@@ -1,0 +1,6 @@
+{
+  "name": "Bella Salon & Booking Manager",
+  "description": "Modern booking, shift planning, calendar scheduling, customer management, and analytics dashboard for Bella Hair Salon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
