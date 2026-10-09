@@ -15,6 +15,7 @@ import {
   ConversationStatus,
 } from '../types';
 import { LANGUAGE_NAMES } from '../conversationData';
+import { WAITLIST_FORM_URL } from '../config';
 
 interface ConversationsViewProps {
   conversations: Conversation[];
@@ -56,6 +57,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const [filter, setFilter] = useState<Filter>('all');
   const [draft, setDraft] = useState('');
   const [showWhatsApp, setShowWhatsApp] = useState(false);
+  const [showWaitlist, setShowWaitlist] = useState(false);
 
   const needsCount = conversations.filter(
     (c) => c.status === 'needs-attention'
@@ -413,6 +415,70 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Pilot waitlist call to action */}
+      <div className="rounded-2xl border border-[#5551FF]/20 bg-[#5551FF]/5 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">
+            Want this assistant for your business?
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            This is a student prototype. Leaving your email on the waitlist is optional.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowWaitlist(true)}
+          className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors shrink-0"
+        >
+          Join the pilot waitlist
+        </button>
+      </div>
+
+      {showWaitlist && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowWaitlist(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Join the pilot waitlist"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <h2 className="text-sm font-bold text-slate-900">Join the pilot waitlist</h2>
+              <div className="flex items-center gap-4">
+                <a
+                  href={WAITLIST_FORM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-[#5551FF] hover:underline"
+                >
+                  Open in a new tab
+                </a>
+                <button
+                  onClick={() => setShowWaitlist(false)}
+                  aria-label="Close waitlist form"
+                  className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="relative h-[640px] max-h-[75vh]">
+              <p className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">
+                Loading the form…
+              </p>
+              <iframe
+                src={`${WAITLIST_FORM_URL}?embedded=true`}
+                title="Pilot waitlist form"
+                className="relative w-full h-full border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WhatsApp view: what the customer sees on their phone */}
       {showWhatsApp && selected && (
