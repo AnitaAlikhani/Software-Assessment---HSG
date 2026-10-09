@@ -8,6 +8,8 @@ export type NavigationTab =
   | 'employees'
   | 'services'
   | 'analytics'
+  | 'conversations'
+  | 'ai-assistant'
   | 'settings';
 
 export type SettingsSubTab =
@@ -15,6 +17,68 @@ export type SettingsSubTab =
   | 'hours'
   | 'closed-dates'
   | 'profile';
+
+export type ChatLanguage = 'EN' | 'FR' | 'DE' | 'IT';
+
+export type ConversationStatus =
+  | 'needs-attention'
+  | 'booked'
+  | 'ai-handled'
+  | 'owner-handled';
+
+export interface ChatMessage {
+  id: string;
+  sender: 'customer' | 'ai' | 'owner';
+  /** Text exactly as it was sent, in the customer's language. */
+  original: string;
+  /** The same message in the owner's language (English). */
+  translation: string;
+  time: string;
+  /** True when the demo could not translate the owner's free-typed reply. */
+  untranslated?: boolean;
+}
+
+export interface QuickReply {
+  /** What the owner sees and selects (English). */
+  en: string;
+  /** What the customer receives (their language). */
+  local: string;
+}
+
+export interface Conversation {
+  id: string;
+  customerName: string;
+  initials: string;
+  avatarColor: string;
+  language: ChatLanguage;
+  phone: string;
+  channel: 'WhatsApp' | 'Instagram';
+  status: ConversationStatus;
+  attentionReason?: string;
+  takenOver?: boolean;
+  lastTime: string;
+  messages: ChatMessage[];
+  /** What the AI sends when the owner chooses "Let AI continue". */
+  aiFollowUp?: Pick<ChatMessage, 'original' | 'translation'>;
+  quickReplies?: QuickReply[];
+}
+
+export interface HandoverRule {
+  id: string;
+  label: string;
+  enabled: boolean;
+}
+
+export interface AiAssistantSettings {
+  askBeforeSending: boolean;
+  translateChats: boolean;
+  ownerLanguage: string;
+  answerLanguages: Record<ChatLanguage, boolean>;
+  tone: 'friendly' | 'formal';
+  handoverRules: HandoverRule[];
+  whatsappConnected: boolean;
+  instagramConnected: boolean;
+}
 
 export interface AppointmentRequest {
   id: string;

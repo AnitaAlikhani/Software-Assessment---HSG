@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Search,
   Menu,
@@ -8,6 +8,7 @@ import {
   User,
   ExternalLink,
   CheckCircle2,
+  MessageSquare,
 } from 'lucide-react';
 import { Customer, AppointmentRequest } from '../types';
 
@@ -20,6 +21,11 @@ interface HeaderProps {
   onSelectCustomer?: (customer: Customer) => void;
   onSelectRequest?: (req: AppointmentRequest) => void;
   onOpenPOSModal?: () => void;
+  needsAttentionCount: number;
+  needsAttentionNames: string[];
+  latestAiBooking: { customerName: string; detail: string } | null;
+  onOpenConversations: () => void;
+  onOpenCalendar: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,10 +37,27 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectCustomer,
   onSelectRequest,
   onOpenPOSModal,
+  needsAttentionCount,
+  needsAttentionNames,
+  latestAiBooking,
+  onOpenConversations,
+  onOpenCalendar,
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!notificationsRef.current?.contains(event.target as Node)) {
+        setShowNotifications(false);
+      }
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [showNotifications]);
 
   const filteredCustomers = searchQuery.trim()
     ? customers.filter(
@@ -152,6 +175,21 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Zone: POS/Calculator, Bell, Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Conversations */}
+        <button
+          onClick={onOpenConversations}
+          className="relative p-2 rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
+          title="Conversations"
+          aria-label="Conversations"
+        >
+          <MessageSquare className="w-4 h-4" />
+          {needsAttentionCount > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white tabular-nums">
+              {needsAttentionCount}
+            </span>
+          )}
+        </button>
+
         {/* POS / Register Calculator Icon */}
         <button
           onClick={onOpenPOSModal}
@@ -164,7 +202,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Notification Bell */}
-        <div className="relative">
+        <div className="relative" ref={notificationsRef}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="relative p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
@@ -172,7 +210,7 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label="Notifications"
           >
             <Bell className="w-4 h-4" />
-            {appointmentRequests.length > 0 && (
+            {(appointmentRequests.length > 0 || needsAttentionCount > 0) && (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-white" />
             )}
           </button>
@@ -182,35 +220,91 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <span className="font-semibold text-xs text-slate-800">Notifications</span>
                 <span className="text-[11px] text-slate-400">
-                  {appointmentRequests.length} pending
+                  {appointmentRequests.length + (needsAttentionCount > 0 ? 1 : 0)} new
                 </span>
               </div>
-              <div className="mt-2 space-y-2 max-h-60 overflow-y-auto">
+              <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
+                {needsAttentionCount > 0 && (
+                  <button
+                    onClick={() => {
+                      onOpenConversations();
+                      setShowNotifications(false);
+                    }}
+                    className="w-full text-left p-2.5 rounded-xl bg-amber-50 hover:bg-amber-100/70 text-xs text-slate-700 transition-colors flex gap-2.5"
+                  >
+                    <span className="mt-1 w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-900">
+                          {needsAttentionCount} {needsAttentionCount === 1 ? 'chat needs' : 'chats need'} your attention
+                        </span>
+                        <span className="text-[10px] text-slate-400">now</span>
+                      </span>
+                      <span className="block text-slate-500 mt-0.5">
+                        {needsAttentionNames.join(', ')} {needsAttentionCount === 1 ? 'is' : 'are'} waiting
+                      </span>
+                    </span>
+                  </button>
+                )}
+
                 {appointmentRequests.map((req) => (
-                  <div
+                  <button
                     key={req.id}
-                    className="p-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50/40 text-xs text-slate-700 transition-colors cursor-pointer"
                     onClick={() => {
                       onSelectRequest?.(req);
                       setShowNotifications(false);
                     }}
+                    className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50/40 text-xs text-slate-700 transition-colors flex gap-2.5"
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-900">{req.customerName}</span>
-                      <span className="text-[10px] text-slate-400">{req.timeAgo}</span>
-                    </div>
-                    <p className="text-slate-500 mt-0.5">
-                      Requested {req.serviceName} ({req.timeStr})
-                    </p>
-                  </div>
+                    <span className="mt-1 w-2 h-2 rounded-full bg-[#5551FF] shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-900">New appointment request</span>
+                        <span className="text-[10px] text-slate-400">{req.timeAgo}</span>
+                      </span>
+                      <span className="block text-slate-500 mt-0.5">
+                        {req.customerName} · {req.timeStr}
+                      </span>
+                    </span>
+                  </button>
                 ))}
-                {appointmentRequests.length === 0 && (
-                  <div className="text-center py-4 text-xs text-slate-400">
-                    <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1.5 opacity-80" />
-                    All caught up! No unread notifications.
-                  </div>
+
+                {latestAiBooking && (
+                  <button
+                    onClick={() => {
+                      onOpenCalendar();
+                      setShowNotifications(false);
+                    }}
+                    className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50/60 text-xs text-slate-700 transition-colors flex gap-2.5"
+                  >
+                    <span className="mt-1 w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold text-slate-900">
+                        AI booked {latestAiBooking.customerName}
+                      </span>
+                      <span className="block text-slate-500 mt-0.5">{latestAiBooking.detail}</span>
+                    </span>
+                  </button>
                 )}
+
+                {appointmentRequests.length === 0 &&
+                  needsAttentionCount === 0 &&
+                  !latestAiBooking && (
+                    <div className="text-center py-4 text-xs text-slate-400">
+                      <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1.5 opacity-80" />
+                      All caught up! No unread notifications.
+                    </div>
+                  )}
               </div>
+              <button
+                onClick={() => {
+                  onOpenConversations();
+                  setShowNotifications(false);
+                }}
+                className="w-full mt-3 pt-3 border-t border-slate-100 text-center text-xs font-semibold text-[#5551FF] hover:underline"
+              >
+                View all conversations →
+              </button>
             </div>
           )}
         </div>

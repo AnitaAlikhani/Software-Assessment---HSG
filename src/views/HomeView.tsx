@@ -12,7 +12,14 @@ import {
   User,
   Plus,
 } from 'lucide-react';
-import { AppointmentRequest } from '../types';
+import { AppointmentRequest, Conversation } from '../types';
+
+const LANG_CHIP: Record<string, string> = {
+  FR: 'bg-violet-100 text-violet-700',
+  DE: 'bg-emerald-100 text-emerald-700',
+  IT: 'bg-rose-100 text-rose-700',
+  EN: 'bg-amber-100 text-amber-700',
+};
 
 interface HomeViewProps {
   requests: AppointmentRequest[];
@@ -36,6 +43,8 @@ interface HomeViewProps {
     replyTimeSec: number;
   };
   onExportActivity: () => void;
+  conversations: Conversation[];
+  onOpenConversations: (conversationId?: string) => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -47,11 +56,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
   nextAppointment,
   activityStats,
   onExportActivity,
+  conversations,
+  onOpenConversations,
 }) => {
   const [movingRequestId, setMovingRequestId] = useState<string | null>(null);
   const [rescheduleTime, setRescheduleTime] = useState('11:30 - 12:00');
 
   const currentRequest = requests.length > 0 ? requests[0] : null;
+
+  const needingAttention = conversations.filter((c) => c.status === 'needs-attention');
+  const shownConversations = (needingAttention.length > 0 ? needingAttention : conversations).slice(0, 2);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-200">
@@ -199,8 +213,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </div>
 
-      {/* Today's Activity Section */}
-      <div className="space-y-4">
+      {/* Today's Activity + Conversations */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="lg:col-span-8 space-y-4">
         {/* Header & Export Button */}
         <div className="flex items-center justify-between">
           <div>
@@ -292,6 +307,61 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             </div>
           </div>
+        </div>
+      </div>
+
+        {/* Conversations card */}
+        <div className="lg:col-span-4 bg-white rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-slate-200/70 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-800">Conversations</h3>
+            {needingAttention.length > 0 && (
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                {needingAttention.length} need you
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {shownConversations.map((c) => {
+              const last = c.messages[c.messages.length - 1];
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => onOpenConversations(c.id)}
+                  className="w-full flex items-center gap-3 text-left rounded-xl p-1.5 -m-1.5 hover:bg-slate-50 transition-colors"
+                >
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${c.avatarColor}`}
+                  >
+                    {c.initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-900 truncate">
+                        {c.customerName}
+                      </span>
+                      <span
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
+                      >
+                        {c.language}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 truncate">{last.translation}</p>
+                  </div>
+                </button>
+              );
+            })}
+            {shownConversations.length === 0 && (
+              <p className="text-xs text-slate-400">No conversations yet.</p>
+            )}
+          </div>
+
+          <button
+            onClick={() => onOpenConversations()}
+            className="w-full pt-3 border-t border-slate-100 text-left text-xs font-semibold text-[#5551FF] hover:underline"
+          >
+            Open conversations →
+          </button>
         </div>
       </div>
 
