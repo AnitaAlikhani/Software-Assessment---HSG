@@ -16,12 +16,14 @@ interface CustomersViewProps {
   customers: Customer[];
   onAddCustomer: (customer: Omit<Customer, 'id' | 'initials' | 'lastBooking' | 'bookingsCount'>) => void;
   onDeleteCustomer: (id: string) => void;
+  onOpenChat?: (customerName: string) => void;
 }
 
 export const CustomersView: React.FC<CustomersViewProps> = ({
   customers,
   onAddCustomer,
   onDeleteCustomer,
+  onOpenChat,
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -139,7 +141,9 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             {filteredCustomers.map((cust) => (
               <div
                 key={cust.id}
-                className="grid grid-cols-12 items-center py-3.5 px-6 hover:bg-slate-50/60 transition-colors text-xs text-slate-700 group"
+                onClick={() => onOpenChat?.(cust.name)}
+                title={`Open conversation with ${cust.name}`}
+                className="grid grid-cols-12 items-center py-3.5 px-6 hover:bg-slate-50/60 transition-colors text-xs text-slate-700 group cursor-pointer"
               >
                 {/* Name with initials circle */}
                 <div className="col-span-3 flex items-center gap-3">
@@ -181,7 +185,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     {cust.bookingsCount}
                   </span>
                   <button
-                    onClick={() => onDeleteCustomer(cust.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteCustomer(cust.id);
+                    }}
                     className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded-md transition-opacity"
                     title="Delete customer"
                     aria-label={`Delete ${cust.name}`}

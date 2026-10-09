@@ -10,7 +10,10 @@ import {
   CompanySettingsData,
   BookingHoursDay,
   ShiftEntry,
+  Conversation,
+  AiAssistantSettings,
 } from './types';
+import { initialConversations, initialAiSettings } from './conversationData';
 import {
   initialAppointmentRequests,
   initialCalendarEvents,
@@ -34,6 +37,8 @@ import { ServicesView } from './views/ServicesView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { SettingsView } from './views/SettingsView';
 import { BookingPageView } from './views/BookingPageView';
+import { ConversationsView } from './views/ConversationsView';
+import { AiAssistantView } from './views/AiAssistantView';
 import { POSModal } from './components/POSModal';
 import { CheckCircle2 } from 'lucide-react';
 
@@ -54,6 +59,14 @@ export default function App() {
   const [shiftOverview, setShiftOverview] = useState<ShiftEntry[]>(initialShiftOverview);
   const [companySettings, setCompanySettings] = useState<CompanySettingsData>(initialCompanySettings);
   const [bookingHours, setBookingHours] = useState<BookingHoursDay[]>(initialBookingHours);
+  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
+    initialConversations[0]?.id ?? null
+  );
+  const [aiSettings, setAiSettings] = useState<AiAssistantSettings>(initialAiSettings);
+
+  const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
+  const latestAiBookedEvent = calendarEvents.find((e) => e.isAiBooked) ?? null;
 
   // Next appointment state (matching Figma top right card)
   const [nextAppointment, setNextAppointment] = useState<{
@@ -303,6 +316,88 @@ export default function App() {
     showToast('Company settings successfully saved');
   };
 
+  // Conversations
+  const openConversation = (id?: string) => {
+    const target = id
+      ? conversations.find((c) => c.id === id)
+      : conversations.find((c) => c.status === 'needs-attention') ?? conversations[0];
+    if (target) setSelectedConversationId(target.id);
+    setCurrentTab('conversations');
+  };
+
+  const openChatForCustomer = (customerName: string) => {
+    const conv = conversations.find((c) => c.customerName === customerName);
+    if (!conv) {
+      showToast(`No conversation with ${customerName} yet`);
+      return;
+    }
+    openConversation(conv.id);
+  };
+
+  const handleTakeOver = (id: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, takenOver: true } : c))
+    );
+    showToast('You took over this conversation. The AI is paused.');
+  };
+
+  const handleLetAiContinue = (id: string) => {
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const messages = c.aiFollowUp
+          ? [
+              ...c.messages,
+              {
+                id: `msg-${Date.now()}`,
+                sender: 'ai' as const,
+                original: c.aiFollowUp.original,
+                translation: c.aiFollowUp.translation,
+                time: 'now',
+              },
+            ]
+          : c.messages;
+        return {
+          ...c,
+          takenOver: false,
+          status: 'ai-handled' as const,
+          messages,
+          lastTime: 'now',
+        };
+      })
+    );
+    showToast('The AI is continuing this conversation');
+  };
+
+  const handleOwnerReply = (id: string, english: string, local?: string) => {
+    setConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        return {
+          ...c,
+          status: c.status === 'needs-attention' ? ('owner-handled' as const) : c.status,
+          messages: [
+            ...c.messages,
+            {
+              id: `msg-${Date.now()}`,
+              sender: 'owner' as const,
+              original: local ?? english,
+              translation: english,
+              time: 'now',
+              untranslated: c.language !== 'EN' && !local,
+            },
+          ],
+          lastTime: 'now',
+        };
+      })
+    );
+  };
+
+  const handleSaveAiSettings = (settings: AiAssistantSettings) => {
+    setAiSettings(settings);
+    showToast('AI Assistant settings saved');
+  };
+
   // POS
   const handleCompleteSale = (amount: number, serviceName: string) => {
     showToast(`Payment of CHF ${amount.toFixed(2)} received for ${serviceName}`);
@@ -337,6 +432,18 @@ export default function App() {
             setSearchQuery('');
           }}
           onOpenPOSModal={() => setIsPOSOpen(true)}
+          needsAttentionCount={needsAttention.length}
+          needsAttentionNames={needsAttention.map((c) => c.customerName.split(' ')[0])}
+          latestAiBooking={
+            latestAiBookedEvent
+              ? {
+                  customerName: latestAiBookedEvent.customerName,
+                  detail: `${latestAiBookedEvent.dateDisplay} · ${latestAiBookedEvent.serviceName}`,
+                }
+              : null
+          }
+          onOpenConversations={() => openConversation()}
+          onOpenCalendar={() => setCurrentTab('calendar')}
         />
 
         {/* Main View Body */}
@@ -351,6 +458,8 @@ export default function App() {
               nextAppointment={nextAppointment}
               activityStats={activityStats}
               onExportActivity={handleExportActivity}
+              conversations={conversations}
+              onOpenConversations={openConversation}
             />
           )}
 
@@ -374,6 +483,7 @@ export default function App() {
               customers={customers}
               onAddCustomer={handleAddCustomer}
               onDeleteCustomer={handleDeleteCustomer}
+              onOpenChat={openChatForCustomer}
             />
           )}
 
@@ -403,6 +513,23 @@ export default function App() {
           )}
 
           {currentTab === 'analytics' && <AnalyticsView />}
+
+          {currentTab === 'conversations' && (
+            <ConversationsView
+              conversations={conversations}
+              selectedId={selectedConversationId}
+              onSelect={setSelectedConversationId}
+              onTakeOver={handleTakeOver}
+              onLetAiContinue={handleLetAiContinue}
+              onOwnerReply={handleOwnerReply}
+              aiSettings={aiSettings}
+              onOpenAiSettings={() => setCurrentTab('ai-assistant')}
+            />
+          )}
+
+          {currentTab === 'ai-assistant' && (
+            <AiAssistantView settings={aiSettings} onSave={handleSaveAiSettings} />
+          )}
 
           {currentTab === 'settings' && (
             <SettingsView

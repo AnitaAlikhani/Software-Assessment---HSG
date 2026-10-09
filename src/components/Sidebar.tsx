@@ -12,6 +12,7 @@ import {
   X,
   PieChart,
   SlidersHorizontal,
+  Sparkles,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 
@@ -230,6 +231,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             <div className="mt-1 space-y-0.5 pl-2">
+              <button
+                onClick={() => handleNav('ai-assistant')}
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                  currentTab === 'ai-assistant'
+                    ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
+                    : 'hover:bg-slate-100 text-slate-600'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span>AI Assistant</span>
+              </button>
+
               <button
                 onClick={() => handleNav('settings')}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
