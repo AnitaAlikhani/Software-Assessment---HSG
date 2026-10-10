@@ -40,6 +40,7 @@ import { BookingPageView } from './views/BookingPageView';
 import { ConversationsView } from './views/ConversationsView';
 import { AiAssistantView } from './views/AiAssistantView';
 import { POSModal } from './components/POSModal';
+import { PilotInterest } from './components/PilotInterest';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -446,6 +447,8 @@ export default function App() {
           onOpenCalendar={() => setCurrentTab('calendar')}
         />
 
+        <PilotInterest />
+
         {/* Main View Body */}
         <main className="flex-1 pb-16">
           {currentTab === 'home' && (
@@ -571,3 +574,4 @@ export default function App() {
     </div>
   );
 }
+

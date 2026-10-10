@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, anita-banner]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +30,13 @@ jobs:
           path: preview-app
           persist-credentials: false
 
+      - name: Check out Anita banner preview
+        uses: actions/checkout@v7
+        with:
+          ref: anita-banner
+          path: anita-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -51,12 +58,26 @@ jobs:
         working-directory: preview-app
         run: npm run build -- --base=/Software-Assessment---HSG/previews/nil-figma-sync/
 
-      - name: Assemble main site and branch preview
+      - name: Install Anita preview dependencies
+        working-directory: anita-app
+        run: npm install --no-audit --no-fund
+
+      - name: Check Anita preview types
+        working-directory: anita-app
+        run: npm run lint
+
+      - name: Build Anita banner preview
+        working-directory: anita-app
+        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-banner/
+
+      - name: Assemble main site and branch previews
         run: |
-          mkdir -p site/previews/nil-figma-sync
+          mkdir -p site/previews/nil-figma-sync site/previews/anita-banner
           cp -a main-app/dist/. site/
           cp -a preview-app/dist/. site/previews/nil-figma-sync/
           git -C preview-app rev-parse HEAD > site/previews/nil-figma-sync/revision.txt
+          cp -a anita-app/dist/. site/previews/anita-banner/
+          git -C anita-app rev-parse HEAD > site/previews/anita-banner/revision.txt
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v5
@@ -76,6 +97,7 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
-      - name: Deploy main site and branch preview
+      - name: Deploy main site and branch previews
         id: deployment
         uses: actions/deploy-pages@v5
+
