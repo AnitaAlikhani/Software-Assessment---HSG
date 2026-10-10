@@ -9,6 +9,7 @@ interface PilotInterestProps {
 }
 
 export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, onClose }) => {
+  const [isVisible, setIsVisible] = useState(true);
   const [formLoaded, setFormLoaded] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -31,6 +32,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
 
   return (
     <>
+      {isVisible && (
         <section
           aria-labelledby="pilot-banner-title"
           className="mx-4 mt-2 mb-2 rounded-2xl border border-[#5551FF]/15 bg-[#EFEEFF] p-4 sm:mx-8 sm:px-5 lg:mx-10"
@@ -60,9 +62,17 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                 Register interest
                 <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                onClick={() => setIsVisible(false)}
+                className="rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
+              >
+                Not now
+              </button>
             </div>
           </div>
         </section>
+      )}
 
       <dialog
         ref={dialogRef}
