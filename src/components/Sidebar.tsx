@@ -61,12 +61,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
+        className={`fixed top-0 left-0 z-50 h-dvh w-64 shrink-0 overflow-hidden bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 transition-transform duration-300 ease-in-out lg:sticky lg:self-start lg:translate-x-0 ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Top Header / Brand Button */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex shrink-0 items-center justify-between mb-8">
           <button
             onClick={() => handleNav('home')}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-xs ${
@@ -90,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 space-y-1 overflow-y-auto pr-1 text-sm font-medium text-slate-500">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 text-sm font-medium text-slate-500">
           {/* Home */}
           <button
             onClick={() => handleNav('home')}
@@ -261,7 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* Persistent pilot interest button. */}
-        <div className="pt-4 border-t border-slate-200/60 mt-auto">
+        <div className="shrink-0 pt-4 border-t border-slate-200/60 mt-auto">
           <button
             type="button"
             aria-haspopup="dialog"
