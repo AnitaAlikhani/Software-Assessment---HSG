@@ -48,6 +48,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPOSOpen, setIsPOSOpen] = useState(false);
+  const [isPilotInterestOpen, setIsPilotInterestOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Core application states
@@ -413,6 +414,7 @@ export default function App() {
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         pendingRequestsCount={requests.length}
+        onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
       />
 
       {/* Main App Container */}
@@ -447,7 +449,11 @@ export default function App() {
           onOpenCalendar={() => setCurrentTab('calendar')}
         />
 
-        <PilotInterest />
+        <PilotInterest
+          isOpen={isPilotInterestOpen}
+          onOpen={() => setIsPilotInterestOpen(true)}
+          onClose={() => setIsPilotInterestOpen(false)}
+        />
 
         {/* Main View Body */}
         <main className="flex-1 pb-16">

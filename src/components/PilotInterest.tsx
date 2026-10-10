@@ -2,9 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ExternalLink, LoaderCircle, Mail, X } from 'lucide-react';
 import { WAITLIST_FORM_URL } from '../config';
 
-export const PilotInterest: React.FC = () => {
+interface PilotInterestProps {
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}
+
+export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, onClose }) => {
   const [isVisible, setIsVisible] = useState(true);
-  const [isOpen, setIsOpen] = useState(false);
   const [formLoaded, setFormLoaded] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -17,17 +22,13 @@ export const PilotInterest: React.FC = () => {
 
   useEffect(() => {
     if (!isOpen) return;
+    setFormLoaded(false);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
-
-  const openForm = () => {
-    setFormLoaded(false);
-    setIsOpen(true);
-  };
 
   return (
     <>
@@ -46,7 +47,7 @@ export const PilotInterest: React.FC = () => {
                   Interested in a future pilot?
                 </h2>
                 <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-600">
-                  This is a student prototype. Leave your email if you would like our team to
+                  This is a prototype. Leave your email if you would like our team to
                   contact you about a possible future pilot for your business.
                 </p>
               </div>
@@ -54,7 +55,9 @@ export const PilotInterest: React.FC = () => {
             <div className="flex shrink-0 flex-wrap items-center gap-2 sm:pl-[52px] xl:pl-0">
               <button
                 type="button"
-                onClick={openForm}
+                onClick={onOpen}
+                aria-haspopup="dialog"
+                aria-controls="pilot-interest-dialog"
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#5551FF] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#433fd8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
               >
                 Register interest
@@ -74,11 +77,12 @@ export const PilotInterest: React.FC = () => {
 
       <dialog
         ref={dialogRef}
+        id="pilot-interest-dialog"
         aria-labelledby="pilot-form-title"
         aria-describedby="pilot-form-description"
-        onClose={() => setIsOpen(false)}
+        onClose={onClose}
         onClick={(event) => {
-          if (event.target === event.currentTarget) setIsOpen(false);
+          if (event.target === event.currentTarget) onClose();
         }}
         className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl overflow-y-auto rounded-2xl border-0 bg-white p-0 text-slate-800 shadow-2xl backdrop:bg-slate-900/50 backdrop:backdrop-blur-xs"
       >
@@ -88,14 +92,14 @@ export const PilotInterest: React.FC = () => {
               Register interest in a future pilot
             </h2>
             <p id="pilot-form-description" className="mt-1.5 max-w-lg text-xs leading-relaxed text-slate-500">
-              Leave your email for possible pilot follow-up from our student team. Joining is
+              Leave your email for possible pilot follow-up from our team. Joining is
               optional and does not commit you to using or paying for a product.
             </p>
           </div>
           <button
             type="button"
             autoFocus
-            onClick={() => setIsOpen(false)}
+            onClick={onClose}
             aria-label="Close interest form"
             className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF]"
           >
