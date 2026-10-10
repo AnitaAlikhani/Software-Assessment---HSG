@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, anita-fixes]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
