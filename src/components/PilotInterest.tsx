@@ -81,8 +81,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
               Register interest in a future pilot
             </h2>
             <p id="pilot-form-description" className="mt-1.5 max-w-lg text-xs leading-relaxed text-slate-500">
-              Leave your email for possible pilot follow-up from our team. Joining is
-              optional and does not commit you to using or paying for a product.
+              Interested in trying the AI receptionist? Leave your email and we'll contact you about a future pilot.
             </p>
           </div>
           <button
