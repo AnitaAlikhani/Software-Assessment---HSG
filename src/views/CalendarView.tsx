@@ -10,44 +10,55 @@ import {
   Scissors,
   X,
 } from 'lucide-react';
-import { CalendarEvent } from '../types';
+import { CalendarEvent, ServiceItem } from '../types';
+import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, startOfWeek } from '../scheduling';
 
 interface CalendarViewProps {
   events: CalendarEvent[];
+  services: ServiceItem[];
+  date: string;
+  onDateChange: (date: string) => void;
   onAddEvent: (event: Omit<CalendarEvent, 'id'>) => void;
   onDeleteEvent: (id: string) => void;
 }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({
   events,
+  services,
+  date,
+  onDateChange,
   onAddEvent,
   onDeleteEvent,
 }) => {
   const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newSlotDay, setNewSlotDay] = useState<'mon' | 'tue' | 'wed' | 'thu' | 'fri'>('wed');
+  const [newSlotDate, setNewSlotDate] = useState(date);
+  const [formError, setFormError] = useState('');
   const [newSlotTime, setNewSlotTime] = useState('11:00');
   const [newCustomer, setNewCustomer] = useState('');
-  const [newService, setNewService] = useState('Sample Service');
+  const [newServiceId, setNewServiceId] = useState(services[0]?.id ?? '');
+  const newService = services.find((service) => service.id === newServiceId) ?? services[0];
   const [newStaff, setNewStaff] = useState('Nilufar Ismayilova');
 
-  const days = [
-    { key: 'mon', label: 'Mon 05/10', closed: false },
-    { key: 'tue', label: 'Tue 06/10', closed: false },
-    { key: 'wed', label: 'Wed 07/10', closed: false },
-    { key: 'thu', label: 'Thu 08/10', closed: false },
-    { key: 'fri', label: 'Fri 09/10', closed: false },
-    { key: 'sat', label: 'Sat 10/10', closed: true },
-    { key: 'sun', label: 'Sun 11/10', closed: true },
-  ];
-
-  const visibleDays =
-    activeView === 'Day'
-      ? [days[2]] // Wednesday
-      : activeView === '3-day'
-      ? [days[2], days[3], days[4]]
+  const makeDay = (value: string) => ({
+    key: value,
+    label: formatCalendarDate(value),
+    closed: ['sat', 'sun'].includes(dayKeyForDate(value)),
+  });
+  const weekStart = startOfWeek(date);
+  const days = Array.from({ length: 7 }, (_, index) => makeDay(addDays(weekStart, index)));
+  const visibleDays = activeView === 'Day'
+    ? [makeDay(date)]
+    : activeView === '3-day'
+      ? Array.from({ length: 3 }, (_, index) => makeDay(addDays(date, index)))
       : days;
+  const gridColumns = activeView === 'Day' ? 'grid-cols-2' : activeView === '3-day' ? 'grid-cols-4' : 'grid-cols-8';
+  const navigationStep = activeView === 'Day' ? 1 : activeView === '3-day' ? 3 : 7;
+  const visibleEvents = events
+    .filter((event) => visibleDays.some((day) => day.key === event.date))
+    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+  const dateRange = `${visibleDays[0].label} - ${visibleDays[visibleDays.length - 1].label}`;
 
   const hours = [
     '09:00',
@@ -63,25 +74,32 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustomer.trim()) return;
+    if (!newCustomer.trim() || !newSlotDate || !newService) return;
+    if (['sat', 'sun'].includes(dayKeyForDate(newSlotDate))) {
+      setFormError('Please choose a weekday. The salon is closed at weekends.');
+      return;
+    }
+    const endTime = addMinutes(newSlotTime, newService.durationMinutes);
+    if (endTime <= newSlotTime) {
+      setFormError('Please choose a start time that lets the appointment finish on the same day.');
+      return;
+    }
+    setFormError('');
 
     onAddEvent({
       customerName: newCustomer.trim(),
-      serviceName: newService,
+      serviceName: newService.name,
       staffName: newStaff,
-      day: newSlotDay,
-      dateDisplay: days.find((d) => d.key === newSlotDay)?.label || 'Wed 07/10',
+      date: newSlotDate,
+      day: dayKeyForDate(newSlotDate),
+      dateDisplay: formatCalendarDate(newSlotDate),
       startTime: newSlotTime,
-      endTime:
-        newSlotTime === '09:00'
-          ? '09:30'
-          : newSlotTime === '11:00'
-          ? '11:30'
-          : '14:00',
+      endTime,
       colorTheme: 'blue',
       isAiBooked: false,
     });
 
+    onDateChange(newSlotDate);
     setNewCustomer('');
     setShowAddModal(false);
   };
@@ -96,22 +114,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             Calendar
           </h1>
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full">
-            Week 41
+            {date.slice(0, 4)}
           </span>
 
-          <div className="flex items-center gap-1.5 ml-2">
-            <button className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <div className="flex flex-wrap items-center gap-1.5 ml-2">
+            <button onClick={() => onDateChange(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' }))} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
               Today
             </button>
             <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-2xs">
-              <button className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
+              <button aria-label="Previous date range" onClick={() => onDateChange(addDays(date, -navigationStep))} className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <span className="text-xs font-medium text-slate-600 px-2">Date range</span>
-              <button className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
+              <span className="text-xs font-medium text-slate-600 px-2">{dateRange}</span>
+              <button aria-label="Next date range" onClick={() => onDateChange(addDays(date, navigationStep))} className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
+            <input type="date" aria-label="Calendar date" value={date} onChange={(e) => { if (e.target.value) onDateChange(e.target.value); }} className="w-32 px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-xl" />
           </div>
         </div>
 
@@ -139,7 +158,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </button>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => { setNewSlotDate(date); setFormError(''); setShowAddModal(true); }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-2xs transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -151,8 +170,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Calendar Grid View */}
       {activeView === 'List' ? (
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-3">
-          <h2 className="text-sm font-semibold text-slate-800 mb-3">All Appointments (Week 41)</h2>
-          {events.map((ev) => (
+          <h2 className="text-sm font-semibold text-slate-800 mb-3">Appointments ({dateRange})</h2>
+          {visibleEvents.length === 0 && <p className="text-sm text-slate-500">No appointments in this date range.</p>}
+          {visibleEvents.map((ev) => (
             <div
               key={ev.id}
               onClick={() => setSelectedEvent(ev)}
@@ -166,7 +186,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs font-semibold text-slate-800">{ev.dateDisplay}</p>
+                <p className="text-xs font-semibold text-slate-800">{formatCalendarDate(ev.date)}</p>
                 <p className="text-xs text-[#5551FF] font-medium">{ev.startTime} - {ev.endTime}</p>
               </div>
             </div>
@@ -176,7 +196,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
           <div className="min-w-[760px]">
             {/* Days Column Headers */}
-            <div className="grid grid-cols-8 border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50">
+            <div className={`grid ${gridColumns} border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50`}>
               <div className="p-3.5 text-center text-slate-400 border-r border-slate-100">
                 GMT+2
               </div>
@@ -188,34 +208,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   }`}
                 >
                   <span className="font-semibold">{d.label}</span>
+                  {events.some((event) => event.date === d.key && event.outsideHoursApproved) && (
+                    <span className="block text-[10px] font-medium text-indigo-600 mt-1">Owner-approved appointment</span>
+                  )}
                 </div>
               ))}
             </div>
 
-            {/* Time Grid with Red Current Time Line */}
+            {/* Time grid */}
             <div className="relative divide-y divide-slate-100">
-              {/* Red Line for 17:33 (approx 85% down) */}
-              <div
-                className="absolute left-0 right-0 z-20 flex items-center pointer-events-none"
-                style={{ top: '85%' }}
-              >
-                <div className="w-16 text-right pr-2 text-[10px] font-bold text-rose-500 tabular-nums">
-                  17:33
-                </div>
-                <div className="w-2.5 h-2.5 rounded-full bg-rose-500 -ml-1.5 ring-2 ring-white" />
-                <div className="flex-1 h-[2px] bg-rose-500" />
-              </div>
-
               {hours.map((hour) => (
                 <div
                   key={hour}
-                  className={`grid ${
-                    activeView === 'Day'
-                      ? 'grid-cols-2'
-                      : activeView === '3-day'
-                      ? 'grid-cols-4'
-                      : 'grid-cols-8'
-                  } min-h-[58px] group`}
+                  className={`grid ${gridColumns} min-h-[58px] group`}
                 >
                   {/* Left Hour Label */}
                   <div className="p-2.5 text-right text-xs font-medium text-slate-400 border-r border-slate-100 select-none">
@@ -226,7 +231,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   {visibleDays.map((d) => {
                     // Check if there is an event matching day and start hour
                     const slotEvents = events.filter(
-                      (e) => e.day === d.key && e.startTime.startsWith(hour.slice(0, 2))
+                      (e) => e.date === d.key && e.startTime.startsWith(hour.slice(0, 2))
                     );
 
                     return (
@@ -234,7 +239,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         key={d.key}
                         onClick={() => {
                           if (!d.closed) {
-                            setNewSlotDay(d.key as any);
+                            setNewSlotDate(d.key);
+                            setFormError('');
                             setNewSlotTime(hour);
                             setShowAddModal(true);
                           }
@@ -245,7 +251,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             : 'hover:bg-indigo-50/20 cursor-pointer'
                         }`}
                       >
-                        {d.closed ? (
+                        {d.closed && slotEvents.length === 0 ? (
                           <span className="text-[11px] font-medium text-slate-400 select-none">
                             Closed
                           </span>
@@ -322,7 +328,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-slate-400" />
-                <span>Time: <strong className="text-slate-800">{selectedEvent.dateDisplay}, {selectedEvent.startTime} - {selectedEvent.endTime}</strong></span>
+                <span>Time: <strong className="text-slate-800">{formatCalendarDate(selectedEvent.date)}, {selectedEvent.startTime} - {selectedEvent.endTime}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4 text-slate-400" />
@@ -331,8 +337,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               {selectedEvent.isAiBooked && (
                 <div className="flex items-center gap-2 text-indigo-600 font-medium bg-indigo-50 p-2 rounded-xl">
                   <Sparkles className="w-4 h-4" />
-                  <span>Booked automatically via WhatsApp AI Assistant</span>
+                  <span>Booked with the AI Assistant</span>
                 </div>
+              )}
+              {selectedEvent.outsideHoursApproved && (
+                <p className="text-xs text-indigo-700 bg-indigo-50 p-2 rounded-xl">Approved by the owner outside regular opening hours.</p>
               )}
             </div>
 
@@ -392,13 +401,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <div>
                   <label className="font-semibold text-slate-700 block mb-1">Service</label>
                   <select
-                    value={newService}
-                    onChange={(e) => setNewService(e.target.value)}
+                    value={newService?.id ?? ''}
+                    onChange={(e) => setNewServiceId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
-                    <option value="Sample Service">Sample Service (CHF 45)</option>
-                    <option value="Haircut">Haircut (CHF 55)</option>
-                    <option value="Colouring">Colouring (CHF 120)</option>
+                    {services.map((service) => (
+                      <option key={service.id} value={service.id}>{service.name} ({service.durationMinutes} min, CHF {service.priceCHF})</option>
+                    ))}
                   </select>
                 </div>
 
@@ -417,18 +426,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Day</label>
-                  <select
-                    value={newSlotDay}
-                    onChange={(e) => setNewSlotDay(e.target.value as any)}
+                  <label htmlFor="appointment-date" className="font-semibold text-slate-700 block mb-1">Date</label>
+                  <input
+                    id="appointment-date"
+                    type="date"
+                    required
+                    value={newSlotDate}
+                    onChange={(e) => { setNewSlotDate(e.target.value); setFormError(''); }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
-                  >
-                    <option value="mon">Monday 05/10</option>
-                    <option value="tue">Tuesday 06/10</option>
-                    <option value="wed">Wednesday 07/10</option>
-                    <option value="thu">Thursday 08/10</option>
-                    <option value="fri">Friday 09/10</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
@@ -448,6 +454,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
             </div>
 
+            {newService && <p className="text-xs text-slate-500">{newService.durationMinutes} minutes · Ends at {addMinutes(newSlotTime, newService.durationMinutes)}</p>}
+            {formError && <p role="alert" className="text-xs text-rose-600">{formError}</p>}
             <div className="pt-3 flex gap-2">
               <button
                 type="button"

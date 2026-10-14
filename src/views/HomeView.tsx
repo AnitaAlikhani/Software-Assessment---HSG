@@ -13,6 +13,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { AppointmentRequest, Conversation } from '../types';
+import { addMinutes, formatDate } from '../scheduling';
 
 const LANG_CHIP: Record<string, string> = {
   FR: 'bg-violet-100 text-violet-700',
@@ -60,9 +61,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onOpenConversations,
 }) => {
   const [movingRequestId, setMovingRequestId] = useState<string | null>(null);
-  const [rescheduleTime, setRescheduleTime] = useState('11:30 - 12:00');
+  const [rescheduleStart, setRescheduleStart] = useState('11:30');
 
   const currentRequest = requests.length > 0 ? requests[0] : null;
+  const movingRequest = requests.find((request) => request.id === movingRequestId);
+  const [currentStart, currentEnd] = (movingRequest?.timeStr ?? '11:30 - 12:00').split(' - ');
+  const toMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  const moveDuration = Math.max(1, toMinutes(currentEnd) - toMinutes(currentStart)) || 30;
+  const rescheduleTime = `${rescheduleStart} - ${addMinutes(rescheduleStart, moveDuration)}`;
+  const requestDate = currentRequest ? new Date(`${currentRequest.date}T00:00:00.000Z`) : null;
 
   const needingAttention = conversations.filter((c) => c.status === 'needs-attention');
   const shownConversations = (needingAttention.length > 0 ? needingAttention : conversations).slice(0, 2);
@@ -77,13 +87,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
               {/* Date Block + Info */}
               <div className="flex items-start gap-5">
-                {/* OCT 1 Box */}
+                {/* Request date */}
                 <div className="flex flex-col items-center justify-center w-16 h-18 rounded-xl border border-slate-200/90 bg-white p-2 shrink-0 shadow-2xs">
                   <span className="text-[11px] font-bold text-slate-400 tracking-wider">
-                    OCT
+                    {requestDate?.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }).toUpperCase()}
                   </span>
                   <span className="text-2xl font-bold text-slate-800 tabular-nums">
-                    1
+                    {requestDate?.getUTCDate()}
                   </span>
                 </div>
 
@@ -104,7 +114,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                   <div className="text-xs text-slate-500 pt-0.5 space-y-0.5">
                     <p className="font-medium text-slate-700">
-                      {currentRequest.dateStr}, from {currentRequest.timeStr}
+                      {formatDate(currentRequest.date)}, from {currentRequest.timeStr}
                     </p>
                     <p className="text-slate-400">{currentRequest.serviceName}</p>
                   </div>
@@ -371,22 +381,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95 duration-150">
             <h3 className="text-base font-bold text-slate-900 mb-2">Reschedule Appointment</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Select a new time slot for {currentRequest?.customerName}
+              Select a new time slot for {movingRequest?.customerName}
             </p>
 
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-slate-700 block mb-1">Time Slot</label>
                 <select
-                  value={rescheduleTime}
-                  onChange={(e) => setRescheduleTime(e.target.value)}
+                  value={rescheduleStart}
+                  onChange={(e) => setRescheduleStart(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF]"
                 >
-                  <option value="10:30 - 11:00">10:30 - 11:00</option>
-                  <option value="11:00 - 11:30">11:00 - 11:30</option>
-                  <option value="11:30 - 12:00">11:30 - 12:00</option>
-                  <option value="14:00 - 14:30">14:00 - 14:30</option>
-                  <option value="16:00 - 16:30">16:00 - 16:30</option>
+                  {['10:30', '11:00', '11:30', '14:00', '16:00'].map((start) => (
+                    <option key={start} value={start}>{start} - {addMinutes(start, moveDuration)}</option>
+                  ))}
                 </select>
               </div>
 

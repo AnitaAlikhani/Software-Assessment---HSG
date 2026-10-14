@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import {
   AiAssistantSettings,
+  AppointmentAction,
   ChatMessage,
   Conversation,
   ConversationStatus,
@@ -22,7 +23,12 @@ interface ConversationsViewProps {
   onSelect: (id: string) => void;
   onTakeOver: (id: string) => void;
   onLetAiContinue: (id: string) => void;
-  onOwnerReply: (id: string, english: string, local?: string) => void;
+  onOwnerReply: (
+    id: string,
+    english: string,
+    local?: string,
+    appointmentAction?: AppointmentAction
+  ) => boolean;
   aiSettings: AiAssistantSettings;
   onOpenAiSettings: () => void;
 }
@@ -54,7 +60,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOpenAiSettings,
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
-  const [draft, setDraft] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
 
   const needsCount = conversations.filter(
@@ -70,6 +76,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
   const selected =
     conversations.find((c) => c.id === selectedId) ?? conversations[0] ?? null;
+  const draft = selected ? drafts[selected.id] ?? '' : '';
 
   const tabs: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -85,10 +92,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     ? selected.status === 'needs-attention' && !selected.takenOver
     : true;
 
-  const send = (english: string, local?: string) => {
+  const send = (english: string, local?: string, appointmentAction?: AppointmentAction) => {
     if (!selected || !english.trim()) return;
-    onOwnerReply(selected.id, english.trim(), local);
-    setDraft('');
+    const conversationId = selected.id;
+    if (onOwnerReply(conversationId, english.trim(), local, appointmentAction)) {
+      setDrafts((previous) => ({ ...previous, [conversationId]: '' }));
+    }
   };
 
   const renderBubble = (c: Conversation, m: ChatMessage, flagged: boolean) => {
@@ -321,7 +330,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               </div>
             )}
 
-            {selected.status === 'needs-attention' && selected.takenOver && (
+            {selected.takenOver && (
               <div className="mx-6 mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
                 <div className="w-8 h-8 rounded-full bg-[#5551FF] text-white flex items-center justify-center shrink-0">
                   <CheckCircle2 className="w-4 h-4" />
@@ -362,7 +371,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   {selected.quickReplies.map((q) => (
                     <button
                       key={q.en}
-                      onClick={() => send(q.en, q.local)}
+                      onClick={() => send(q.en, q.local, q.appointmentAction)}
                       className="text-left text-[11px] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
                     >
                       {q.en}
@@ -379,7 +388,11 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               >
                 <input
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const conversationId = selected.id;
+                    const value = e.target.value;
+                    setDrafts((previous) => ({ ...previous, [conversationId]: value }));
+                  }}
                   disabled={locked}
                   placeholder={
                     locked

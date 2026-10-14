@@ -11,6 +11,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { ServiceItem, Employee, AppointmentRequest } from '../types';
+import { addMinutes, dayKeyForDate, formatDate } from '../scheduling';
 
 interface BookingPageViewProps {
   services: ServiceItem[];
@@ -23,10 +24,14 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   employees,
   onNewBookingRequest,
 }) => {
-  const [selectedService, setSelectedService] = useState<ServiceItem>(services[0]);
+  const availableServices = services.filter((service) => service.onlineBooking);
+  const [selectedServiceId, setSelectedServiceId] = useState(availableServices[0]?.id ?? '');
+  const selectedService = availableServices.find((service) => service.id === selectedServiceId) ?? availableServices[0];
   const [selectedStaff, setSelectedStaff] = useState<string>('Nilufar Ismayilova');
   const [selectedDate, setSelectedDate] = useState('2026-10-01');
-  const [selectedTime, setSelectedTime] = useState('10:00 - 10:30');
+  const [selectedStartTime, setSelectedStartTime] = useState('10:00');
+  const selectedTime = `${selectedStartTime} - ${addMinutes(selectedStartTime, selectedService?.durationMinutes ?? 30)}`;
+  const [formError, setFormError] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
@@ -35,23 +40,33 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
 
   const availableSlots = [
-    '09:00 - 09:30',
-    '10:00 - 10:30',
-    '11:00 - 11:30',
-    '13:30 - 14:00',
-    '14:30 - 15:00',
-    '16:00 - 16:30',
+    '09:00',
+    '10:00',
+    '11:00',
+    '13:30',
+    '14:30',
+    '16:00',
   ];
 
   const handleBookingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName.trim()) return;
+    if (!clientName.trim() || !selectedService || !selectedDate) return;
+    if (['sat', 'sun'].includes(dayKeyForDate(selectedDate))) {
+      setFormError('Please choose a weekday. The salon is closed at weekends.');
+      return;
+    }
+    if (addMinutes(selectedStartTime, selectedService.durationMinutes) <= selectedStartTime) {
+      setFormError('Please choose a start time that lets the appointment finish on the same day.');
+      return;
+    }
+    setFormError('');
 
     const newRequest: AppointmentRequest = {
       id: `req-${Date.now()}`,
       customerName: clientName.trim(),
       serviceName: selectedService.name,
-      dateStr: '1 October 2026',
+      date: selectedDate,
+      dateStr: formatDate(selectedDate),
       timeStr: selectedTime,
       timeAgo: 'Just now',
       staffName: selectedStaff,
@@ -109,8 +124,8 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               Booking Request Received!
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
-              Your appointment request for <strong>{selectedService.name}</strong> on{' '}
-              <strong>1 October 2026 ({selectedTime})</strong> with{' '}
+              Your appointment request for <strong>{selectedService?.name}</strong> on{' '}
+              <strong>{formatDate(selectedDate)} ({selectedTime})</strong> with{' '}
               <strong>{selectedStaff}</strong> has been sent to the salon manager.
             </p>
             <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-900 max-w-sm mx-auto">
@@ -150,9 +165,9 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                   .map((srv) => (
                     <div
                       key={srv.id}
-                      onClick={() => setSelectedService(srv)}
+                      onClick={() => setSelectedServiceId(srv.id)}
                       className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        selectedService.id === srv.id
+                        selectedService?.id === srv.id
                           ? 'border-[#5551FF] bg-[#5551FF]/5 ring-1 ring-[#5551FF]'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
@@ -200,21 +215,29 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             {/* Step 3: Date & Time */}
             <div className="space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
-                3. Choose Time Slot (Thursday, 1 Oct 2026)
+                3. Choose Date & Time
               </label>
+              <input
+                type="date"
+                required
+                aria-label="Appointment date"
+                value={selectedDate}
+                onChange={(e) => { setSelectedDate(e.target.value); setFormError(''); }}
+                className="px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+              />
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {availableSlots.map((slot) => (
                   <button
                     key={slot}
                     type="button"
-                    onClick={() => setSelectedTime(slot)}
+                    onClick={() => setSelectedStartTime(slot)}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold tabular-nums border transition-all ${
-                      selectedTime === slot
+                      selectedStartTime === slot
                         ? 'bg-[#5551FF] text-white border-[#5551FF] shadow-xs'
                         : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    {slot}
+                    {slot} - {addMinutes(slot, selectedService?.durationMinutes ?? 30)}
                   </button>
                 ))}
               </div>
@@ -275,10 +298,13 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               </div>
             </div>
 
+            {availableServices.length === 0 && <p className="text-xs text-slate-500">No services are currently available for online booking.</p>}
+            {formError && <p role="alert" className="text-xs text-rose-600">{formError}</p>}
             {/* Submit Button */}
             <div className="pt-4 border-t border-slate-100">
               <button
                 type="submit"
+                disabled={!selectedService}
                 className="w-full py-3 text-xs sm:text-sm font-bold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-md shadow-indigo-500/20 transition-all flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />

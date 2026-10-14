@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   NavigationTab,
   AppointmentRequest,
+  AppointmentAction,
   CalendarEvent,
   Customer,
   Employee,
@@ -42,6 +43,8 @@ import { AiAssistantView } from './views/AiAssistantView';
 import { POSModal } from './components/POSModal';
 import { PilotInterest } from './components/PilotInterest';
 import { CheckCircle2 } from 'lucide-react';
+import { addMinutes, formatDate } from './scheduling';
+import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
@@ -54,6 +57,7 @@ export default function App() {
   // Core application states
   const [requests, setRequests] = useState<AppointmentRequest[]>(initialAppointmentRequests);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(initialCalendarEvents);
+  const [calendarDate, setCalendarDate] = useState('2026-10-07');
   const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [services, setServices] = useState<ServiceItem[]>(initialServices);
@@ -104,34 +108,26 @@ export default function App() {
     const accepted = requests.find((r) => r.id === id);
     if (!accepted) return;
 
-    setRequests(requests.filter((r) => r.id !== id));
+    const newCalEvent = appointmentFromRequest(accepted, services);
+    setRequests((prev) => prev.filter((r) => r.id !== id));
     setNextAppointment({
-      customerName: accepted.customerName,
-      staffName: accepted.staffName || 'Eloise Denniese',
-      time: accepted.timeStr,
-      dayName: 'THURSDAY',
+      customerName: newCalEvent.customerName,
+      staffName: newCalEvent.staffName,
+      time: `${newCalEvent.startTime} - ${newCalEvent.endTime}`,
+      dayName: new Date(`${newCalEvent.date}T12:00:00Z`).toLocaleDateString('en-GB', {
+        weekday: 'long', timeZone: 'UTC',
+      }).toUpperCase(),
     });
+    setCalendarEvents((prev) => upsertAppointment(prev, newCalEvent));
+    setCalendarDate(newCalEvent.date);
 
-    // Add to calendar
-    const newCalEvent: CalendarEvent = {
-      id: `cal-${Date.now()}`,
-      customerName: accepted.customerName,
-      serviceName: accepted.serviceName,
-      staffName: accepted.staffName || 'Eloise Denniese',
-      day: 'thu',
-      dateDisplay: 'Thu 08/10',
-      startTime: accepted.timeStr.split(' - ')[0] || '10:00',
-      endTime: accepted.timeStr.split(' - ')[1] || '10:30',
-      colorTheme: 'yellow',
-      isAiBooked: accepted.channel === 'WhatsApp' || accepted.channel === 'Instagram',
-    };
-    setCalendarEvents([newCalEvent, ...calendarEvents]);
-
-    setActivityStats((prev) => ({
-      ...prev,
-      aiBookingsToday: prev.aiBookingsToday + 1,
-      aiBookingsMonth: prev.aiBookingsMonth + 1,
-    }));
+    if (newCalEvent.isAiBooked) {
+      setActivityStats((prev) => ({
+        ...prev,
+        aiBookingsToday: prev.aiBookingsToday + 1,
+        aiBookingsMonth: prev.aiBookingsMonth + 1,
+      }));
+    }
 
     showToast(`Accepted appointment for ${accepted.customerName}`);
   };
@@ -143,10 +139,13 @@ export default function App() {
   };
 
   const handleMoveRequest = (id: string, newTime: string) => {
-    setRequests(
-      requests.map((r) => (r.id === id ? { ...r, timeStr: newTime } : r))
-    );
-    showToast(`Appointment rescheduled to ${newTime}`);
+    setRequests((prev) => prev.map((request) => {
+      if (request.id !== id) return request;
+      const startTime = newTime.split(' - ')[0];
+      const duration = services.find((service) => service.name === request.serviceName)?.durationMinutes ?? 30;
+      return { ...request, timeStr: `${startTime} - ${addMinutes(startTime, duration)}` };
+    }));
+    showToast('Appointment request rescheduled');
   };
 
   const handleSimulateNewRequest = () => {
@@ -156,7 +155,8 @@ export default function App() {
       id: `req-${Date.now()}`,
       customerName: randomName,
       serviceName: 'Haircut',
-      dateStr: '1 October 2026',
+      date: '2026-10-01',
+      dateStr: formatDate('2026-10-01'),
       timeStr: '14:00 - 14:30',
       timeAgo: 'Just now',
       staffName: 'Nilufar Ismayilova',
@@ -190,7 +190,8 @@ export default function App() {
       ...ev,
       id: `cal-${Date.now()}`,
     };
-    setCalendarEvents([newEv, ...calendarEvents]);
+    setCalendarEvents((prev) => upsertAppointment(prev, newEv));
+    setCalendarDate(newEv.date);
     showToast(`Appointment added for ${ev.customerName}`);
   };
 
@@ -343,56 +344,65 @@ export default function App() {
     showToast('You took over this conversation. The AI is paused.');
   };
 
+  const applyConversationAppointment = (conversation: Conversation, action: AppointmentAction, fromAi: boolean) => {
+    const appointment = appointmentFromConversationAction(action, conversation, calendarEvents, services, fromAi);
+    if (!appointment) {
+      showToast('This appointment could not be updated. Check the calendar and service before confirming.');
+      return false;
+    }
+    setCalendarEvents((prev) => upsertAppointment(prev, appointment));
+    setCalendarDate(appointment.date);
+    return true;
+  };
+
   const handleLetAiContinue = (id: string) => {
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c;
-        const messages = c.aiFollowUp
-          ? [
-              ...c.messages,
-              {
-                id: `msg-${Date.now()}`,
-                sender: 'ai' as const,
-                original: c.aiFollowUp.original,
-                translation: c.aiFollowUp.translation,
-                time: 'now',
-              },
-            ]
-          : c.messages;
-        return {
-          ...c,
-          takenOver: false,
-          status: 'ai-handled' as const,
-          messages,
-          lastTime: 'now',
-        };
-      })
-    );
+    const conversation = conversations.find((item) => item.id === id);
+    if (!conversation) return;
+    const followUp = conversation.aiFollowUp;
+    const action = followUp?.appointmentAction;
+    if (action && !applyConversationAppointment(conversation, action, true)) return;
+
+    setConversations((prev) => prev.map((c) => c.id !== id ? c : {
+      ...c,
+      takenOver: false,
+      status: action || c.appointmentId ? 'booked' : 'ai-handled',
+      appointmentId: action?.appointmentId ?? c.appointmentId,
+      aiFollowUp: undefined,
+      messages: followUp ? [...c.messages, {
+        id: `msg-${Date.now()}`,
+        sender: 'ai' as const,
+        original: followUp.original,
+        translation: followUp.translation,
+        time: 'now',
+      }] : c.messages,
+      lastTime: followUp ? 'now' : c.lastTime,
+    }));
     showToast('The AI is continuing this conversation');
   };
 
-  const handleOwnerReply = (id: string, english: string, local?: string) => {
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c;
-        return {
-          ...c,
-          status: c.status === 'needs-attention' ? ('owner-handled' as const) : c.status,
-          messages: [
-            ...c.messages,
-            {
-              id: `msg-${Date.now()}`,
-              sender: 'owner' as const,
-              original: local ?? english,
-              translation: english,
-              time: 'now',
-              untranslated: c.language !== 'EN' && !local,
-            },
-          ],
-          lastTime: 'now',
-        };
-      })
-    );
+  const handleOwnerReply = (id: string, english: string, local?: string, action?: AppointmentAction) => {
+    const conversation = conversations.find((item) => item.id === id);
+    if (!conversation) return false;
+    if (action && !applyConversationAppointment(conversation, action, false)) return false;
+
+    setConversations((prev) => prev.map((c) => c.id !== id ? c : {
+      ...c,
+      takenOver: true,
+      status: 'owner-handled' as const,
+      appointmentId: action?.appointmentId ?? c.appointmentId,
+      // The scripted follow-up predates this reply and may now contradict the owner.
+      aiFollowUp: undefined,
+      messages: [...c.messages, {
+        id: `msg-${Date.now()}`,
+        sender: 'owner' as const,
+        original: local ?? english,
+        translation: english,
+        time: 'now',
+        untranslated: c.language !== 'EN' && !local,
+      }],
+      lastTime: 'now',
+    }));
+    return true;
   };
 
   const handleSaveAiSettings = (settings: AiAssistantSettings) => {
@@ -475,6 +485,9 @@ export default function App() {
           {currentTab === 'calendar' && (
             <CalendarView
               events={calendarEvents}
+              services={services}
+              date={calendarDate}
+              onDateChange={setCalendarDate}
               onAddEvent={handleAddCalendarEvent}
               onDeleteEvent={handleDeleteCalendarEvent}
             />

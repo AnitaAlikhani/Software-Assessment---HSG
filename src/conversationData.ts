@@ -1,4 +1,13 @@
-import { AiAssistantSettings, ChatLanguage, Conversation } from './types';
+import { AiAssistantSettings, AppointmentAction, ChatLanguage, Conversation } from './types';
+
+const camilleBooking: AppointmentAction = {
+  type: 'book',
+  appointmentId: 'cal-camille',
+  date: '2026-10-09',
+  startTime: '11:00',
+  serviceName: 'Colouring',
+  staffName: 'Nilufar Ismayilova',
+};
 
 export const LANGUAGE_NAMES: Record<ChatLanguage, string> = {
   EN: 'English',
@@ -43,6 +52,7 @@ export const initialConversations: Conversation[] = [
       },
     ],
     aiFollowUp: {
+      appointmentAction: camilleBooking,
       original:
         'Parfait, votre rendez-vous de vendredi à 11h00 est confirmé au tarif habituel. À bientôt !',
       translation:
@@ -56,6 +66,7 @@ export const initialConversations: Conversation[] = [
       },
       {
         en: "Sorry, we can't offer a discount, but I've booked you for Friday at 11:00.",
+        appointmentAction: camilleBooking,
         local:
           "Désolé, nous ne pouvons pas offrir de réduction, mais je vous ai réservé vendredi à 11h00.",
       },
@@ -96,6 +107,7 @@ export const initialConversations: Conversation[] = [
   },
   {
     id: 'conv-giulia',
+    appointmentId: 'cal-giulia',
     customerName: 'Giulia Rossi',
     initials: 'GR',
     avatarColor: 'bg-emerald-100 text-emerald-700',
@@ -121,12 +133,20 @@ export const initialConversations: Conversation[] = [
     quickReplies: [
       {
         en: 'Yes, Saturday at 10:00 works. I have moved your appointment.',
+        appointmentAction: {
+          type: 'reschedule',
+          appointmentId: 'cal-giulia',
+          date: '2026-10-10',
+          startTime: '10:00',
+          outsideHoursApproved: true,
+        },
         local: 'Sì, sabato alle 10:00 va bene. Ho spostato il suo appuntamento.',
       },
     ],
   },
   {
     id: 'conv-marie',
+    appointmentId: 'cal-2',
     customerName: 'Marie Dupont',
     initials: 'MD',
     avatarColor: 'bg-violet-100 text-violet-700',
@@ -168,6 +188,7 @@ export const initialConversations: Conversation[] = [
   },
   {
     id: 'conv-lea',
+    appointmentId: 'cal-3',
     customerName: 'Léa Girard',
     initials: 'LG',
     avatarColor: 'bg-pink-100 text-pink-700',
@@ -209,6 +230,7 @@ export const initialConversations: Conversation[] = [
   },
   {
     id: 'conv-john',
+    appointmentId: 'cal-john',
     customerName: 'John Smith',
     initials: 'JS',
     avatarColor: 'bg-sky-100 text-sky-700',
