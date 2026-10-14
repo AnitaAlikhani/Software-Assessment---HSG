@@ -56,7 +56,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   onNewBookingRequest, onUpdateBookingRequest, onCancelBookingRequest, onViewRequest,
   publicMode = false,
 }) => {
-  const timeZone = companySettings.timeZone || 'Europe/Zurich';
+  const timeZone = (companySettings.timeZone || 'Europe/Zurich').split(' ')[0];
   const [clock, setClock] = useState(() => new Date());
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
@@ -278,7 +278,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
         {formError && <div ref={errorRef} tabIndex={-1} role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 focus:outline-2 focus:outline-rose-500"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span>{formError}</span></div>}
 
         {!showForm && liveRequest ? (
-          <section className="space-y-5 py-3" aria-labelledby="booking-status-heading">
+          <section className="space-y-5 py-3" aria-labelledby="booking-status-heading" onClickCapture={(event) => { if (event.detail > 1) { event.preventDefault(); event.stopPropagation(); } }}>
             <div className="text-center">
               <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${liveRequest.status === 'rejected' || liveRequest.status === 'cancelled' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-600'}`}><CheckCircle2 className="h-8 w-8" aria-hidden="true" /></div>
               <h2 id="booking-status-heading" ref={headingRef} tabIndex={-1} className="text-xl font-bold text-slate-900 focus:outline-hidden">{statusHeading}</h2>
