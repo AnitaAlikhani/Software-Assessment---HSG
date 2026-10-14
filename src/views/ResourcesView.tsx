@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, X, Check, Box, Trash2, Users } from 'lucide-react';
 import { IsometricCube } from '../components/IsometricCube';
 import { Resource } from '../types';
@@ -23,6 +23,22 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [visibleOnline, setVisibleOnline] = useState(false);
   const [allServices, setAllServices] = useState(true);
   const [generalHours, setGeneralHours] = useState(true);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (!showModal) return;
+    const trigger = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog?.showModal();
+    dialog?.querySelector<HTMLInputElement>('#resource-name')?.focus();
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [showModal]);
 
   const colorPalette = [
     { name: 'Yellow', hex: '#FDE047' },
@@ -55,16 +71,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
           Resources
         </h1>
 
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
+          className="flex min-h-11 items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>New Resource</span>
@@ -74,8 +90,8 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       {/* Content: Empty State vs Resource Cards */}
       {resources.length === 0 ? (
         /* Empty state matching Figma Page 15, 29 */
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-12 sm:p-16 text-center shadow-xs flex flex-col items-center justify-center space-y-5">
-          <IsometricCube size={220} />
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-16 text-center shadow-xs flex flex-col items-center justify-center space-y-5">
+          <div className="max-w-full"><IsometricCube size={220} /></div>
 
           <div className="space-y-1.5">
             <h2 className="text-lg sm:text-xl font-bold text-slate-900">
@@ -89,7 +105,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           <div className="pt-2">
             <button
               onClick={() => setShowModal(true)}
-              className="px-5 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
+              className="min-h-11 px-5 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
             >
               New Resource
             </button>
@@ -103,17 +119,17 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               key={res.id}
               className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4 relative group"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-3">
                   <div
-                    className="w-4 h-4 rounded-full ring-2 ring-white shadow-xs"
+                    className="w-4 h-4 shrink-0 rounded-full ring-2 ring-white shadow-xs"
                     style={{ backgroundColor: res.color }}
                   />
-                  <span className="font-bold text-sm text-slate-900">{res.name}</span>
+                  <span className="font-bold text-sm text-slate-900 [overflow-wrap:anywhere]">{res.name}</span>
                 </div>
                 <button
                   onClick={() => onDeleteResource(res.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded-lg transition-opacity"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
                   aria-label={`Delete ${res.name}`}
                 >
                   <Trash2 className="w-4 h-4" />
@@ -132,14 +148,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
       {/* Slide-over / Modal for New Resource matching Figma Page 18, 32 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl p-6 sm:p-7 overflow-y-auto space-y-5 flex flex-col animate-in slide-in-from-right duration-200">
+        <dialog ref={dialogRef} aria-labelledby="resource-dialog-title" onCancel={(event) => { event.preventDefault(); setShowModal(false); }} className="fixed inset-y-0 right-0 left-auto m-0 ml-auto h-dvh max-h-dvh w-full max-w-md overflow-y-auto overscroll-contain border-0 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs">
+          <div className="min-h-full p-6 sm:p-7 space-y-5 flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-base font-bold text-slate-900">New Resource</h2>
+              <h2 id="resource-dialog-title" className="text-base font-bold text-slate-900">New Resource</h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+                aria-label="Close resource editor"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -148,27 +165,29 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
             {/* Form Fields matching Figma */}
             <form onSubmit={handleCreate} className="space-y-4 text-xs flex-1">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label htmlFor="resource-name" className="font-semibold text-slate-700 block mb-1">
                   * Name
                 </label>
                 <input
+                  id="resource-name"
                   type="text"
                   required
                   placeholder="e.g. Table 4 or Chair 1"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label htmlFor="resource-type" className="font-semibold text-slate-700 block mb-1">
                   * Type
                 </label>
                 <select
+                  id="resource-type"
                   value={type}
                   onChange={(e) => setType(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 >
                   <option value="Room">Room</option>
                   <option value="Chair">Chair</option>
@@ -179,15 +198,16 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label htmlFor="resource-capacity" className="font-semibold text-slate-700 block mb-1">
                   Number of people
                 </label>
                 <input
+                  id="resource-capacity"
                   type="number"
                   min="1"
                   value={capacity}
                   onChange={(e) => setCapacity(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden tabular-nums"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden tabular-nums"
                 />
               </div>
 
@@ -202,7 +222,9 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       key={col.hex}
                       type="button"
                       onClick={() => setSelectedColor(col.hex)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-transform hover:scale-110 shadow-2xs relative border border-slate-200/50"
+                      aria-label={`${col.name} appointment color`}
+                      aria-pressed={selectedColor === col.hex}
+                      className="w-11 h-11 rounded-lg flex items-center justify-center transition-transform hover:scale-105 shadow-2xs relative border border-slate-200/50 focus-visible:outline-2 focus-visible:outline-[#5551FF]"
                       style={{ backgroundColor: col.hex }}
                     >
                       {selectedColor === col.hex && (
@@ -215,7 +237,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
               {/* Checkboxes from Figma */}
               <div className="space-y-3 pt-2 text-slate-600">
-                <label className="flex items-start gap-2.5 cursor-pointer">
+                <label className="flex min-h-11 items-start gap-2.5 py-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={reserveEntireRoom}
@@ -225,7 +247,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   <span>First booking reserves entire room</span>
                 </label>
 
-                <label className="flex items-start gap-2.5 cursor-pointer">
+                <label className="flex min-h-11 items-start gap-2.5 py-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={visibleOnline}
@@ -237,7 +259,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   </span>
                 </label>
 
-                <label className="flex items-start gap-2.5 cursor-pointer">
+                <label className="flex min-h-11 items-start gap-2.5 py-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={allServices}
@@ -247,7 +269,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   <span>Can be booked for all services</span>
                 </label>
 
-                <label className="flex items-start gap-2.5 cursor-pointer">
+                <label className="flex min-h-11 items-start gap-2.5 py-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={generalHours}
@@ -263,20 +285,20 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                  className="min-h-11 flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors shadow-xs"
+                  className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors shadow-xs"
                 >
                   Create
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

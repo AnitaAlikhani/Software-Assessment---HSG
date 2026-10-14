@@ -11,6 +11,7 @@ import {
 
 interface HeaderProps {
   onOpenMobileMenu: () => void;
+  isMobileMenuOpen: boolean;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   customers: Customer[];
@@ -32,7 +33,7 @@ interface HeaderProps {
 type Dropdown = 'search' | 'notifications' | 'profile' | null;
 
 export const Header: React.FC<HeaderProps> = ({
-  onOpenMobileMenu, searchQuery, onSearchChange, customers, appointmentRequests,
+  onOpenMobileMenu, isMobileMenuOpen, searchQuery, onSearchChange, customers, appointmentRequests,
   calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment, onOpenPOSModal,
   needsAttentionCount, needsAttentionNames, needsAttentionRevision, needsAttentionUpdates, latestAiBooking,
   onOpenConversations, onOpenSettings,
@@ -147,16 +148,16 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 lg:px-8 py-3.5 bg-white/95 backdrop-blur-md border-b border-slate-200/60">
+    <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-y-2 px-4 sm:px-6 lg:px-8 py-2 sm:py-3.5 bg-white/95 backdrop-blur-md border-b border-slate-200/60">
       <div className="flex items-center gap-3">
-        <button type="button" onClick={onOpenMobileMenu}
-          className="lg:hidden p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl"
-          aria-label="Open navigation menu">
+        <button id="mobile-menu-trigger" type="button" onClick={onOpenMobileMenu}
+          className="lg:hidden flex h-11 w-11 items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl"
+          aria-label="Open navigation menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-sidebar">
           <Menu className="w-5 h-5" aria-hidden="true" />
         </button>
       </div>
 
-      <div ref={searchRef} className="relative flex-1 min-w-0 max-w-md mx-2 sm:mx-6"
+      <div ref={searchRef} className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-md sm:mx-6"
         onBlur={(event) => closeWhenFocusLeaves(event, 'search')} onKeyDown={handleSearchKeyDown}>
         <label htmlFor="header-search" className="sr-only">Find customers, requests or appointments</label>
         <div className="relative">
@@ -169,11 +170,11 @@ export const Header: React.FC<HeaderProps> = ({
             onChange={(event) => { onSearchChange(event.target.value); setActiveResultIndex(-1); setOpenDropdown('search'); }}
             onFocus={() => setOpenDropdown('search')}
             placeholder="Find customers or appointments"
-            className="w-full pl-10 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-sm text-slate-700 placeholder-slate-400 rounded-full border border-transparent focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 transition-all" />
+            className="w-full min-h-11 pl-10 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-base sm:text-sm text-slate-700 placeholder-slate-400 rounded-full border border-transparent focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 transition-all" />
         </div>
         {searchIsOpen && (
           <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-            <div id="header-search-results" role="listbox" aria-label="Search results" className="max-h-80 overflow-y-auto">
+            <div id="header-search-results" role="listbox" aria-label="Search results" className="max-h-[min(20rem,calc(100dvh-9rem))] overflow-y-auto overscroll-contain">
               {searchResults.map((result, index) => {
                 const title = result.kind === 'customer' ? result.record.name : result.record.customerName;
                 const category = result.kind === 'customer' ? 'Customer' : result.kind === 'request' ? 'Pending request' : 'Confirmed appointment';
@@ -187,8 +188,8 @@ export const Header: React.FC<HeaderProps> = ({
                     onFocus={() => setActiveResultIndex(index)}
                     onClick={() => selectSearchResult(result)}
                     className={`w-full px-3 py-2.5 text-left rounded-xl transition-colors text-xs ${activeIndex === index ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'}`}>
-                    <span className="block text-[10px] font-semibold text-slate-400">{category}</span>
-                    <span className="block mt-0.5 font-semibold text-slate-800">{title}</span>
+                    <span className="block break-words text-[10px] font-semibold text-slate-400">{category}</span>
+                    <span className="block mt-0.5 break-words font-semibold text-slate-800">{title}</span>
                     <span className="block mt-0.5 text-[11px] text-slate-500 break-words">{detail}</span>
                   </button>
                 );
@@ -202,35 +203,35 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <button type="button" onClick={onOpenConversations}
-          className="relative p-2 rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
+          className="relative flex h-11 w-11 items-center justify-center rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
           title="Conversations" aria-label={`Conversations${needsAttentionCount > 0 ? `, ${needsAttentionCount} need attention` : ''}`}>
           <MessageSquare className="w-4 h-4" aria-hidden="true" />
           {needsAttentionCount > 0 && <span aria-hidden="true" className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white tabular-nums">{needsAttentionCount}</span>}
         </button>
         <button type="button" onClick={onOpenPOSModal}
-          className="relative p-2 rounded-xl text-amber-600 bg-amber-50/80 hover:bg-amber-100/90 transition-colors border border-amber-200/60"
+          className="relative flex h-11 w-11 items-center justify-center rounded-xl text-amber-600 bg-amber-50/80 hover:bg-amber-100/90 transition-colors border border-amber-200/60"
           title="Quick Cash Register / POS Checkout" aria-label="POS Register">
           <Calculator className="w-4 h-4" aria-hidden="true" />
         </button>
 
-        <div ref={notificationsRef} className="relative" onBlur={(event) => closeWhenFocusLeaves(event, 'notifications')}>
+        <div ref={notificationsRef} className="static sm:relative" onBlur={(event) => closeWhenFocusLeaves(event, 'notifications')}>
           <button ref={notificationsButtonRef} type="button"
             onClick={() => setOpenDropdown((current) => current === 'notifications' ? null : 'notifications')}
             aria-expanded={openDropdown === 'notifications'} aria-controls="header-notifications"
-            className="relative p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            className="relative flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
             title="Notifications" aria-label={`Notifications, ${unreadCount} unread`}>
             <Bell className="w-4 h-4" aria-hidden="true" />
             {unreadCount > 0 && <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-white" />}
           </button>
           {openDropdown === 'notifications' && (
             <div id="header-notifications" role="region" aria-labelledby="header-notifications-title"
-              className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-4 z-50 animate-in fade-in zoom-in-95">
+              className="absolute left-4 right-4 top-full mt-2 flex max-h-[calc(100dvh-8rem)] flex-col sm:left-auto sm:right-0 sm:w-80 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-4 z-50 animate-in fade-in zoom-in-95">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <h2 id="header-notifications-title" className="font-semibold text-xs text-slate-800">Notifications</h2>
                 <span className="text-[11px] text-slate-400" aria-live="polite">{unreadCount} unread</span>
               </div>
               {notifications.length > 0 && <button type="button" onClick={markAllRead} disabled={unreadCount === 0} className="text-[11px] font-semibold text-[#5551FF] hover:underline py-2 disabled:text-slate-400 disabled:no-underline">Mark all as read</button>}
-              <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
+              <div className="mt-2 min-h-0 space-y-2 max-h-72 overflow-y-auto overscroll-contain">
                 {notifications.map((notification) => {
                   const unread = isHeaderNotificationUnread(notification, readRevisions);
                   return (
@@ -239,8 +240,8 @@ export const Header: React.FC<HeaderProps> = ({
                       <span aria-hidden="true" className={`mt-1 w-2 h-2 rounded-full shrink-0 ${unread ? 'bg-[#5551FF]' : 'bg-slate-300'}`} />
                       <span className="min-w-0 flex-1">
                         <span className="sr-only">{unread ? 'Unread. ' : 'Read. '}</span>
-                        <span className="block font-semibold text-slate-900">{notification.title}</span>
-                        <span className="block text-slate-500 mt-0.5">{notification.detail}</span>
+                        <span className="block break-words font-semibold text-slate-900">{notification.title}</span>
+                        <span className="block break-words text-slate-500 mt-0.5">{notification.detail}</span>
                       </span>
                     </button>
                   );
@@ -256,11 +257,11 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        <div ref={profileRef} className="relative pl-1 sm:pl-2" onBlur={(event) => closeWhenFocusLeaves(event, 'profile')}>
+        <div ref={profileRef} className="static sm:relative sm:pl-2" onBlur={(event) => closeWhenFocusLeaves(event, 'profile')}>
           <button ref={profileButtonRef} type="button"
             onClick={() => setOpenDropdown((current) => current === 'profile' ? null : 'profile')}
             aria-label="Account and salon settings" aria-expanded={openDropdown === 'profile'} aria-controls="header-account"
-            className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-slate-100 transition-colors">
+            className="flex min-h-11 min-w-11 items-center justify-center gap-2.5 p-1 rounded-xl hover:bg-slate-100 transition-colors">
             <div aria-hidden="true" className="relative w-8 h-8 rounded-full overflow-hidden ring-1 ring-slate-200 bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 flex items-center justify-center shadow-xs">
               <svg viewBox="0 0 36 36" className="w-full h-full" fill="none">
                 <circle cx="18" cy="18" r="18" fill="#F4ECE6" />
@@ -292,7 +293,7 @@ export const Header: React.FC<HeaderProps> = ({
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:block" aria-hidden="true" />
           </button>
           {openDropdown === 'profile' && (
-            <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute right-0 top-full mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
+            <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute left-4 right-4 top-full mt-2 max-h-[calc(100dvh-8rem)] overflow-y-auto sm:left-auto sm:right-0 sm:w-64 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
               <div className="px-3 py-2 border-b border-slate-100">
                 <h2 id="header-account-title" className="font-semibold text-slate-800">Anna Weber</h2>
                 <p className="text-[11px] text-slate-400 mt-0.5">Bella Hair Salon · St. Gallen</p>

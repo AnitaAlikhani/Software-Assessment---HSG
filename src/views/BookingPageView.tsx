@@ -45,9 +45,9 @@ interface BookingPageViewProps extends AvailabilityContext {
   publicMode?: boolean;
 }
 
-const buttonClass = 'rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600';
-const inputClass = 'w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-900 focus:border-indigo-600 focus:outline-2 focus:outline-indigo-100';
-const cardClass = (selected: boolean) => `rounded-xl border p-3.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${selected ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-slate-200 bg-white hover:border-indigo-300'}`;
+const buttonClass = 'min-h-11 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600';
+const inputClass = 'min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-base sm:text-sm text-slate-900 focus:border-indigo-600 focus:outline-2 focus:outline-indigo-100';
+const cardClass = (selected: boolean) => `min-w-0 rounded-xl border p-3.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${selected ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-slate-200 bg-white hover:border-indigo-300'}`;
 const stepClass = 'mb-3 block text-xs font-bold uppercase tracking-wider text-slate-500';
 
 export const BookingPageView: React.FC<BookingPageViewProps> = ({
@@ -238,7 +238,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
       : liveRequest?.status === 'cancelled' ? 'Request cancelled' : 'Booking request received';
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200">
+    <div className="mx-auto min-w-0 max-w-4xl space-y-5 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200 [overflow-wrap:anywhere]">
       {publicMode && <a href={window.location.pathname} className="inline-block text-sm font-semibold text-indigo-700 hover:underline">Back to owner preview</a>}
       {!publicMode && (
         <div className="space-y-4 rounded-2xl bg-gradient-to-r from-[#5551FF] to-indigo-600 p-5 text-white shadow-lg shadow-indigo-500/10 sm:p-6">
@@ -284,7 +284,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               <h2 id="booking-status-heading" ref={headingRef} tabIndex={-1} className="text-xl font-bold text-slate-900 focus:outline-hidden">{statusHeading}</h2>
               <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{liveRequest.status === 'pending' ? 'Your request is awaiting approval in this demo. This is not a confirmed appointment yet.' : liveRequest.status === 'accepted' ? 'The salon has accepted this appointment in the demo calendar.' : liveRequest.status === 'cancelled' ? 'This request is no longer pending. Its time is available for booking again.' : 'The salon has declined this request in the demo. You can choose another time.'}</p>
             </div>
-            <dl className="mx-auto grid max-w-xl grid-cols-1 gap-4 rounded-xl bg-slate-50 p-5 text-sm sm:grid-cols-2">
+            <dl className="mx-auto grid min-w-0 max-w-xl grid-cols-1 gap-4 rounded-xl bg-slate-50 p-5 text-sm sm:grid-cols-2 [&>div]:min-w-0">
               <div><dt className="text-xs text-slate-500">Service</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.serviceName}</dd></div>
               <div><dt className="text-xs text-slate-500">Specialist</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.staffName}</dd></div>
               <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-900">{formatDate(liveRequest.date)}<br />{liveRequest.timeStr}</dd></div>
@@ -326,7 +326,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             {availableServices.length === 0 ? (
               <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">No services are currently available for online booking. Please contact the salon{!publicMode ? ', or enable a service in Services' : ''}.</div>
             ) : (<>
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className={stepClass}>1. Select service</legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {availableServices.map((service) => (
@@ -335,7 +335,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                       const keepEmployee = employees.find((employee) => employee.id === draft.employeeId);
                       updateDraft({ serviceId: service.id, startTime: '', employeeId: keepEmployee && isBookableEmployee(keepEmployee) && isEmployeeAssignedToService(service, keepEmployee) ? keepEmployee.id : '' });
                     }} className={cardClass(selectedService?.id === service.id)}>
-                      <span className="flex items-start justify-between gap-3"><span className="text-sm font-bold text-slate-900">{service.name}</span><span className="whitespace-nowrap text-xs font-bold text-indigo-600">{formatPrice(service.priceCHF)}</span></span>
+                      <span className="flex items-start justify-between gap-3"><span className="min-w-0 text-sm font-bold text-slate-900">{service.name}</span><span className="shrink-0 whitespace-nowrap text-xs font-bold text-indigo-600">{formatPrice(service.priceCHF)}</span></span>
                       <span className="mt-1 block text-xs text-slate-500">{service.durationMinutes} minutes</span>
                     </button>
                   ))}
@@ -355,7 +355,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 {draft.date && draft.date < today && <p role="alert" className="mt-2 text-sm text-rose-600">This date has passed. Choose today or a future date.</p>}
               </div>
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className={stepClass}>3. Choose specialist</legend>
                 {eligibleEmployees.length === 0 ? <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">No specialists currently offer this service online. Choose another service or contact the salon.</p> : (
                   <>
@@ -366,7 +366,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                           if (draft.employeeId !== employee.id) updateDraft({ employeeId: employee.id, startTime: '' });
                         }} className={`${cardClass(draft.employeeId === employee.id)} flex items-center gap-3`}>
                           <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-xs font-bold text-indigo-600">{employee.initials}</span>
-                          <span><span className="block text-sm font-semibold text-slate-800">{employee.name}</span><span className={`mt-0.5 block text-xs ${hasSlots ? 'text-emerald-700' : 'text-slate-500'}`}>{hasSlots ? 'Available on this date' : 'No times on this date'}</span></span>
+                          <span className="min-w-0"><span className="block text-sm font-semibold text-slate-800">{employee.name}</span><span className={`mt-0.5 block text-xs ${hasSlots ? 'text-emerald-700' : 'text-slate-500'}`}>{hasSlots ? 'Available on this date' : 'No times on this date'}</span></span>
                           {draft.employeeId === employee.id && <CheckCircle2 aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-indigo-600" />}
                         </button>;
                       })}
@@ -377,7 +377,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 )}
               </fieldset>
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className={stepClass}>4. Choose time</legend>
                 {!selectedEmployee ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Choose a specialist to see their available times.</p> : availableSlots.length === 0 ? (
                   <div role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><strong>{selectedEmployee.name}</strong> has no available times on {draft.date ? formatDate(draft.date) : 'this date'}. Find their next available date, or choose a different specialist above.</div>
@@ -387,7 +387,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 {draft.startTime && !selectedStartTime && selectedEmployee && <p role="status" className="mt-2 text-sm text-amber-800">Your previously selected time is no longer available. Please choose another time.</p>}
               </fieldset>
 
-              <fieldset>
+              <fieldset className="min-w-0">
                 <legend className={stepClass}>5. Contact details</legend>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-name">Full name <span aria-hidden="true">*</span></label><input id="booking-name" type="text" autoComplete="name" required maxLength={120} value={draft.name} placeholder="e.g. Sandra Meier" onChange={(event) => updateDraft({ name: event.target.value })} className={inputClass} /></div>
@@ -398,7 +398,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
 
               <section aria-labelledby="booking-review-heading" className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
                 <h3 id="booking-review-heading" className="mb-4 text-sm font-bold text-slate-900">Review your request</h3>
-                <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+                <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 [&>div]:min-w-0">
                   <div><dt className="text-xs text-slate-500">Service and price</dt><dd className="mt-1 font-semibold text-slate-800">{selectedService ? `${selectedService.name} · ${selectedService.durationMinutes} min · ${formatPrice(selectedService.priceCHF)}` : 'Choose a service'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Specialist</dt><dd className="mt-1 font-semibold text-slate-800">{selectedEmployee?.name ?? 'Choose a specialist'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-800">{draft.date ? formatDate(draft.date) : 'Choose a date'}{selectedStartTime && selectedService ? `, ${selectedStartTime} - ${addMinutes(selectedStartTime, selectedService.durationMinutes)}` : ', choose a time'}</dd></div>

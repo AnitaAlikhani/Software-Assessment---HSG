@@ -576,10 +576,11 @@ export default function App() {
       />
 
       {/* Main App Container */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div id="app-content" className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <Header
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+          isMobileMenuOpen={isMobileMenuOpen}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           customers={customers}
@@ -703,6 +704,8 @@ export default function App() {
             <ConversationsView
               conversations={conversations}
               selectedId={route.conversationId ?? selectedConversationId}
+              mobileDetailOpen={Boolean(route.conversationId)}
+              onBackToList={() => navigate({ tab: 'conversations' })}
               onSelect={id => { setSelectedConversationId(id); navigate({ tab: 'conversations', conversationId: id }); }}
               onTakeOver={handleTakeOver}
               onLetAiContinue={handleLetAiContinue}

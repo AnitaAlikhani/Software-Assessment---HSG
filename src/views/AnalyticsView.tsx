@@ -22,7 +22,7 @@ export const AnalyticsView: React.FC = () => {
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header Controls matching Figma Page 13, 27 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -72,7 +72,9 @@ export const AnalyticsView: React.FC = () => {
         </div>
 
         {/* SVG Line Graph */}
-        <div className="relative pt-4 pb-2">
+        <p id="analytics-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe the chart horizontally to see every date.</p>
+        <div role="region" aria-label="Appointment chart" aria-describedby="analytics-scroll-hint" tabIndex={0} className="relative max-w-full overflow-x-auto pt-4 pb-2 focus-visible:outline-2 focus-visible:outline-[#5551FF]">
+          <div className="min-w-[640px]">
           <div className="h-52 w-full flex">
             {/* Y-axis labels */}
             <div className="flex flex-col justify-between text-[11px] text-slate-400 pr-3 pb-6 select-none tabular-nums text-right w-8">
@@ -131,18 +133,19 @@ export const AnalyticsView: React.FC = () => {
           </div>
 
           {/* X-axis Date Labels */}
-          <div className="flex justify-between pl-8 text-[11px] text-slate-400 select-none overflow-x-auto">
-            {dates.map((d) => (
-              <span key={d} className="whitespace-nowrap px-1">
+          <div className="relative ml-8 h-5 text-[11px] text-slate-400 select-none">
+            {dates.map((d, index) => (
+              <span key={d} className="absolute whitespace-nowrap" style={{ left: `${index * 100 / (dates.length - 1)}%`, transform: index === 0 ? undefined : `translateX(${index === dates.length - 1 ? '-100%' : '-50%'})` }}>
                 {d}
               </span>
             ))}
+          </div>
           </div>
         </div>
       </div>
 
       {/* 3 Bottom Metric Cards matching Figma Page 13 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Card 1: Number of Customers */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between space-y-4">
           <div className="flex items-center gap-1.5">
@@ -264,7 +267,7 @@ export const AnalyticsView: React.FC = () => {
           </div>
 
           {/* Legend matching Figma */}
-          <div className="flex items-center justify-center gap-5 text-xs">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs">
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[#5551FF]" />
               <span className="font-medium text-slate-700">WhatsApp 67%</span>
