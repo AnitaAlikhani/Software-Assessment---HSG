@@ -44,6 +44,7 @@ import { POSModal } from './components/POSModal';
 import { PilotInterest } from './components/PilotInterest';
 import { CheckCircle2 } from 'lucide-react';
 import { addMinutes, formatDate } from './scheduling';
+import { getAvailableSlots, validateBookingRequest } from './availability';
 import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
 
 export default function App() {
@@ -70,6 +71,8 @@ export default function App() {
     initialConversations[0]?.id ?? null
   );
   const [aiSettings, setAiSettings] = useState<AiAssistantSettings>(initialAiSettings);
+
+  const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests };
 
   const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
   const latestAiBookedEvent = calendarEvents.find((e) => e.isAiBooked) ?? null;
@@ -107,6 +110,11 @@ export default function App() {
   const handleAcceptRequest = (id: string) => {
     const accepted = requests.find((r) => r.id === id);
     if (!accepted) return;
+    const availabilityError = validateBookingRequest(availabilityContext, accepted, accepted.id);
+    if (availabilityError) {
+      showToast(availabilityError);
+      return;
+    }
 
     const newCalEvent = appointmentFromRequest(accepted, services);
     setRequests((prev) => prev.filter((r) => r.id !== id));
@@ -139,32 +147,53 @@ export default function App() {
   };
 
   const handleMoveRequest = (id: string, newTime: string) => {
-    setRequests((prev) => prev.map((request) => {
-      if (request.id !== id) return request;
-      const startTime = newTime.split(' - ')[0];
-      const duration = services.find((service) => service.name === request.serviceName)?.durationMinutes ?? 30;
-      return { ...request, timeStr: `${startTime} - ${addMinutes(startTime, duration)}` };
-    }));
+    const request = requests.find((item) => item.id === id);
+    if (!request) return;
+    const startTime = newTime.split(' - ')[0];
+    const service = request.serviceId
+      ? services.find((item) => item.id === request.serviceId)
+      : services.find((item) => item.name === request.serviceName);
+    if (!service) { showToast('This service is no longer available.'); return; }
+    const updatedRequest = { ...request, timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}` };
+    const error = validateBookingRequest(availabilityContext, updatedRequest, id);
+    if (error) { showToast(error); return; }
+    setRequests((prev) => prev.map((item) => item.id === id ? updatedRequest : item));
     showToast('Appointment request rescheduled');
   };
 
+  const handleNewBookingRequest = (request: AppointmentRequest): string | null => {
+    const error = validateBookingRequest(availabilityContext, request);
+    if (error) return error;
+    setRequests((prev) => [request, ...prev]);
+    showToast(`New booking request submitted for ${request.customerName}!`);
+    return null;
+  };
+
   const handleSimulateNewRequest = () => {
-    const names = ['L\u00e9a Girard', 'Chlo\u00e9 Favre', 'Camille Bonnet', 'Elena Rossi'];
-    const randomName = names[Math.floor(Math.random() * names.length)];
-    const newReq: AppointmentRequest = {
+    const service = services.find((item) => item.name === 'Haircut' && item.onlineBooking);
+    if (!service) { showToast('No online haircut service is available.'); return; }
+    const date = '2026-10-01';
+    const available = employees.map((employee) => ({
+      employee,
+      slots: getAvailableSlots(availabilityContext, { date, serviceId: service.id, employeeId: employee.id }),
+    })).find((item) => item.slots.length > 0);
+    if (!available) { showToast('There are no available slots for this demo date.'); return; }
+    const names = ['Léa Girard', 'Chloé Favre', 'Camille Bonnet', 'Elena Rossi'];
+    const startTime = available.slots[0];
+    handleNewBookingRequest({
       id: `req-${Date.now()}`,
-      customerName: randomName,
-      serviceName: 'Haircut',
-      date: '2026-10-01',
-      dateStr: formatDate('2026-10-01'),
-      timeStr: '14:00 - 14:30',
+      serviceId: service.id,
+      employeeId: available.employee.id,
+      customerName: names[Math.floor(Math.random() * names.length)],
+      serviceName: service.name,
+      date,
+      dateStr: formatDate(date),
+      timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}`,
       timeAgo: 'Just now',
-      staffName: 'Nilufar Ismayilova',
+      staffName: available.employee.name,
       channel: 'WhatsApp',
       status: 'pending',
-    };
-    setRequests([newReq, ...requests]);
-    showToast(`New booking request arrived from ${randomName} via WhatsApp!`);
+    });
   };
 
   const handleExportActivity = () => {
@@ -188,6 +217,8 @@ export default function App() {
   const handleAddCalendarEvent = (ev: Omit<CalendarEvent, 'id'>) => {
     const newEv: CalendarEvent = {
       ...ev,
+      serviceId: ev.serviceId ?? services.find((service) => service.name === ev.serviceName)?.id,
+      employeeId: ev.employeeId ?? employees.find((employee) => employee.name === ev.staffName)?.id,
       id: `cal-${Date.now()}`,
     };
     setCalendarEvents((prev) => upsertAppointment(prev, newEv));
@@ -201,27 +232,24 @@ export default function App() {
   };
 
   // Shift Plan
-  const handleUpdateShift = (
-    employeeId: string,
-    dayKey: string,
-    start: string,
-    end: string
-  ) => {
-    setShiftOverview((prev) =>
-      prev.map((item) => {
-        if (item.employeeId === employeeId) {
-          return {
-            ...item,
-            shifts: {
-              ...item.shifts,
-              [dayKey]: { start, end },
-            },
-          };
-        }
-        return item;
-      })
-    );
-    showToast(`Shift updated: ${start} - ${end}`);
+  const handleUpdateShift = (employeeId: string, date: string, shift: { start: string; end: string } | null) => {
+    const employee = employees.find((item) => item.id === employeeId);
+    if (!employee || (shift && shift.end <= shift.start)) return;
+    setShiftOverview((prev) => {
+      if (!prev.some((item) => item.employeeId === employeeId)) {
+        return [...prev, {
+          employeeId,
+          employeeName: employee.name,
+          initials: employee.initials,
+          avatarColor: 'bg-indigo-100 text-indigo-700',
+          shifts: { [date]: shift },
+        }];
+      }
+      return prev.map((item) => item.employeeId === employeeId
+        ? { ...item, shifts: { ...item.shifts, [date]: shift } }
+        : item);
+    });
+    showToast(shift ? `Shift saved for ${employee.name}` : `${employee.name} is unavailable on ${formatDate(date)}`);
   };
 
   // Customers
@@ -485,6 +513,7 @@ export default function App() {
           {currentTab === 'calendar' && (
             <CalendarView
               events={calendarEvents}
+              bookingHours={bookingHours}
               services={services}
               date={calendarDate}
               onDateChange={setCalendarDate}
@@ -495,6 +524,7 @@ export default function App() {
 
           {currentTab === 'shift-plan' && (
             <ShiftPlanView
+              employees={employees}
               shiftOverview={shiftOverview}
               onUpdateShift={handleUpdateShift}
             />
@@ -563,12 +593,8 @@ export default function App() {
 
           {currentTab === 'booking-page' && (
             <BookingPageView
-              services={services}
-              employees={employees}
-              onNewBookingRequest={(req) => {
-                setRequests([req, ...requests]);
-                showToast(`New booking request submitted for ${req.customerName}!`);
-              }}
+              {...availabilityContext}
+              onNewBookingRequest={handleNewBookingRequest}
             />
           )}
         </main>

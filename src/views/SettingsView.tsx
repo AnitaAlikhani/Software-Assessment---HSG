@@ -22,21 +22,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsSubTab>('basic');
   const [formData, setFormData] = useState<CompanySettingsData>(initialSettings);
-  const [hoursData, setHoursData] = useState<BookingHoursDay[]>(initialBookingHours);
+  const [hoursData, setHoursData] = useState<BookingHoursDay[]>(() => initialBookingHours.map((day) => ({ ...day })));
   const [closedDatesTab, setClosedDatesTab] = useState<'closed' | 'absences'>('closed');
   const [closedDatesList, setClosedDatesList] = useState<string[]>([]);
   const [showSavedFeedback, setShowSavedFeedback] = useState(false);
 
   const handleToggleDay = (index: number) => {
-    const updated = [...hoursData];
-    updated[index].isOpen = !updated[index].isOpen;
-    setHoursData(updated);
+    setHoursData((previous) => previous.map((day, i) => i === index ? { ...day, isOpen: !day.isOpen } : day));
   };
 
   const handleTimeChange = (index: number, field: 'from' | 'to', value: string) => {
-    const updated = [...hoursData];
-    updated[index][field] = value;
-    setHoursData(updated);
+    setHoursData((previous) => previous.map((day, i) => i === index ? { ...day, [field]: value } : day));
   };
 
   const handleSave = () => {

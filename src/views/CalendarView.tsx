@@ -10,12 +10,13 @@ import {
   Scissors,
   X,
 } from 'lucide-react';
-import { CalendarEvent, ServiceItem } from '../types';
+import { BookingHoursDay, CalendarEvent, ServiceItem } from '../types';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, startOfWeek } from '../scheduling';
 
 interface CalendarViewProps {
   events: CalendarEvent[];
   services: ServiceItem[];
+  bookingHours: BookingHoursDay[];
   date: string;
   onDateChange: (date: string) => void;
   onAddEvent: (event: Omit<CalendarEvent, 'id'>) => void;
@@ -25,6 +26,7 @@ interface CalendarViewProps {
 export const CalendarView: React.FC<CalendarViewProps> = ({
   events,
   services,
+  bookingHours,
   date,
   onDateChange,
   onAddEvent,
@@ -41,10 +43,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const newService = services.find((service) => service.id === newServiceId) ?? services[0];
   const [newStaff, setNewStaff] = useState('Nilufar Ismayilova');
 
+  const isOpenDate = (value: string) => {
+    const weekday = new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+    return bookingHours.some((day) => day.day === weekday && day.isOpen && day.from < day.to);
+  };
   const makeDay = (value: string) => ({
     key: value,
     label: formatCalendarDate(value),
-    closed: ['sat', 'sun'].includes(dayKeyForDate(value)),
+    closed: !isOpenDate(value),
   });
   const weekStart = startOfWeek(date);
   const days = Array.from({ length: 7 }, (_, index) => makeDay(addDays(weekStart, index)));
@@ -75,8 +81,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustomer.trim() || !newSlotDate || !newService) return;
-    if (['sat', 'sun'].includes(dayKeyForDate(newSlotDate))) {
-      setFormError('Please choose a weekday. The salon is closed at weekends.');
+    if (!isOpenDate(newSlotDate)) {
+      setFormError('The salon is closed on this date. Please choose an open day.');
       return;
     }
     const endTime = addMinutes(newSlotTime, newService.durationMinutes);

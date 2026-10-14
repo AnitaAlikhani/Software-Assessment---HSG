@@ -10,12 +10,17 @@ export function upsertAppointment(events: CalendarEvent[], appointment: Calendar
 }
 
 export function appointmentFromRequest(request: AppointmentRequest, services: ServiceItem[]): CalendarEvent {
-  const startTime = request.timeStr.split(' - ')[0];
-  const duration = services.find((service) => service.name === request.serviceName)?.durationMinutes ?? 30;
+  const startTime = request.timeStr.split(/\s*-\s*/)[0];
+  const service = request.serviceId !== undefined
+    ? services.find((item) => item.id === request.serviceId)
+    : services.find((item) => item.name === request.serviceName);
+  const duration = service?.durationMinutes ?? 30;
   return {
     id: `cal-${request.id}`,
+    serviceId: request.serviceId,
+    employeeId: request.employeeId,
     customerName: request.customerName,
-    serviceName: request.serviceName,
+    serviceName: service?.name ?? request.serviceName,
     staffName: request.staffName || 'Eloise Denniese',
     date: request.date,
     day: dayKeyForDate(request.date),
@@ -45,6 +50,7 @@ export function appointmentFromConversationAction(
     id: action.appointmentId,
     customerName: conversation.customerName,
     serviceName,
+    serviceId: service.id,
     staffName: action.type === 'book' ? action.staffName : existing!.staffName,
     date: action.date,
     day: dayKeyForDate(action.date),

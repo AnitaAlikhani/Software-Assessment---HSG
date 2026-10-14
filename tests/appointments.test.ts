@@ -16,13 +16,21 @@ test('accepting an October 1 request preserves the full date and requested time'
 });
 
 test('appointments use the selected service duration, including 90-minute services', () => {
-  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], serviceName: 'Colouring', timeStr: '16:00 - 16:30' }, initialServices);
+  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 16:30' }, initialServices);
   assert.equal(event.endTime, '17:30');
   for (const hour of ['09:00', '10:00', '11:00', '13:30', '14:00', '16:00']) {
     const [h, m] = hour.split(':').map(Number);
     const expected = h * 60 + m + 30;
     assert.equal(addMinutes(hour, 30), `${String(Math.floor(expected / 60)).padStart(2, '0')}:${String(expected % 60).padStart(2, '0')}`);
   }
+});
+
+test('accepted requests retain their service identity after a service is renamed', () => {
+  const services = initialServices.map((service) => service.id === 'srv-3' ? { ...service, name: 'Full Colour' } : service);
+  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 17:30' }, services);
+  assert.equal(event.serviceId, 'srv-3');
+  assert.equal(event.serviceName, 'Full Colour');
+  assert.equal(event.endTime, '17:30');
 });
 
 test('owner and AI booking confirmations reference one stable appointment', () => {

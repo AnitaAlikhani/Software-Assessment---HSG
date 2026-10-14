@@ -103,6 +103,8 @@ export interface AiAssistantSettings {
 
 export interface AppointmentRequest {
   id: string;
+  serviceId?: string;
+  employeeId?: string;
   customerName: string;
   serviceName: string;
   date: string; // YYYY-MM-DD, shared by requests and calendar entries
@@ -116,6 +118,8 @@ export interface AppointmentRequest {
 
 export interface CalendarEvent {
   id: string;
+  serviceId?: string;
+  employeeId?: string;
   customerName: string;
   serviceName: string;
   staffName: string;
@@ -135,6 +139,7 @@ export interface ShiftEntry {
   initials: string;
   avatarColor: string;
   shifts: {
+    // Explicit date-only keys (YYYY-MM-DD); missing dates are not scheduled.
     [dayKey: string]: {
       start: string;
       end: string;
