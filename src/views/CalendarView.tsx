@@ -32,7 +32,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onAddEvent,
   onDeleteEvent,
 }) => {
-  const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
+  const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>(
+    // A full week doesn't fit on a phone, so phones start on 3-day
+    () => (typeof window !== 'undefined' && window.innerWidth < 640 ? '3-day' : 'Week')
+  );
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSlotDate, setNewSlotDate] = useState(date);
@@ -147,7 +150,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button
                 key={view}
                 onClick={() => setActiveView(view)}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
+                className={`px-2.5 sm:px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
                   activeView === view
                     ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                     : 'hover:text-slate-900 text-slate-500'
@@ -200,7 +203,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
-          <div className="min-w-[760px]">
+          {/* Only the week grid needs side-scrolling; Day and 3-day fit the screen */}
+          <div className={activeView === 'Week' ? 'min-w-[760px]' : ''}>
             {/* Days Column Headers */}
             <div className={`grid ${gridColumns} border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50`}>
               <div className="p-3.5 text-center text-slate-400 border-r border-slate-100">

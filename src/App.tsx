@@ -452,6 +452,7 @@ export default function App() {
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         pendingRequestsCount={requests.length}
+        needsAttentionCount={needsAttention.length}
         onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
       />
 

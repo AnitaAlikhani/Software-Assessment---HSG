@@ -102,7 +102,12 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             onFocus={() => setShowSearchDropdown(true)}
             onBlur={() => setTimeout(() => setShowSearchDropdown(false), 250)}
-            placeholder="Find customers or appointments"
+            // The long hint gets cut off ("Find custo…") on phones
+            placeholder={
+              typeof window !== 'undefined' && window.innerWidth < 640
+                ? 'Search…'
+                : 'Find customers or appointments'
+            }
             className="w-full pl-10 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-sm text-slate-700 placeholder-slate-400 rounded-full border border-transparent focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 transition-all"
           />
         </div>

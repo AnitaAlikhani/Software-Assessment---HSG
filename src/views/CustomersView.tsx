@@ -88,7 +88,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           {/* Search */}
-          <div className="relative flex-1 sm:w-64">
+          {/* Full row on phones so the buttons can't squeeze the input to nothing */}
+          <div className="relative basis-full sm:basis-auto sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
               type="text"

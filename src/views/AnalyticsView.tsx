@@ -131,9 +131,10 @@ export const AnalyticsView: React.FC = () => {
           </div>
 
           {/* X-axis Date Labels */}
-          <div className="flex justify-between pl-8 text-[11px] text-slate-400 select-none overflow-x-auto">
-            {dates.map((d) => (
-              <span key={d} className="whitespace-nowrap px-1">
+          {/* Phones show every other date so the labels fit without a scrollbar */}
+          <div className="flex justify-between pl-8 text-[11px] text-slate-400 select-none">
+            {dates.map((d, i) => (
+              <span key={d} className={`whitespace-nowrap px-1 ${i % 2 ? 'hidden sm:inline' : ''}`}>
                 {d}
               </span>
             ))}

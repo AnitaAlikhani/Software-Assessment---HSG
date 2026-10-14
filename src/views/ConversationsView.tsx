@@ -62,6 +62,15 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const [filter, setFilter] = useState<Filter>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
+  // Phones only: list and open chat take turns filling the screen
+  // (on md+ they sit side by side and this flag is ignored).
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
+
+  const openChat = (id: string) => {
+    onSelect(id);
+    setMobileChatOpen(true);
+    window.scrollTo({ top: 0 });
+  };
 
   const needsCount = conversations.filter(
     (c) => c.status === 'needs-attention'
@@ -163,7 +172,11 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px]">
         {/* Chat list */}
-        <div className="md:col-span-4 border-b md:border-b-0 md:border-r border-slate-200/70 flex flex-col">
+        <div
+          className={`md:col-span-4 md:border-r border-slate-200/70 flex-col ${
+            mobileChatOpen ? 'hidden md:flex' : 'flex'
+          }`}
+        >
           <div className="flex items-center gap-3.5 px-4 pt-4 border-b border-slate-100 overflow-x-auto">
             {tabs.map((t) => (
               <button
@@ -199,7 +212,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               return (
                 <button
                   key={c.id}
-                  onClick={() => onSelect(c.id)}
+                  onClick={() => openChat(c.id)}
                   className={`w-full text-left px-4 py-3.5 flex gap-3 border-b border-slate-100 transition-colors ${
                     active ? 'bg-[#5551FF]/7' : 'hover:bg-slate-50'
                   }`}
@@ -238,10 +251,21 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
         {/* Open chat */}
         {selected ? (
-          <div className="md:col-span-8 flex flex-col min-h-[520px]">
+          <div
+            className={`md:col-span-8 flex-col min-h-[520px] ${
+              mobileChatOpen ? 'flex' : 'hidden md:flex'
+            }`}
+          >
             {/* Chat header */}
-            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-3 min-w-0">
+                <button
+                  onClick={() => setMobileChatOpen(false)}
+                  aria-label="Back to all conversations"
+                  className="md:hidden -ml-1 p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 shrink-0"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
                 <div
                   className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${selected.avatarColor}`}
                 >
@@ -275,10 +299,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 </button>
                 <button
                   onClick={() => setShowWhatsApp(true)}
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
+                  aria-label="Open in WhatsApp"
+                  className="flex items-center gap-2 p-2.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
                 >
                   <span className="w-4 h-4 rounded-full bg-[#25D366] inline-block" />
-                  Open in WhatsApp
+                  {/* Phones show just the green dot so the customer's name has room */}
+                  <span className="hidden sm:inline">Open in WhatsApp</span>
                 </button>
               </div>
             </div>
