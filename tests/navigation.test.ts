@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseRoute, routeHash } from '../src/navigation';
-import { nextUpcomingAppointment } from '../src/dashboard';
-import { initialCalendarEvents } from '../src/mockData';
+import { mostRecentAiAppointment, nextUpcomingAppointment } from '../src/dashboard';
+import { initialAppointmentRequests, initialCalendarEvents, initialServices } from '../src/mockData';
+import { appointmentFromRequest, upsertAppointment } from '../src/appointmentActions';
 
 test('search and notification routes retain exact record IDs across navigation', () => {
   for (const route of [
@@ -37,4 +38,11 @@ test('next appointment uses salon timezone across midnight and does not mutate c
   const events = [{ ...initialCalendarEvents[0], id: 'tomorrow', date: '2026-10-15', startTime: '00:30' }];
   assert.equal(nextUpcomingAppointment(events, new Date('2026-10-14T22:45:00Z')), null);
   assert.equal(events[0].id, 'tomorrow');
+});
+
+test('accepting an AI request replaces the previous AI booking notification target', () => {
+  const accepted = appointmentFromRequest(initialAppointmentRequests[0], initialServices);
+  const calendar = upsertAppointment(initialCalendarEvents, accepted);
+  assert.equal(mostRecentAiAppointment(calendar)?.id, accepted.id);
+  assert.notEqual(mostRecentAiAppointment(calendar.filter(event => event.id !== accepted.id))?.id, accepted.id);
 });

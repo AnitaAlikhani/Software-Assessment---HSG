@@ -137,6 +137,8 @@ export const Header: React.FC<HeaderProps> = ({
     else onSelectAppointment(notification.record);
   };
   const markAllRead = () => {
+    // The action becomes disabled after reading; move focus before that happens.
+    notificationsButtonRef.current?.focus();
     setReadRevisions((previous) => Object.fromEntries([
       ...Object.entries(previous), ...notifications.map((item) => [item.id, item.kind === 'attention'
         ? Array.from(new Set([...(previous[item.id] ?? []), ...notificationReadTokens(item)]))

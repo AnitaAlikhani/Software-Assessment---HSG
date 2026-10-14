@@ -27,7 +27,7 @@ export const POSModal: React.FC<POSModalProps> = ({
   const [selectedServiceId, setSelectedServiceId] = useState(services[0]?.id ?? '');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id ?? 'walkin');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
-  const [completedSale, setCompletedSale] = useState<{ amount: number; serviceName: string; paymentLabel: string } | null>(null);
+  const [completedSale, setCompletedSale] = useState<{ amount: number; serviceName: string; customerName: string; paymentLabel: string } | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
 
@@ -63,6 +63,7 @@ export const POSModal: React.FC<POSModalProps> = ({
     setCompletedSale({
       amount: total,
       serviceName: currentService.name,
+      customerName: customers.find(customer => customer.id === currentCustomerId)?.name ?? 'Walk-in customer',
       paymentLabel: paymentMethods.find((method) => method.value === paymentMethod)!.label,
     });
     onCompleteSale(total, currentService.name);
@@ -97,6 +98,7 @@ export const POSModal: React.FC<POSModalProps> = ({
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" aria-hidden="true" />
               <h3 className="text-base font-bold text-slate-900">Simulated payment complete</h3>
               <p className="text-xs text-slate-600">CHF {completedSale.amount.toFixed(2)} for {completedSale.serviceName} using {completedSale.paymentLabel}.</p>
+              <p className="text-xs text-slate-600">Customer: {completedSale.customerName}</p>
               <p className="text-xs text-slate-500">No money was charged or recorded as a real sale.</p>
             </div>
             <button ref={doneRef} type="button" onClick={onClose} className="w-full py-2.5 text-xs font-bold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]">Done</button>

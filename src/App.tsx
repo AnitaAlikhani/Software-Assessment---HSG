@@ -44,7 +44,7 @@ import { POSModal } from './components/POSModal';
 import { PilotInterest } from './components/PilotInterest';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { AppRoute, parseRoute, routeHash } from './navigation';
-import { nextUpcomingAppointment } from './dashboard';
+import { mostRecentAiAppointment, nextUpcomingAppointment } from './dashboard';
 import { addMinutes, formatDate } from './scheduling';
 import { getAvailableSlots, validateBookingRequest } from './availability';
 import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
@@ -110,7 +110,7 @@ export default function App() {
   const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests };
 
   const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
-  const latestAiBookedEvent = [...calendarEvents].reverse().find((event) => event.isAiBooked) ?? null;
+  const latestAiBookedEvent = mostRecentAiAppointment(calendarEvents);
   const nextAppointment = nextUpcomingAppointment(calendarEvents, now, companySettings.timeZone.split(' ')[0]);
   const openAppointment = (event: CalendarEvent) => {
     setCalendarDate(event.date);

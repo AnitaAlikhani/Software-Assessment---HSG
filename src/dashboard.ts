@@ -1,5 +1,9 @@
 import type { CalendarEvent } from './types';
 
+// New bookings are prepended by upsertAppointment; retain that creation order.
+export const mostRecentAiAppointment = (events: CalendarEvent[]): CalendarEvent | null =>
+  events.find(event => event.isAiBooked) ?? null;
+
 /** Compare salon-local dates and times, never a browser-dependent UTC conversion. */
 export function nextUpcomingAppointment(events: CalendarEvent[], now = new Date(), timeZone = 'Europe/Zurich'): CalendarEvent | null {
   let parts: Intl.DateTimeFormatPart[];
