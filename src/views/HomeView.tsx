@@ -116,7 +116,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <p className="font-medium text-slate-700">
                       {formatDate(currentRequest.date)}, from {currentRequest.timeStr}
                     </p>
-                    <p className="text-slate-400">{currentRequest.serviceName}</p>
+                    <p className="text-slate-400">{currentRequest.serviceName} · {currentRequest.staffName} · {currentRequest.channel ?? 'Web'}</p>
+                    {currentRequest.customerPhone && <p>Phone: {currentRequest.customerPhone}</p>}
                   </div>
                 </div>
               </div>

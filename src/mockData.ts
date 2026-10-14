@@ -9,6 +9,7 @@ import {
   BookingHoursDay,
   ShiftEntry,
 } from './types';
+import { addDays, getSalonNow, startOfWeek } from './scheduling';
 
 export const initialAppointmentRequests: AppointmentRequest[] = [
   {
@@ -23,20 +24,22 @@ export const initialAppointmentRequests: AppointmentRequest[] = [
     timeAgo: '10 minutes ago',
     staffName: 'Eloise Denniese',
     channel: 'WhatsApp',
+    isAiBooked: true,
     status: 'pending',
   },
   {
     id: 'req-2',
-    serviceId: 'srv-1',
+    serviceId: 'srv-2',
     employeeId: 'emp-1',
     customerName: 'Atilla Ismayilova',
-    serviceName: 'Sample Service',
+    serviceName: 'Haircut',
     date: '2026-10-01',
     dateStr: '1 October 2026',
     timeStr: '11:00 - 11:30',
     timeAgo: '1 minutes ago',
     staffName: 'Nilufar Ismayilova',
     channel: 'Instagram',
+    isAiBooked: true,
     status: 'pending',
   },
 ];
@@ -196,6 +199,7 @@ export const initialServices: ServiceItem[] = [
     priceCHF: 45.0,
     onlineBooking: true,
     assignedEmployeesCount: 1,
+    assignedEmployeeIds: ['emp-2'],
     category: 'Hair',
     description: 'Quick hair styling and consultation for regular care.',
   },
@@ -206,6 +210,7 @@ export const initialServices: ServiceItem[] = [
     priceCHF: 55.0,
     onlineBooking: true,
     assignedEmployeesCount: 2,
+    assignedEmployeeIds: ['emp-1', 'emp-2'],
     category: 'Haircut',
     description: 'Precision haircut including shampoo, conditioning, and blow dry.',
   },
@@ -215,7 +220,8 @@ export const initialServices: ServiceItem[] = [
     durationMinutes: 90,
     priceCHF: 120.0,
     onlineBooking: false,
-    assignedEmployeesCount: 1,
+    assignedEmployeesCount: 2,
+    assignedEmployeeIds: ['emp-1', 'emp-2'],
     category: 'Colour',
     description: 'Full hair colouring and gloss treatment by experienced colorists.',
   },
@@ -269,6 +275,23 @@ export const initialShiftOverview: ShiftEntry[] = [
     },
   },
 ];
+
+/** Fresh sample capacity created once per demo session, never by availability checks. */
+export const createDemoShifts = (timeZone?: string, now = new Date()): ShiftEntry[] => {
+  const today = getSalonNow(timeZone, now).date;
+  const weekStart = startOfWeek(today);
+  const end = addDays(today, 89);
+  return initialShiftOverview.map((entry) => {
+    const shifts = Object.fromEntries(Object.entries(entry.shifts).map(([date, shift]) => [date, shift ? { ...shift } : null]));
+    for (let date = weekStart; date <= end; date = addDays(date, 1)) {
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      // Nilufar works Mon-Fri, Eloise Wed-Sat, matching the original sample week.
+      const works = entry.employeeId === 'emp-1' ? weekday >= 1 && weekday <= 5 : weekday >= 3 && weekday <= 6;
+      shifts[date] = works ? { start: entry.employeeId === 'emp-1' ? '09:00' : '10:00', end: '18:00' } : null;
+    }
+    return { ...entry, shifts };
+  });
+};
 
 export const initialCompanySettings: CompanySettingsData = {
   companyName: 'Bella Hair Salon',
