@@ -14,53 +14,44 @@ import { BookingHoursDay, CalendarEvent, ServiceItem } from '../types';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, startOfWeek } from '../scheduling';
 
 interface CalendarViewProps {
-  focusedEventId?: string | null;
-  onFocusedEventOpened?: () => void;
   events: CalendarEvent[];
   services: ServiceItem[];
   bookingHours: BookingHoursDay[];
   date: string;
+  selectedEventId: string | null;
+  onSelectEvent: (event: CalendarEvent | null) => void;
   onDateChange: (date: string) => void;
   onAddEvent: (event: Omit<CalendarEvent, 'id'>) => void;
   onDeleteEvent: (id: string) => void;
 }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({
-  focusedEventId,
-  onFocusedEventOpened,
   events,
   services,
   bookingHours,
   date,
+  selectedEventId,
+  onSelectEvent,
   onDateChange,
   onAddEvent,
   onDeleteEvent,
 }) => {
   const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
-  const detailsRef = useRef<HTMLDivElement>(null);
+  const selectedEvent = events.find(event => event.id === selectedEventId) ?? null;
+  const setSelectedEvent = onSelectEvent;
+  const detailsRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (focusedEventId) {
-      const event = events.find((item) => item.id === focusedEventId);
-      if (event) setSelectedEvent(event);
-      onFocusedEventOpened?.();
-    }
-  }, [focusedEventId, events, onFocusedEventOpened]);
-  useEffect(() => {
-    if (!selectedEvent) return;
-    const previous = document.activeElement as HTMLElement | null;
-    detailsRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSelectedEvent(null);
-      if (event.key === 'Tab') {
-        const controls = detailsRef.current?.querySelectorAll<HTMLElement>('button, a[href], input, [tabindex="0"]');
-        const first = controls?.[0]; const last = controls?.[controls.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === detailsRef.current)) { event.preventDefault(); last?.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-      }
+    const dialog = detailsRef.current;
+    if (!dialog || !selectedEvent) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('keydown', onKey); previous?.focus(); };
   }, [selectedEvent?.id]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSlotDate, setNewSlotDate] = useState(date);
@@ -201,6 +192,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       </div>
 
+      {selectedEventId && !selectedEvent && <p role="status" className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">This appointment is no longer available. <button className="font-semibold text-[#5551FF] underline" onClick={() => onSelectEvent(null)}>View calendar</button></p>}
+
       {/* Calendar Grid View */}
       {activeView === 'List' ? (
         <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-3">
@@ -209,6 +202,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           {visibleEvents.map((ev) => (
             <div
               key={ev.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`Open appointment for ${ev.customerName} on ${formatCalendarDate(ev.date)} at ${ev.startTime}`}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedEvent(ev); } }}
               onClick={() => setSelectedEvent(ev)}
               className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 hover:bg-indigo-50/50 border border-slate-100 transition-colors cursor-pointer"
             >
@@ -293,6 +290,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           slotEvents.map((ev) => (
                             <div
                               key={ev.id}
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Open appointment for ${ev.customerName} on ${formatCalendarDate(ev.date)} at ${ev.startTime}`}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setSelectedEvent(ev); } }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedEvent(ev);
@@ -336,19 +337,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
       {/* Event Details Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div ref={detailsRef} role="dialog" aria-modal="true" aria-label="Appointment details" tabIndex={-1} className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95">
+        <dialog ref={detailsRef} aria-labelledby="appointment-details-title" onCancel={e => { e.preventDefault(); setSelectedEvent(null); }} onClick={e => { if (e.target === e.currentTarget) setSelectedEvent(null); }} className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-2xl border-0 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#5551FF]">
                   Appointment Details
                 </span>
-                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                <h3 id="appointment-details-title" className="text-base font-bold text-slate-900 mt-0.5">
                   {selectedEvent.customerName}
                 </h3>
               </div>
               <button
                 aria-label="Close appointment details"
+                autoFocus
                 onClick={() => setSelectedEvent(null)}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
               >
@@ -399,7 +401,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
 
       {/* Add New Appointment Modal */}
