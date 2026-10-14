@@ -10,57 +10,72 @@ import {
   Copy,
   ExternalLink,
 } from 'lucide-react';
-import { ServiceItem, Employee, AppointmentRequest } from '../types';
+import { AppointmentRequest } from '../types';
+import { addMinutes, formatDate } from '../scheduling';
+import { AvailabilityContext, getAvailableSlots, isBookableEmployee, validateBookingRequest } from '../availability';
 
-interface BookingPageViewProps {
-  services: ServiceItem[];
-  employees: Employee[];
-  onNewBookingRequest: (req: AppointmentRequest) => void;
+interface BookingPageViewProps extends AvailabilityContext {
+  onNewBookingRequest: (req: AppointmentRequest) => string | null;
 }
 
 export const BookingPageView: React.FC<BookingPageViewProps> = ({
   services,
   employees,
+  bookingHours,
+  shiftOverview,
+  events,
+  requests,
   onNewBookingRequest,
 }) => {
-  const [selectedService, setSelectedService] = useState<ServiceItem>(services[0]);
-  const [selectedStaff, setSelectedStaff] = useState<string>('Nilufar Ismayilova');
+  const context: AvailabilityContext = { services, employees, bookingHours, shiftOverview, events, requests };
+  const availableServices = services.filter((service) => service.onlineBooking);
+  const [selectedServiceId, setSelectedServiceId] = useState(availableServices[0]?.id ?? '');
+  const selectedService = availableServices.find((service) => service.id === selectedServiceId) ?? availableServices[0];
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [selectedDate, setSelectedDate] = useState('2026-10-01');
-  const [selectedTime, setSelectedTime] = useState('10:00 - 10:30');
+  const [preferredStartTime, setPreferredStartTime] = useState('');
+  const [formError, setFormError] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
-  const [clientEmail, setClientEmail] = useState('');
   const [channel, setChannel] = useState<'WhatsApp' | 'Instagram' | 'Web'>('WhatsApp');
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [submittedRequest, setSubmittedRequest] = useState<AppointmentRequest | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const availableSlots = [
-    '09:00 - 09:30',
-    '10:00 - 10:30',
-    '11:00 - 11:30',
-    '13:30 - 14:00',
-    '14:30 - 15:00',
-    '16:00 - 16:30',
-  ];
+  const availableEmployees = employees.filter((employee) => isBookableEmployee(employee) && selectedService &&
+    getAvailableSlots(context, { date: selectedDate, serviceId: selectedService.id, employeeId: employee.id }).length > 0);
+  const selectedEmployee = availableEmployees.find((employee) => employee.id === selectedEmployeeId) ?? availableEmployees[0];
+  const availableSlots = selectedService && selectedEmployee
+    ? getAvailableSlots(context, { date: selectedDate, serviceId: selectedService.id, employeeId: selectedEmployee.id })
+    : [];
+  const selectedStartTime = availableSlots.includes(preferredStartTime) ? preferredStartTime : '';
 
   const handleBookingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName.trim()) return;
-
+    if (!clientName.trim() || !selectedService || !selectedEmployee || !selectedDate || !selectedStartTime) {
+      setFormError('Please choose an available service, specialist and time.');
+      return;
+    }
     const newRequest: AppointmentRequest = {
       id: `req-${Date.now()}`,
+      serviceId: selectedService.id,
+      employeeId: selectedEmployee.id,
       customerName: clientName.trim(),
       serviceName: selectedService.name,
-      dateStr: '1 October 2026',
-      timeStr: selectedTime,
+      date: selectedDate,
+      dateStr: formatDate(selectedDate),
+      timeStr: `${selectedStartTime} - ${addMinutes(selectedStartTime, selectedService.durationMinutes)}`,
       timeAgo: 'Just now',
-      staffName: selectedStaff,
+      staffName: selectedEmployee.name,
       channel,
       status: 'pending',
     };
-
-    onNewBookingRequest(newRequest);
-    setIsSuccess(true);
+    const error = validateBookingRequest(context, newRequest) ?? onNewBookingRequest(newRequest);
+    if (error) {
+      setFormError(error);
+      return;
+    }
+    setFormError('');
+    setSubmittedRequest(newRequest);
   };
 
   const handleCopy = () => {
@@ -100,7 +115,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
 
       {/* Booking Form Card */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-xs">
-        {isSuccess ? (
+        {submittedRequest ? (
           <div className="text-center py-10 space-y-4 animate-in zoom-in-95">
             <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
               <CheckCircle2 className="w-8 h-8" />
@@ -109,16 +124,17 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               Booking Request Received!
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
-              Your appointment request for <strong>{selectedService.name}</strong> on{' '}
-              <strong>1 October 2026 ({selectedTime})</strong> with{' '}
-              <strong>{selectedStaff}</strong> has been sent to the salon manager.
+              Your appointment request for <strong>{submittedRequest.serviceName}</strong> on{' '}
+              <strong>{submittedRequest.dateStr} ({submittedRequest.timeStr})</strong> with{' '}
+              <strong>{submittedRequest.staffName}</strong> has been sent to the salon manager.
             </p>
             <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-900 max-w-sm mx-auto">
               ✨ <strong>Tip:</strong> Head over to the <strong>Dashboard Home</strong> to review, accept, or reschedule this incoming request!
             </div>
             <button
               onClick={() => {
-                setIsSuccess(false);
+                setSubmittedRequest(null);
+                setPreferredStartTime('');
                 setClientName('');
               }}
               className="px-6 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
@@ -148,11 +164,13 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 {services
                   .filter((s) => s.onlineBooking)
                   .map((srv) => (
-                    <div
+                    <button
+                      type="button"
                       key={srv.id}
-                      onClick={() => setSelectedService(srv)}
+                      aria-pressed={selectedService?.id === srv.id}
+                      onClick={() => { setSelectedServiceId(srv.id); setPreferredStartTime(''); setFormError(''); }}
                       className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        selectedService.id === srv.id
+                        selectedService?.id === srv.id
                           ? 'border-[#5551FF] bg-[#5551FF]/5 ring-1 ring-[#5551FF]'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
@@ -164,7 +182,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">{srv.durationMinutes} minutes</p>
-                    </div>
+                    </button>
                   ))}
               </div>
             </div>
@@ -175,12 +193,14 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 2. Select Specialist
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {employees.map((emp) => (
-                  <div
+                {availableEmployees.map((emp) => (
+                  <button
+                    type="button"
                     key={emp.id}
-                    onClick={() => setSelectedStaff(emp.name)}
+                    aria-pressed={selectedEmployee?.id === emp.id}
+                    onClick={() => { setSelectedEmployeeId(emp.id); setPreferredStartTime(''); setFormError(''); }}
                     className={`p-3.5 rounded-xl border cursor-pointer flex items-center gap-3 transition-all ${
-                      selectedStaff === emp.name
+                      selectedEmployee?.id === emp.id
                         ? 'border-[#5551FF] bg-[#5551FF]/5 ring-1 ring-[#5551FF]'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
                     }`}
@@ -190,9 +210,9 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                     </div>
                     <div>
                       <p className="font-bold text-xs text-slate-800">{emp.name}</p>
-                      <p className="text-[11px] text-slate-400">Senior Stylist · Available</p>
+                      <p className="text-[11px] text-slate-400">Available on this date</p>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -200,21 +220,33 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             {/* Step 3: Date & Time */}
             <div className="space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
-                3. Choose Time Slot (Thursday, 1 Oct 2026)
+                3. Choose Date & Time
               </label>
+              <input
+                type="date"
+                required
+                aria-label="Appointment date"
+                value={selectedDate}
+                onChange={(e) => { setSelectedDate(e.target.value); setPreferredStartTime(''); setFormError(''); }}
+                className="px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+              />
+              {selectedService && availableSlots.length === 0 && (
+                <p role="status" className="text-sm text-slate-500">No appointments are available on this date. Please choose another date or service.</p>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {availableSlots.map((slot) => (
                   <button
                     key={slot}
                     type="button"
-                    onClick={() => setSelectedTime(slot)}
+                    onClick={() => { setPreferredStartTime(slot); setFormError(''); }}
+                    aria-pressed={selectedStartTime === slot}
                     className={`py-2 px-3 rounded-xl text-xs font-semibold tabular-nums border transition-all ${
-                      selectedTime === slot
+                      selectedStartTime === slot
                         ? 'bg-[#5551FF] text-white border-[#5551FF] shadow-xs'
                         : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    {slot}
+                    {slot} - {addMinutes(slot, selectedService?.durationMinutes ?? 30)}
                   </button>
                 ))}
               </div>
@@ -275,11 +307,14 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               </div>
             </div>
 
+            {availableServices.length === 0 && <p className="text-xs text-slate-500">No services are currently available for online booking.</p>}
+            {formError && <p role="alert" className="text-xs text-rose-600">{formError}</p>}
             {/* Submit Button */}
             <div className="pt-4 border-t border-slate-100">
               <button
                 type="submit"
-                className="w-full py-3 text-xs sm:text-sm font-bold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-md shadow-indigo-500/20 transition-all flex items-center justify-center gap-2"
+                disabled={!selectedService || !selectedEmployee || !selectedStartTime}
+                className="w-full py-3 text-xs sm:text-sm font-bold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-md shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Confirm & Request Appointment</span>

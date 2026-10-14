@@ -10,12 +10,12 @@ import {
 } from 'lucide-react';
 import {
   AiAssistantSettings,
+  AppointmentAction,
   ChatMessage,
   Conversation,
   ConversationStatus,
 } from '../types';
 import { LANGUAGE_NAMES } from '../conversationData';
-import { WAITLIST_FORM_URL } from '../config';
 
 interface ConversationsViewProps {
   conversations: Conversation[];
@@ -23,7 +23,12 @@ interface ConversationsViewProps {
   onSelect: (id: string) => void;
   onTakeOver: (id: string) => void;
   onLetAiContinue: (id: string) => void;
-  onOwnerReply: (id: string, english: string, local?: string) => void;
+  onOwnerReply: (
+    id: string,
+    english: string,
+    local?: string,
+    appointmentAction?: AppointmentAction
+  ) => boolean;
   aiSettings: AiAssistantSettings;
   onOpenAiSettings: () => void;
 }
@@ -55,9 +60,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOpenAiSettings,
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
-  const [draft, setDraft] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
-  const [showWaitlist, setShowWaitlist] = useState(false);
 
   const needsCount = conversations.filter(
     (c) => c.status === 'needs-attention'
@@ -72,6 +76,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
   const selected =
     conversations.find((c) => c.id === selectedId) ?? conversations[0] ?? null;
+  const draft = selected ? drafts[selected.id] ?? '' : '';
 
   const tabs: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -87,10 +92,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     ? selected.status === 'needs-attention' && !selected.takenOver
     : true;
 
-  const send = (english: string, local?: string) => {
+  const send = (english: string, local?: string, appointmentAction?: AppointmentAction) => {
     if (!selected || !english.trim()) return;
-    onOwnerReply(selected.id, english.trim(), local);
-    setDraft('');
+    const conversationId = selected.id;
+    if (onOwnerReply(conversationId, english.trim(), local, appointmentAction)) {
+      setDrafts((previous) => ({ ...previous, [conversationId]: '' }));
+    }
   };
 
   const renderBubble = (c: Conversation, m: ChatMessage, flagged: boolean) => {
@@ -323,7 +330,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               </div>
             )}
 
-            {selected.status === 'needs-attention' && selected.takenOver && (
+            {selected.takenOver && (
               <div className="mx-6 mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
                 <div className="w-8 h-8 rounded-full bg-[#5551FF] text-white flex items-center justify-center shrink-0">
                   <CheckCircle2 className="w-4 h-4" />
@@ -364,7 +371,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   {selected.quickReplies.map((q) => (
                     <button
                       key={q.en}
-                      onClick={() => send(q.en, q.local)}
+                      onClick={() => send(q.en, q.local, q.appointmentAction)}
                       className="text-left text-[11px] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
                     >
                       {q.en}
@@ -381,7 +388,11 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               >
                 <input
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    const conversationId = selected.id;
+                    const value = e.target.value;
+                    setDrafts((previous) => ({ ...previous, [conversationId]: value }));
+                  }}
                   disabled={locked}
                   placeholder={
                     locked
@@ -415,70 +426,6 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
           </div>
         )}
       </div>
-
-      {/* Pilot waitlist call to action */}
-      <div className="rounded-2xl border border-[#5551FF]/20 bg-[#5551FF]/5 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">
-            Want this assistant for your business?
-          </p>
-          <p className="text-xs text-slate-500 mt-0.5">
-            This is a student prototype. Leaving your email on the waitlist is optional.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowWaitlist(true)}
-          className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors shrink-0"
-        >
-          Join the pilot waitlist
-        </button>
-      </div>
-
-      {showWaitlist && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShowWaitlist(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Join the pilot waitlist"
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-              <h2 className="text-sm font-bold text-slate-900">Join the pilot waitlist</h2>
-              <div className="flex items-center gap-4">
-                <a
-                  href={WAITLIST_FORM_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold text-[#5551FF] hover:underline"
-                >
-                  Open in a new tab
-                </a>
-                <button
-                  onClick={() => setShowWaitlist(false)}
-                  aria-label="Close waitlist form"
-                  className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            <div className="relative h-[640px] max-h-[75vh]">
-              <p className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">
-                Loading the form…
-              </p>
-              <iframe
-                src={`${WAITLIST_FORM_URL}?embedded=true`}
-                title="Pilot waitlist form"
-                className="relative w-full h-full border-0"
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* WhatsApp view: what the customer sees on their phone */}
       {showWhatsApp && selected && (
@@ -548,3 +495,4 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     </div>
   );
 };
+

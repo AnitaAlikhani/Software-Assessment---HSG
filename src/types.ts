@@ -38,11 +38,29 @@ export interface ChatMessage {
   untranslated?: boolean;
 }
 
+export type AppointmentAction =
+  | {
+      type: 'book';
+      appointmentId: string;
+      date: string;
+      startTime: string;
+      serviceName: string;
+      staffName: string;
+    }
+  | {
+      type: 'reschedule';
+      appointmentId: string;
+      date: string;
+      startTime: string;
+      outsideHoursApproved?: boolean;
+    };
+
 export interface QuickReply {
   /** What the owner sees and selects (English). */
   en: string;
   /** What the customer receives (their language). */
   local: string;
+  appointmentAction?: AppointmentAction;
 }
 
 export interface Conversation {
@@ -56,10 +74,13 @@ export interface Conversation {
   status: ConversationStatus;
   attentionReason?: string;
   takenOver?: boolean;
+  appointmentId?: string;
   lastTime: string;
   messages: ChatMessage[];
   /** What the AI sends when the owner chooses "Let AI continue". */
-  aiFollowUp?: Pick<ChatMessage, 'original' | 'translation'>;
+  aiFollowUp?: Pick<ChatMessage, 'original' | 'translation'> & {
+    appointmentAction?: AppointmentAction;
+  };
   quickReplies?: QuickReply[];
 }
 
@@ -82,8 +103,11 @@ export interface AiAssistantSettings {
 
 export interface AppointmentRequest {
   id: string;
+  serviceId?: string;
+  employeeId?: string;
   customerName: string;
   serviceName: string;
+  date: string; // YYYY-MM-DD, shared by requests and calendar entries
   dateStr: string; // e.g. "1 October 2026"
   timeStr: string; // e.g. "10:00 - 10:30"
   timeAgo: string; // e.g. "10 minutes ago"
@@ -94,15 +118,19 @@ export interface AppointmentRequest {
 
 export interface CalendarEvent {
   id: string;
+  serviceId?: string;
+  employeeId?: string;
   customerName: string;
   serviceName: string;
   staffName: string;
+  date: string; // YYYY-MM-DD, never inferred from the visible calendar week
   day: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
   dateDisplay: string; // "Wed 07/10"
   startTime: string; // "10:00"
   endTime: string; // "10:30"
   colorTheme: 'yellow' | 'green' | 'purple' | 'blue';
   isAiBooked?: boolean;
+  outsideHoursApproved?: boolean;
 }
 
 export interface ShiftEntry {
@@ -111,6 +139,7 @@ export interface ShiftEntry {
   initials: string;
   avatarColor: string;
   shifts: {
+    // Explicit date-only keys (YYYY-MM-DD); missing dates are not scheduled.
     [dayKey: string]: {
       start: string;
       end: string;

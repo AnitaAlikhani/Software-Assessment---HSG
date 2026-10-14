@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Calendar,
+  MessageSquare,
   Store,
   CalendarDays,
   Users,
@@ -22,6 +23,7 @@ interface SidebarProps {
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   pendingRequestsCount: number;
+  onOpenPilotInterest: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -30,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
   pendingRequestsCount,
+  onOpenPilotInterest,
 }) => {
   const isManagementActive = [
     'customers',
@@ -59,12 +62,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
+        className={`fixed top-0 left-0 z-50 h-dvh w-64 shrink-0 overflow-hidden bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 transition-transform duration-300 ease-in-out lg:sticky lg:self-start lg:translate-x-0 ${
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Top Header / Brand Button */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex shrink-0 items-center justify-between mb-8">
           <button
             onClick={() => handleNav('home')}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-xs ${
@@ -88,7 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 space-y-1 overflow-y-auto pr-1 text-sm font-medium text-slate-500">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 text-sm font-medium text-slate-500">
           {/* Home */}
           <button
             onClick={() => handleNav('home')}
@@ -125,6 +128,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <Calendar className="w-4 h-4 shrink-0" />
             <span>Calendar</span>
+          </button>
+
+          {/* Conversations */}
+          <button
+            onClick={() => handleNav('conversations')}
+            aria-current={currentTab === 'conversations' ? 'page' : undefined}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+              currentTab === 'conversations'
+                ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            <span>Conversations</span>
           </button>
 
           {/* Your Booking Page */}
@@ -258,8 +275,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </nav>
 
-        {/* Bottom Salon Badge */}
-        <div className="pt-4 border-t border-slate-200/60 mt-auto">
+        {/* Persistent pilot interest button. */}
+        <div className="shrink-0 pt-4 border-t border-slate-200/60 mt-auto">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="pilot-interest-dialog"
+            onClick={onOpenPilotInterest}
+            className="mb-4 flex w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
+          >
+            Register interest
+          </button>
           <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg bg-white/70 border border-slate-200/50">
             <div className="w-7 h-7 rounded-lg bg-[#5551FF]/10 text-[#5551FF] flex items-center justify-center font-bold text-xs">
               B
@@ -274,3 +300,4 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
+
