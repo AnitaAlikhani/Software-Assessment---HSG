@@ -46,6 +46,13 @@ jobs:
           path: fixes-app
           persist-credentials: false
 
+      - name: Check out Anita first visit navigation preview
+        uses: actions/checkout@v7
+        with:
+          ref: anita-fix-first-visit-navigation
+          path: first-visit-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -91,9 +98,25 @@ jobs:
         working-directory: fixes-app
         run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fixes/
 
+      - name: Install first visit navigation dependencies
+        working-directory: first-visit-app
+        run: npm install --no-audit --no-fund
+
+      - name: Check first visit navigation types
+        working-directory: first-visit-app
+        run: npm run lint
+
+      - name: Test first visit navigation
+        working-directory: first-visit-app
+        run: npm test
+
+      - name: Build first visit navigation preview
+        working-directory: first-visit-app
+        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-first-visit-navigation/
+
       - name: Assemble main site and branch previews
         run: |
-          mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes
+          mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
           cp -a main-app/dist/. site/
           cp -a preview-app/dist/. site/previews/nil-figma-sync/
           git -C preview-app rev-parse HEAD > site/previews/nil-figma-sync/revision.txt
@@ -101,6 +124,8 @@ jobs:
           git -C anita-app rev-parse HEAD > site/previews/anita-banner/revision.txt
           cp -a fixes-app/dist/. site/previews/anita-fixes/
           git -C fixes-app rev-parse HEAD > site/previews/anita-fixes/revision.txt
+          cp -a first-visit-app/dist/. site/previews/anita-fix-first-visit-navigation/
+          git -C first-visit-app rev-parse HEAD > site/previews/anita-fix-first-visit-navigation/revision.txt
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v5
@@ -126,4 +151,3 @@ jobs:
         uses: actions/deploy-pages@v5
         with:
           artifact_name: ${{ needs.build.outputs.pages_artifact_name }}
-

@@ -11,7 +11,6 @@ import {
   BarChart3,
   Settings as SettingsIcon,
   X,
-  PieChart,
   SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
@@ -34,16 +33,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pendingRequestsCount,
   onOpenPilotInterest,
 }) => {
-  const isManagementActive = [
-    'customers',
-    'resources',
-    'employees',
-    'services',
-    'analytics',
-  ].includes(currentTab);
-
-  const isSettingsActive = currentTab === 'settings';
-
   const handleNav = (tab: NavigationTab) => {
     onSelectTab(tab);
     onCloseMobile();
@@ -66,19 +55,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isOpenMobile ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Top Header / Brand Button */}
+        {/* Salon identity. Home is the single dashboard navigation item. */}
         <div className="flex shrink-0 items-center justify-between mb-8">
-          <button
-            onClick={() => handleNav('home')}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition-all shadow-xs ${
-              currentTab === 'home'
-                ? 'bg-[#5551FF] text-white shadow-[#5551FF]/25'
-                : 'bg-white hover:bg-slate-100/80 text-slate-700 border border-slate-200/70'
-            }`}
-          >
-            <PieChart className="w-5 h-5 shrink-0" />
-            <span className="font-semibold text-[15px]">Dashboard</span>
-          </button>
+          <div className="min-w-0 flex items-center gap-3 px-2 py-2.5">
+            <span aria-hidden="true" className="w-8 h-8 rounded-xl bg-[#5551FF] text-white flex items-center justify-center font-bold text-sm shrink-0">B</span>
+            <p className="font-semibold text-sm text-slate-900 leading-snug">Bella Hair Salon</p>
+          </div>
 
           {/* Mobile Close Button */}
           <button
@@ -95,6 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Home */}
           <button
             onClick={() => handleNav('home')}
+            aria-current={currentTab === 'home' ? 'page' : undefined}
             className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'home'
                 ? 'bg-[#5551FF]/10 text-[#5551FF] font-semibold'
@@ -120,6 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Calendar */}
           <button
             onClick={() => handleNav('calendar')}
+            aria-current={currentTab === 'calendar' ? 'page' : undefined}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'calendar'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
@@ -147,6 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Your Booking Page */}
           <button
             onClick={() => handleNav('booking-page')}
+            aria-current={currentTab === 'booking-page' ? 'page' : undefined}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'booking-page'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
@@ -160,6 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Shift Plan */}
           <button
             onClick={() => handleNav('shift-plan')}
+            aria-current={currentTab === 'shift-plan' ? 'page' : undefined}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'shift-plan'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
@@ -180,6 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="mt-1 space-y-0.5 pl-2">
               <button
                 onClick={() => handleNav('customers')}
+                aria-current={currentTab === 'customers' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'customers'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -192,6 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNav('resources')}
+                aria-current={currentTab === 'resources' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'resources'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -204,6 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNav('employees')}
+                aria-current={currentTab === 'employees' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'employees'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -216,6 +205,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNav('services')}
+                aria-current={currentTab === 'services' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'services'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -228,6 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNav('analytics')}
+                aria-current={currentTab === 'analytics' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'analytics'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -250,6 +241,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="mt-1 space-y-0.5 pl-2">
               <button
                 onClick={() => handleNav('ai-assistant')}
+                aria-current={currentTab === 'ai-assistant' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'ai-assistant'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
@@ -262,6 +254,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 onClick={() => handleNav('settings')}
+                aria-current={currentTab === 'settings' ? 'page' : undefined}
                 className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'settings'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'

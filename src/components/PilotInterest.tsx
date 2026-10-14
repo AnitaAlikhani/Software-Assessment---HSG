@@ -9,7 +9,10 @@ interface PilotInterestProps {
 }
 
 export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, onClose }) => {
-  const [isVisible, setIsVisible] = useState(true);
+  const [isVisible, setIsVisible] = useState(() => {
+    try { return sessionStorage.getItem('bella-interest-dismissed') !== 'true'; } catch { return true; }
+  });
+  const [formOpened, setFormOpened] = useState(false);
   const [formLoaded, setFormLoaded] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -22,7 +25,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
 
   useEffect(() => {
     if (!isOpen) return;
-    setFormLoaded(false);
+    setFormOpened(true);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
@@ -47,7 +50,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                   Interested in a future pilot?
                 </h2>
                 <p className="mt-1 text-xs leading-relaxed text-slate-600 sm:whitespace-nowrap">
-                  This is a prototype. Leave your email to hear about a future pilot.
+                  If you’re interested in trying the AI receptionist, leave your email.
                 </p>
               </div>
             </div>
@@ -64,7 +67,11 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
               </button>
               <button
                 type="button"
-                onClick={() => setIsVisible(false)}
+                onClick={() => {
+                  setIsVisible(false);
+                  try { sessionStorage.setItem('bella-interest-dismissed', 'true'); } catch { /* The banner can still be dismissed when storage is unavailable. */ }
+                  requestAnimationFrame(() => document.querySelector<HTMLElement>('aside [aria-controls="pilot-interest-dialog"]')?.focus());
+                }}
                 className="rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
               >
                 Not now
@@ -88,10 +95,10 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 id="pilot-form-title" className="text-base font-semibold text-slate-900">
-              Register interest in a future pilot
+              Register interest
             </h2>
             <p id="pilot-form-description" className="mt-1.5 max-w-lg text-xs leading-relaxed text-slate-500">
-              Interested in trying the AI receptionist? Leave your email and we'll contact you about a future pilot.
+              If you’re interested in trying the AI receptionist, leave your email. We’ll use it to contact you about trying it.
             </p>
           </div>
           <button
@@ -104,7 +111,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
-        {isOpen && (
+        {formOpened && (
           <div className="relative h-[min(560px,60dvh)] min-h-48 bg-slate-50">
             {!formLoaded && (
               <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-slate-500">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   NavigationTab,
   AppointmentRequest,
@@ -42,18 +42,53 @@ import { ConversationsView } from './views/ConversationsView';
 import { AiAssistantView } from './views/AiAssistantView';
 import { POSModal } from './components/POSModal';
 import { PilotInterest } from './components/PilotInterest';
-import { CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { AppRoute, parseRoute, routeHash } from './navigation';
+import { nextUpcomingAppointment } from './dashboard';
 import { addMinutes, formatDate } from './scheduling';
 import { getAvailableSlots, validateBookingRequest } from './availability';
 import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<NavigationTab>('home');
+  const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.hash));
+  const currentTab = route.tab;
+  const navigate = (next: AppRoute) => {
+    const hash = routeHash(next);
+    if (window.location.hash !== hash) window.location.hash = hash;
+    setRoute(next);
+  };
+  const setCurrentTab = (tab: NavigationTab) => navigate({ tab });
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const onHashChange = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+    const frame = requestAnimationFrame(() => {
+      if (document.querySelector('dialog[open]')) return;
+      const heading = mainRef.current?.querySelector<HTMLElement>('h1');
+      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+      else mainRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [route.tab, route.requestId, route.customerId, route.appointmentId, route.conversationId]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPOSOpen, setIsPOSOpen] = useState(false);
   const [isPilotInterestOpen, setIsPilotInterestOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  const [rejectedRequests, setRejectedRequests] = useState<{ request: AppointmentRequest; index: number }[]>([]);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    const refreshClock = () => { if (!document.hidden) setNow(new Date()); };
+    document.addEventListener('visibilitychange', refreshClock);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshClock); };
+  }, []);
 
   // Core application states
   const [requests, setRequests] = useState<AppointmentRequest[]>(initialAppointmentRequests);
@@ -75,20 +110,17 @@ export default function App() {
   const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests };
 
   const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
-  const latestAiBookedEvent = calendarEvents.find((e) => e.isAiBooked) ?? null;
-
-  // Next appointment state (matching Figma top right card)
-  const [nextAppointment, setNextAppointment] = useState<{
-    customerName: string;
-    staffName: string;
-    time: string;
-    dayName: string;
-  } | null>({
-    customerName: 'Nilufar Ismayilova',
-    staffName: 'Eloise Denniese',
-    time: '10:00 - 10:30',
-    dayName: 'WEDNESDAY',
-  });
+  const latestAiBookedEvent = [...calendarEvents].reverse().find((event) => event.isAiBooked) ?? null;
+  const nextAppointment = nextUpcomingAppointment(calendarEvents, now, companySettings.timeZone.split(' ')[0]);
+  const openAppointment = (event: CalendarEvent) => {
+    setCalendarDate(event.date);
+    setSearchQuery('');
+    navigate({ tab: 'calendar', appointmentId: event.id });
+  };
+  const selectedCalendarEvent = calendarEvents.find(event => event.id === route.appointmentId);
+  useEffect(() => {
+    if (selectedCalendarEvent) setCalendarDate(selectedCalendarEvent.date);
+  }, [route.appointmentId, selectedCalendarEvent?.date]);
 
   // Activity stats matching Figma Page 1-3
   const [activityStats, setActivityStats] = useState({
@@ -101,9 +133,10 @@ export default function App() {
     replyTimeSec: 12,
   });
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, kind, action });
+    if (!action) toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 7000 : 4000);
   };
 
   // Home request actions
@@ -112,22 +145,15 @@ export default function App() {
     if (!accepted) return;
     const availabilityError = validateBookingRequest(availabilityContext, accepted, accepted.id);
     if (availabilityError) {
-      showToast(availabilityError);
+      showToast(availabilityError, 'error');
       return;
     }
 
     const newCalEvent = appointmentFromRequest(accepted, services);
     setRequests((prev) => prev.filter((r) => r.id !== id));
-    setNextAppointment({
-      customerName: newCalEvent.customerName,
-      staffName: newCalEvent.staffName,
-      time: `${newCalEvent.startTime} - ${newCalEvent.endTime}`,
-      dayName: new Date(`${newCalEvent.date}T12:00:00Z`).toLocaleDateString('en-GB', {
-        weekday: 'long', timeZone: 'UTC',
-      }).toUpperCase(),
-    });
     setCalendarEvents((prev) => upsertAppointment(prev, newCalEvent));
     setCalendarDate(newCalEvent.date);
+    if (route.requestId === id) navigate({ tab: 'home' });
 
     if (newCalEvent.isAiBooked) {
       setActivityStats((prev) => ({
@@ -137,28 +163,47 @@ export default function App() {
       }));
     }
 
-    showToast(`Accepted appointment for ${accepted.customerName}`);
+    showToast(`Accepted appointment for ${accepted.customerName}`, 'success', { label: 'View appointment', onClick: () => { openAppointment(newCalEvent); setToast(null); } });
   };
 
   const handleRejectRequest = (id: string) => {
-    const req = requests.find((r) => r.id === id);
-    setRequests(requests.filter((r) => r.id !== id));
-    showToast(`Declined request from ${req?.customerName || 'customer'}`);
+    const index = requests.findIndex(request => request.id === id);
+    if (index < 0) return;
+    const request = requests[index];
+    setRejectedRequests(previous => [...previous, { request, index }]);
+    setRequests(previous => previous.filter(item => item.id !== id));
+    if (route.requestId === id) navigate({ tab: 'home' });
+    showToast(`Declined request from ${request.customerName}`, 'info');
   };
 
-  const handleMoveRequest = (id: string, newTime: string) => {
-    const request = requests.find((item) => item.id === id);
-    if (!request) return;
-    const startTime = newTime.split(' - ')[0];
+  const undoReject = () => {
+    const rejected = rejectedRequests.at(-1);
+    if (!rejected) return;
+    const error = validateBookingRequest(availabilityContext, rejected.request);
+    if (error) { showToast(`Cannot restore this request: ${error}`, 'error'); return; }
+    setRequests(previous => {
+      const restored = [...previous];
+      restored.splice(Math.min(rejected.index, restored.length), 0, rejected.request);
+      return restored;
+    });
+    setRejectedRequests(previous => previous.slice(0, -1));
+    navigate({ tab: 'home', requestId: rejected.request.id });
+    showToast(`Restored request from ${rejected.request.customerName}`);
+  };
+
+  const handleMoveRequest = (id: string, date: string, startTime: string): string | null => {
+    const request = requests.find(item => item.id === id);
+    if (!request) return 'This request is no longer available.';
     const service = request.serviceId
-      ? services.find((item) => item.id === request.serviceId)
-      : services.find((item) => item.name === request.serviceName);
-    if (!service) { showToast('This service is no longer available.'); return; }
-    const updatedRequest = { ...request, timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}` };
+      ? services.find(item => item.id === request.serviceId)
+      : services.find(item => item.name === request.serviceName);
+    if (!service) return 'This service is no longer available.';
+    const updatedRequest = { ...request, date, dateStr: formatDate(date), timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}` };
     const error = validateBookingRequest(availabilityContext, updatedRequest, id);
-    if (error) { showToast(error); return; }
-    setRequests((prev) => prev.map((item) => item.id === id ? updatedRequest : item));
+    if (error) return error;
+    setRequests(previous => previous.map(item => item.id === id ? updatedRequest : item));
     showToast('Appointment request rescheduled');
+    return null;
   };
 
   const handleNewBookingRequest = (request: AppointmentRequest): string | null => {
@@ -171,13 +216,13 @@ export default function App() {
 
   const handleSimulateNewRequest = () => {
     const service = services.find((item) => item.name === 'Haircut' && item.onlineBooking);
-    if (!service) { showToast('No online haircut service is available.'); return; }
+    if (!service) { showToast('No online haircut service is available.', 'error'); return; }
     const date = '2026-10-01';
     const available = employees.map((employee) => ({
       employee,
       slots: getAvailableSlots(availabilityContext, { date, serviceId: service.id, employeeId: employee.id }),
     })).find((item) => item.slots.length > 0);
-    if (!available) { showToast('There are no available slots for this demo date.'); return; }
+    if (!available) { showToast('There are no available slots for this demo date.', 'error'); return; }
     const names = ['Léa Girard', 'Chloé Favre', 'Camille Bonnet', 'Elena Rossi'];
     const startTime = available.slots[0];
     handleNewBookingRequest({
@@ -199,7 +244,9 @@ export default function App() {
   const handleExportActivity = () => {
     const report = {
       date: new Date().toISOString(),
-      salon: 'Bella Hair Salon',
+      salon: companySettings.companyName,
+      dataType: 'sample-demo-activity',
+      note: 'Illustrative demo figures. This export does not measure participant behaviour.',
       stats: activityStats,
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], {
@@ -208,9 +255,10 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bella_salon_activity_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `bella_salon_sample_activity_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
-    showToast('Activity summary exported successfully!');
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Sample activity exported');
   };
 
   // Calendar
@@ -353,13 +401,13 @@ export default function App() {
       ? conversations.find((c) => c.id === id)
       : conversations.find((c) => c.status === 'needs-attention') ?? conversations[0];
     if (target) setSelectedConversationId(target.id);
-    setCurrentTab('conversations');
+    navigate({ tab: 'conversations', conversationId: target?.id });
   };
 
   const openChatForCustomer = (customerName: string) => {
     const conv = conversations.find((c) => c.customerName === customerName);
     if (!conv) {
-      showToast(`No conversation with ${customerName} yet`);
+      showToast(`No conversation with ${customerName} yet`, 'info');
       return;
     }
     openConversation(conv.id);
@@ -375,7 +423,7 @@ export default function App() {
   const applyConversationAppointment = (conversation: Conversation, action: AppointmentAction, fromAi: boolean) => {
     const appointment = appointmentFromConversationAction(action, conversation, calendarEvents, services, fromAi);
     if (!appointment) {
-      showToast('This appointment could not be updated. Check the calendar and service before confirming.');
+      showToast('This appointment could not be updated. Check the calendar and service before confirming.', 'error');
       return false;
     }
     setCalendarEvents((prev) => upsertAppointment(prev, appointment));
@@ -440,7 +488,7 @@ export default function App() {
 
   // POS
   const handleCompleteSale = (amount: number, serviceName: string) => {
-    showToast(`Payment of CHF ${amount.toFixed(2)} received for ${serviceName}`);
+    showToast(`Simulated CHF ${amount.toFixed(2)} checkout for ${serviceName}. No payment was taken.`, 'info');
   };
 
   return (
@@ -464,27 +512,24 @@ export default function App() {
           onSearchChange={setSearchQuery}
           customers={customers}
           appointmentRequests={requests}
+          calendarEvents={calendarEvents}
+          onSelectAppointment={openAppointment}
+          onOpenSettings={() => setCurrentTab('settings')}
           onSelectCustomer={(cust) => {
-            setCurrentTab('customers');
+            navigate({ tab: 'customers', customerId: cust.id });
             setSearchQuery('');
           }}
           onSelectRequest={(req) => {
-            setCurrentTab('home');
+            navigate({ tab: 'home', requestId: req.id });
             setSearchQuery('');
           }}
           onOpenPOSModal={() => setIsPOSOpen(true)}
           needsAttentionCount={needsAttention.length}
           needsAttentionNames={needsAttention.map((c) => c.customerName.split(' ')[0])}
-          latestAiBooking={
-            latestAiBookedEvent
-              ? {
-                  customerName: latestAiBookedEvent.customerName,
-                  detail: `${latestAiBookedEvent.dateDisplay} · ${latestAiBookedEvent.serviceName}`,
-                }
-              : null
-          }
+          latestAiBooking={latestAiBookedEvent}
+          needsAttentionUpdates={needsAttention.map(c => `${c.id}:${c.messages.at(-1)?.id}:${c.attentionReason}`).sort()}
           onOpenConversations={() => openConversation()}
-          onOpenCalendar={() => setCurrentTab('calendar')}
+
         />
 
         <PilotInterest
@@ -494,10 +539,21 @@ export default function App() {
         />
 
         {/* Main View Body */}
-        <main className="flex-1 pb-16">
+        <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 pb-16 outline-none">
+          {currentTab === 'home' && rejectedRequests.length > 0 && (
+            <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs sm:mx-8">
+              <span>Request from {rejectedRequests.at(-1)?.request.customerName} declined.</span>
+              <button onClick={undoReject} className="font-semibold text-[#5551FF] underline">Undo rejection</button>
+              <button aria-label="Dismiss undo rejection" onClick={() => setRejectedRequests(previous => previous.slice(0, -1))} className="ml-auto rounded p-1 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+            </div>
+          )}
           {currentTab === 'home' && (
             <HomeView
               requests={requests}
+              selectedRequestId={route.requestId ?? null}
+              onSelectRequest={id => navigate({ tab: 'home', requestId: id })}
+              availabilityContext={availabilityContext}
+              onOpenAppointment={openAppointment}
               onAcceptRequest={handleAcceptRequest}
               onRejectRequest={handleRejectRequest}
               onMoveRequest={handleMoveRequest}
@@ -515,8 +571,10 @@ export default function App() {
               events={calendarEvents}
               bookingHours={bookingHours}
               services={services}
-              date={calendarDate}
-              onDateChange={setCalendarDate}
+              date={selectedCalendarEvent?.date ?? calendarDate}
+              selectedEventId={route.appointmentId ?? null}
+              onSelectEvent={event => event ? openAppointment(event) : navigate({ tab: 'calendar' })}
+              onDateChange={date => { setCalendarDate(date); if (route.appointmentId) navigate({ tab: 'calendar' }); }}
               onAddEvent={handleAddCalendarEvent}
               onDeleteEvent={handleDeleteCalendarEvent}
             />
@@ -533,6 +591,8 @@ export default function App() {
           {currentTab === 'customers' && (
             <CustomersView
               customers={customers}
+              selectedCustomerId={route.customerId ?? null}
+              onClearSelection={() => navigate({ tab: 'customers' })}
               onAddCustomer={handleAddCustomer}
               onDeleteCustomer={handleDeleteCustomer}
               onOpenChat={openChatForCustomer}
@@ -569,8 +629,8 @@ export default function App() {
           {currentTab === 'conversations' && (
             <ConversationsView
               conversations={conversations}
-              selectedId={selectedConversationId}
-              onSelect={setSelectedConversationId}
+              selectedId={route.conversationId ?? selectedConversationId}
+              onSelect={id => { setSelectedConversationId(id); navigate({ tab: 'conversations', conversationId: id }); }}
               onTakeOver={handleTakeOver}
               onLetAiContinue={handleLetAiContinue}
               onOwnerReply={handleOwnerReply}
@@ -609,11 +669,13 @@ export default function App() {
         onCompleteSale={handleCompleteSale}
       />
 
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2.5 px-4 py-3 bg-slate-900 text-white text-xs font-semibold rounded-2xl shadow-xl animate-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{toastMessage}</span>
+      {/* Feedback distinguishes a completed action from a problem or demo information. */}
+      {toast && (
+        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2.5rem)] flex-wrap items-center gap-2.5 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-semibold text-white shadow-xl">
+          {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
+          <span>{toast.message}</span>
+          {toast.action && <button onClick={toast.action.onClick} className="rounded px-2 py-1 text-indigo-200 underline hover:text-white">{toast.action.label}</button>}
+          <button aria-label="Dismiss notification" onClick={() => setToast(null)} className="rounded p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
         </div>
       )}
     </div>

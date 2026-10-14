@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   RotateCcw,
@@ -12,8 +12,9 @@ import {
   User,
   Plus,
 } from 'lucide-react';
-import { AppointmentRequest, Conversation } from '../types';
-import { addMinutes, formatDate } from '../scheduling';
+import { AppointmentRequest, CalendarEvent, Conversation } from '../types';
+import { addMinutes, formatCalendarDate, formatDate } from '../scheduling';
+import { getAvailableSlots, type AvailabilityContext } from '../availability';
 
 const LANG_CHIP: Record<string, string> = {
   FR: 'bg-violet-100 text-violet-700',
@@ -24,16 +25,15 @@ const LANG_CHIP: Record<string, string> = {
 
 interface HomeViewProps {
   requests: AppointmentRequest[];
+  selectedRequestId: string | null;
+  onSelectRequest: (id: string) => void;
+  availabilityContext: AvailabilityContext;
   onAcceptRequest: (id: string) => void;
   onRejectRequest: (id: string) => void;
-  onMoveRequest: (id: string, newTime: string) => void;
+  onMoveRequest: (id: string, date: string, startTime: string) => string | null;
   onSimulateNewRequest: () => void;
-  nextAppointment: {
-    customerName: string;
-    staffName: string;
-    time: string;
-    dayName: string;
-  } | null;
+  nextAppointment: CalendarEvent | null;
+  onOpenAppointment: (event: CalendarEvent) => void;
   activityStats: {
     messagesToday: number;
     messagesMonth: number;
@@ -50,35 +50,77 @@ interface HomeViewProps {
 
 export const HomeView: React.FC<HomeViewProps> = ({
   requests,
+  selectedRequestId,
+  onSelectRequest,
+  availabilityContext,
   onAcceptRequest,
   onRejectRequest,
   onMoveRequest,
   onSimulateNewRequest,
   nextAppointment,
+  onOpenAppointment,
   activityStats,
   onExportActivity,
   conversations,
   onOpenConversations,
 }) => {
   const [movingRequestId, setMovingRequestId] = useState<string | null>(null);
-  const [rescheduleStart, setRescheduleStart] = useState('11:30');
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleStart, setRescheduleStart] = useState('');
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const moveDialogRef = useRef<HTMLDialogElement>(null);
 
-  const currentRequest = requests.length > 0 ? requests[0] : null;
+  const selectedRequest = requests.find((request) => request.id === selectedRequestId);
+  const unavailableRequest = selectedRequestId !== null && !selectedRequest;
+  const currentRequest = selectedRequestId !== null ? selectedRequest ?? null : requests[0] ?? null;
   const movingRequest = requests.find((request) => request.id === movingRequestId);
-  const [currentStart, currentEnd] = (movingRequest?.timeStr ?? '11:30 - 12:00').split(' - ');
-  const toMinutes = (time: string) => {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-  const moveDuration = Math.max(1, toMinutes(currentEnd) - toMinutes(currentStart)) || 30;
-  const rescheduleTime = `${rescheduleStart} - ${addMinutes(rescheduleStart, moveDuration)}`;
+  const moveService = movingRequest && availabilityContext.services.find((service) =>
+    movingRequest.serviceId !== undefined ? service.id === movingRequest.serviceId : service.name === movingRequest.serviceName
+  );
+  const moveEmployee = movingRequest && availabilityContext.employees.find((employee) =>
+    movingRequest.employeeId !== undefined ? employee.id === movingRequest.employeeId : employee.name === movingRequest.staffName
+  );
+  const moveDuration = moveService?.durationMinutes ?? 0;
+  const availableMoveSlots = movingRequest && moveService && moveEmployee && rescheduleDate
+    ? getAvailableSlots(availabilityContext, {
+        date: rescheduleDate,
+        serviceId: moveService.id,
+        employeeId: moveEmployee.id,
+        excludeRequestId: movingRequest.id,
+      })
+    : [];
+  const selectedMoveStart = availableMoveSlots.includes(rescheduleStart)
+    ? rescheduleStart
+    : availableMoveSlots[0] ?? '';
   const requestDate = currentRequest ? new Date(`${currentRequest.date}T00:00:00.000Z`) : null;
+
+  const openMoveDialog = (request: AppointmentRequest) => {
+    setRescheduleDate(request.date);
+    setRescheduleStart(request.timeStr.split(/\s*-\s*/)[0]);
+    setMoveError(null);
+    setMovingRequestId(request.id);
+  };
+
+  useEffect(() => {
+    const dialog = moveDialogRef.current;
+    if (!movingRequestId || !dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [movingRequestId, Boolean(movingRequest)]);
 
   const needingAttention = conversations.filter((c) => c.status === 'needs-attention');
   const shownConversations = (needingAttention.length > 0 ? needingAttention : conversations).slice(0, 2);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-200">
+      <h1 tabIndex={-1} className="sr-only">Home</h1>
       {/* Top Grid: Appointment Request / Empty State & Next Appointment */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Pending Appointment Request or Empty State (span 8) */}
@@ -116,7 +158,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <p className="font-medium text-slate-700">
                       {formatDate(currentRequest.date)}, from {currentRequest.timeStr}
                     </p>
-                    <p className="text-slate-400">{currentRequest.serviceName}</p>
+                    <p className="text-slate-500">{currentRequest.serviceName}</p>
+                    <p className="flex items-center gap-1.5">
+                      <User className="w-3 h-3 text-slate-400" />
+                      <span>Staff: {currentRequest.staffName || 'Unassigned'}</span>
+                    </p>
+                    {currentRequest.channel && <p className="text-slate-400">Via {currentRequest.channel}</p>}
                   </div>
                 </div>
               </div>
@@ -132,7 +179,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setMovingRequestId(currentRequest.id)}
+                  onClick={() => openMoveDialog(currentRequest)}
                   className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors border border-slate-200/70"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -152,12 +199,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
             /* Empty State from Figma Page 11 & 25 */
             <div className="text-center py-6 px-4 space-y-2">
               <h3 className="text-base sm:text-lg font-bold text-slate-800">
-                No pending appointment requests
+                {unavailableRequest ? 'This request is no longer available' : 'No pending appointment requests'}
               </h3>
               <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
-                New requests from WhatsApp and Instagram will show up here.
+                {unavailableRequest && requests.length > 0
+                  ? 'Select another pending request below.'
+                  : 'New requests from WhatsApp and Instagram will show up here.'}
               </p>
-              <div className="pt-3">
+              {requests.length === 0 && <div className="pt-3">
                 <button
                   onClick={onSimulateNewRequest}
                   className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors border border-[#5551FF]/20"
@@ -165,17 +214,32 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <Plus className="w-3.5 h-3.5" />
                   <span>Simulate incoming booking</span>
                 </button>
-              </div>
+              </div>}
             </div>
           )}
 
-          {/* If there are more requests in queue */}
-          {requests.length > 1 && (
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-              <span>+{requests.length - 1} more in queue</span>
-              <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium">
-                Next: {requests[1].customerName} ({requests[1].timeStr})
-              </span>
+          {/* Every pending request can be reviewed without processing another first. */}
+          {(requests.length > 1 || (unavailableRequest && requests.length > 0)) && (
+            <div className="mt-5 pt-4 border-t border-slate-100 space-y-2">
+              <p className="text-xs font-semibold text-slate-500">{requests.length} pending {requests.length === 1 ? 'request' : 'requests'}</p>
+              <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1" aria-label="Pending appointment requests">
+                {requests.map((request) => (
+                  <button
+                    key={request.id}
+                    type="button"
+                    aria-pressed={currentRequest?.id === request.id}
+                    onClick={() => onSelectRequest(request.id)}
+                    className={`w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-xs border transition-colors ${
+                      currentRequest?.id === request.id
+                        ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                        : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-indigo-50/50'
+                    }`}
+                  >
+                    <span className="font-semibold">{request.customerName}</span>
+                    <span className="text-right tabular-nums">{formatCalendarDate(request.date)} · {request.timeStr}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -183,56 +247,56 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {/* Right Column: Next Appointment (span 4) */}
         <div className="lg:col-span-4 bg-white rounded-2xl p-6 sm:p-7 shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-slate-200/70 min-h-[190px] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-800">Next appointment</h3>
-              <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                {nextAppointment?.dayName || 'WEDNESDAY'}
-              </span>
-            </div>
-
+            <h3 className="text-sm font-semibold text-slate-800 mb-4">Next appointment</h3>
             {nextAppointment ? (
               <div className="space-y-3 pt-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-lg font-bold text-slate-900 tabular-nums">
-                    {nextAppointment.time}
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-800">
-                    {nextAppointment.customerName}
+                <div>
+                  <p className="text-xs font-medium text-slate-500 mb-1">{formatDate(nextAppointment.date)}</p>
+                  <p className="text-lg font-bold text-slate-900 tabular-nums">
+                    {nextAppointment.startTime} - {nextAppointment.endTime}
                   </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-800">{nextAppointment.customerName}</p>
+                  <p className="text-xs text-slate-500">{nextAppointment.serviceName}</p>
                   <p className="text-xs text-slate-500 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Staff : {nextAppointment.staffName}</span>
+                    <span>Staff: {nextAppointment.staffName}</span>
                   </p>
                 </div>
               </div>
             ) : (
               <div className="text-center py-6 text-xs text-slate-400">
                 <Clock className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                No appointment scheduled for this slot
+                No upcoming appointments
               </div>
             )}
           </div>
-
-          <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Room 1 · Chair A</span>
-            <span className="text-emerald-600 font-medium">Confirmed</span>
-          </div>
+          {nextAppointment && (
+            <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between text-[11px]">
+              <span className="text-emerald-600 font-medium">Confirmed</span>
+              <button
+                type="button"
+                onClick={() => onOpenAppointment(nextAppointment)}
+                className="font-semibold text-[#5551FF] hover:underline"
+              >
+                View appointment
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Today's Activity + Conversations */}
+      {/* Sample activity and conversations */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       <div className="lg:col-span-8 space-y-4">
         {/* Header & Export Button */}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-              Today’s Activity
+              Sample activity
             </h2>
-            <p className="text-xs text-slate-400 font-medium">Activity Summary</p>
+            <p className="text-xs text-slate-400 mt-1">Demo salon metrics. Participant activity is not tracked here.</p>
           </div>
 
           <button
@@ -240,7 +304,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200/80 shadow-2xs transition-colors"
           >
             <Share2 className="w-3.5 h-3.5 text-slate-500" />
-            <span>Export</span>
+            <span>Export sample</span>
           </button>
         </div>
 
@@ -356,7 +420,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         {c.language}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 truncate">{last.translation}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{last?.translation || 'No messages yet.'}</p>
                   </div>
                 </button>
               );
@@ -375,49 +439,109 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </div>
 
-      {/* Move Appointment Modal */}
-      {movingRequestId && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95 duration-150">
-            <h3 className="text-base font-bold text-slate-900 mb-2">Reschedule Appointment</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Select a new time slot for {movingRequest?.customerName}
-            </p>
+      {/* Native dialog supplies modal focus handling and Escape support. */}
+      {movingRequest && (
+        <dialog
+          ref={moveDialogRef}
+          aria-labelledby="move-appointment-title"
+          aria-describedby="move-appointment-context"
+          onCancel={(event) => {
+            event.preventDefault();
+            setMovingRequestId(null);
+          }}
+          onClick={(event) => {
+            if (event.target !== event.currentTarget) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+              setMovingRequestId(null);
+            }
+          }}
+          className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs"
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!selectedMoveStart || !rescheduleDate) {
+                setMoveError('Choose a date and an available time slot.');
+                return;
+              }
+              const error = onMoveRequest(movingRequest.id, rescheduleDate, selectedMoveStart);
+              if (error) {
+                setMoveError(error);
+                return;
+              }
+              setMovingRequestId(null);
+            }}
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <h3 id="move-appointment-title" className="text-base font-bold text-slate-900">Reschedule appointment request</h3>
+              <button type="button" onClick={() => setMovingRequestId(null)} aria-label="Close reschedule dialog" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div id="move-appointment-context" className="text-xs text-slate-500 mb-4 space-y-1">
+              <p className="font-semibold text-slate-700">{movingRequest.customerName}</p>
+              <p>{moveService?.name ?? movingRequest.serviceName}{moveDuration > 0 ? ` · ${moveDuration} minutes` : ''}</p>
+              <p>Staff: {moveEmployee?.name ?? movingRequest.staffName ?? 'Unassigned'}</p>
+              <p>Current: {formatDate(movingRequest.date)}, {movingRequest.timeStr}</p>
+            </div>
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1">Time Slot</label>
-                <select
-                  value={rescheduleStart}
-                  onChange={(e) => setRescheduleStart(e.target.value)}
+                <label htmlFor="move-appointment-date" className="text-xs font-medium text-slate-700 block mb-1">Date</label>
+                <input
+                  id="move-appointment-date"
+                  type="date"
+                  required
+                  autoFocus
+                  value={rescheduleDate}
+                  onChange={(event) => {
+                    setRescheduleDate(event.target.value);
+                    setRescheduleStart('');
+                    setMoveError(null);
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF]"
+                />
+              </div>
+              <div>
+                <label htmlFor="move-appointment-time" className="text-xs font-medium text-slate-700 block mb-1">Available time slot</label>
+                <select
+                  id="move-appointment-time"
+                  value={selectedMoveStart}
+                  disabled={availableMoveSlots.length === 0}
+                  required
+                  onChange={(event) => { setRescheduleStart(event.target.value); setMoveError(null); }}
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF] disabled:opacity-60"
                 >
-                  {['10:30', '11:00', '11:30', '14:00', '16:00'].map((start) => (
+                  {availableMoveSlots.length === 0 && <option value="">No available times</option>}
+                  {availableMoveSlots.map((start) => (
                     <option key={start} value={start}>{start} - {addMinutes(start, moveDuration)}</option>
                   ))}
                 </select>
+                {availableMoveSlots.length === 0 && (
+                  <p className="mt-2 text-xs text-slate-500" role="status">No available times for this employee and service on this date. Choose another date or check their shift and booking settings.</p>
+                )}
               </div>
-
+              {moveError && <p role="alert" className="text-xs text-rose-600 rounded-xl bg-rose-50 p-3">{moveError}</p>}
               <div className="flex gap-2 pt-3">
                 <button
+                  type="button"
                   onClick={() => setMovingRequestId(null)}
                   className="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    onMoveRequest(movingRequestId, rescheduleTime);
-                    setMovingRequestId(null);
-                  }}
-                  className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
+                  type="submit"
+                  disabled={!selectedMoveStart || !rescheduleDate}
+                  className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Confirm Move
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+          </form>
+        </dialog>
       )}
     </div>
   );

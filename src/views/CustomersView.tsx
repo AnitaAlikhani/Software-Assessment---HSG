@@ -14,6 +14,8 @@ import { Customer } from '../types';
 
 interface CustomersViewProps {
   customers: Customer[];
+  selectedCustomerId: string | null;
+  onClearSelection: () => void;
   onAddCustomer: (customer: Omit<Customer, 'id' | 'initials' | 'lastBooking' | 'bookingsCount'>) => void;
   onDeleteCustomer: (id: string) => void;
   onOpenChat?: (customerName: string) => void;
@@ -21,6 +23,8 @@ interface CustomersViewProps {
 
 export const CustomersView: React.FC<CustomersViewProps> = ({
   customers,
+  selectedCustomerId,
+  onClearSelection,
   onAddCustomer,
   onDeleteCustomer,
   onOpenChat,
@@ -32,7 +36,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   const [newPhone, setNewPhone] = useState('');
   const [newLang, setNewLang] = useState<'EN' | 'FR' | 'DE' | 'IT'>('EN');
 
-  const filteredCustomers = customers.filter(
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  const filteredCustomers = selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter(
     (c) =>
       c.name.toLowerCase().includes(filterQuery.toLowerCase()) ||
       c.email.toLowerCase().includes(filterQuery.toLowerCase()) ||
@@ -93,7 +98,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             <input
               type="text"
               value={filterQuery}
-              onChange={(e) => setFilterQuery(e.target.value)}
+              onChange={(e) => { setFilterQuery(e.target.value); if (selectedCustomerId) onClearSelection(); }}
+              aria-label="Filter customers"
               placeholder="Filter by name, email or phone"
               className="w-full pl-9 pr-3 py-2 bg-slate-100/90 text-xs rounded-xl border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden text-slate-700 placeholder-slate-400"
             />
@@ -123,6 +129,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         </div>
       </div>
 
+      {selectedCustomerId && <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-slate-700">
+        <span>{selectedCustomer ? `Showing ${selectedCustomer.name}` : 'This customer is no longer available.'}</span>
+        <button onClick={() => { setFilterQuery(''); onClearSelection(); }} className="font-semibold text-[#5551FF] underline">View all customers</button>
+      </div>}
+
       {/* Customers Table matching Figma Page 14 */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
         <div className="min-w-[780px]">
@@ -150,7 +161,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
-                  <span className="font-semibold text-slate-900 truncate">{cust.name}</span>
+                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} className="font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
                 </div>
 
                 {/* Email */}
@@ -209,7 +220,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
         {/* Table Footer Pagination matching Figma Page 14 */}
         <div className="p-4 border-t border-slate-100 text-center text-xs text-slate-400">
-          1-{filteredCustomers.length} of {filteredCustomers.length} customers
+          {filteredCustomers.length ? 1 : 0}-{filteredCustomers.length} of {filteredCustomers.length} customers
         </div>
       </div>
 
