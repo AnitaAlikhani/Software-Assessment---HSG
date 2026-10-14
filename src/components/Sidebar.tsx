@@ -17,6 +17,7 @@ import {
 import { NavigationTab } from '../types';
 
 interface SidebarProps {
+  companyName: string;
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
   isOpenMobile: boolean;
@@ -26,6 +27,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  companyName,
   currentTab,
   onSelectTab,
   isOpenMobile,
@@ -58,8 +60,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Salon identity. Home is the single dashboard navigation item. */}
         <div className="flex shrink-0 items-center justify-between mb-8">
           <div className="min-w-0 flex items-center gap-3 px-2 py-2.5">
-            <span aria-hidden="true" className="w-8 h-8 rounded-xl bg-[#5551FF] text-white flex items-center justify-center font-bold text-sm shrink-0">B</span>
-            <p className="font-semibold text-sm text-slate-900 leading-snug">Bella Hair Salon</p>
+            <span aria-hidden="true" className="w-8 h-8 rounded-xl bg-[#5551FF] text-white flex items-center justify-center font-bold text-sm shrink-0">{companyName.trim().charAt(0).toUpperCase() || 'S'}</span>
+            <p className="font-semibold text-sm text-slate-900 leading-snug">{companyName}</p>
           </div>
 
           {/* Mobile Close Button */}
@@ -284,7 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               B
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-slate-800 truncate">Bella Hair Salon</p>
+              <p className="text-xs font-semibold text-slate-800 truncate">{companyName}</p>
               <p className="text-[11px] text-slate-400 truncate">St. Gallen, Switzerland</p>
             </div>
           </div>

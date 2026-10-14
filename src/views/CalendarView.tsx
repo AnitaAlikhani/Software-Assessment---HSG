@@ -371,6 +371,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <User className="w-4 h-4 text-slate-400" />
                 <span>Staff: <strong className="text-slate-800">{selectedEvent.staffName}</strong></span>
               </div>
+              {selectedEvent.customerPhone && <p className="text-sm text-slate-600">Phone: <strong>{selectedEvent.customerPhone}</strong></p>}
               {selectedEvent.isAiBooked && (
                 <div className="flex items-center gap-2 text-indigo-600 font-medium bg-indigo-50 p-2 rounded-xl">
                   <Sparkles className="w-4 h-4" />

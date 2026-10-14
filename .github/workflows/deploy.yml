@@ -53,6 +53,13 @@ jobs:
           path: first-visit-app
           persist-credentials: false
 
+      - name: Check out Anita customer booking preview
+        uses: actions/checkout@v7
+        with:
+          ref: anita-fix-customer-booking
+          path: customer-booking-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -114,6 +121,22 @@ jobs:
         working-directory: first-visit-app
         run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-first-visit-navigation/
 
+      - name: Install customer booking dependencies
+        working-directory: customer-booking-app
+        run: npm install --no-audit --no-fund
+
+      - name: Check customer booking types
+        working-directory: customer-booking-app
+        run: npm run lint
+
+      - name: Test customer booking
+        working-directory: customer-booking-app
+        run: npm test
+
+      - name: Build customer booking preview
+        working-directory: customer-booking-app
+        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-customer-booking/
+
       - name: Assemble main site and branch previews
         run: |
           mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
@@ -126,6 +149,10 @@ jobs:
           git -C fixes-app rev-parse HEAD > site/previews/anita-fixes/revision.txt
           cp -a first-visit-app/dist/. site/previews/anita-fix-first-visit-navigation/
           git -C first-visit-app rev-parse HEAD > site/previews/anita-fix-first-visit-navigation/revision.txt
+
+          mkdir -p site/previews/anita-fix-customer-booking
+          cp -a customer-booking-app/dist/. site/previews/anita-fix-customer-booking/
+          git -C customer-booking-app rev-parse HEAD > site/previews/anita-fix-customer-booking/revision.txt
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v5

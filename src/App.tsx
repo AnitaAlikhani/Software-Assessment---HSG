@@ -10,19 +10,20 @@ import {
   ServiceItem,
   CompanySettingsData,
   BookingHoursDay,
+  ClosedDate,
+  StaffAbsence,
   ShiftEntry,
   Conversation,
   AiAssistantSettings,
 } from './types';
 import { initialConversations, initialAiSettings } from './conversationData';
 import {
-  initialAppointmentRequests,
   initialCalendarEvents,
   initialCustomers,
   initialEmployees,
   initialServices,
   initialResources,
-  initialShiftOverview,
+  createDemoShifts,
   initialCompanySettings,
   initialBookingHours,
 } from './mockData';
@@ -37,7 +38,7 @@ import { EmployeesView } from './views/EmployeesView';
 import { ServicesView } from './views/ServicesView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { SettingsView } from './views/SettingsView';
-import { BookingPageView } from './views/BookingPageView';
+import { BookingPageView, BookingDraft, createBookingDraft } from './views/BookingPageView';
 import { ConversationsView } from './views/ConversationsView';
 import { AiAssistantView } from './views/AiAssistantView';
 import { POSModal } from './components/POSModal';
@@ -46,10 +47,15 @@ import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { AppRoute, parseRoute, routeHash } from './navigation';
 import { mostRecentAiAppointment, nextUpcomingAppointment } from './dashboard';
 import { addMinutes, formatDate } from './scheduling';
-import { getAvailableSlots, validateBookingRequest } from './availability';
+import { getAvailableSlots, getNextAvailableDate, getSalonNow, validateBookingRequest } from './availability';
 import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
 
+import { createDemoRequests } from './demoRequests';
+import { useDemoState } from './useDemoState';
+import { customerForRequest, upsertCustomer, validateContact } from './bookingData';
+
 export default function App() {
+  const [publicMode, setPublicMode] = useState(new URLSearchParams(window.location.search).get('booking') === '1');
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.hash));
   const currentTab = route.tab;
   const navigate = (next: AppRoute) => {
@@ -91,23 +97,27 @@ export default function App() {
   }, []);
 
   // Core application states
-  const [requests, setRequests] = useState<AppointmentRequest[]>(initialAppointmentRequests);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(initialCalendarEvents);
-  const [calendarDate, setCalendarDate] = useState('2026-10-07');
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
-  const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
-  const [services, setServices] = useState<ServiceItem[]>(initialServices);
+  const [requests, setRequests] = useDemoState<AppointmentRequest[]>('requests', () => createDemoRequests());
+  const [calendarEvents, setCalendarEvents] = useDemoState<CalendarEvent[]>('calendarEvents', initialCalendarEvents);
+  const [calendarDate, setCalendarDate] = useState(() => getSalonNow().date);
+  const [customers, setCustomers] = useDemoState<Customer[]>('customers', initialCustomers);
+  const [employees, setEmployees] = useDemoState<Employee[]>('employees', initialEmployees);
+  const [services, setServices] = useDemoState<ServiceItem[]>('services', initialServices);
   const [resources, setResources] = useState<Resource[]>(initialResources);
-  const [shiftOverview, setShiftOverview] = useState<ShiftEntry[]>(initialShiftOverview);
-  const [companySettings, setCompanySettings] = useState<CompanySettingsData>(initialCompanySettings);
-  const [bookingHours, setBookingHours] = useState<BookingHoursDay[]>(initialBookingHours);
+  const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', () => createDemoShifts());
+  const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
+  const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
     initialConversations[0]?.id ?? null
   );
   const [aiSettings, setAiSettings] = useState<AiAssistantSettings>(initialAiSettings);
 
-  const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests };
+  const [closedDates, setClosedDates] = useDemoState<ClosedDate[]>('closedDates', []);
+  const [absences, setAbsences] = useDemoState<StaffAbsence[]>('absences', []);
+  const [bookingDraft, setBookingDraft] = useDemoState<BookingDraft>('draft', () => createBookingDraft(services, companySettings.timeZone));
+  const [submittedRequest, setSubmittedRequest] = useDemoState<AppointmentRequest | null>('submittedRequest', null);
+  const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests, closedDates, absences, timeZone: companySettings.timeZone };
 
   const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
   const latestAiBookedEvent = mostRecentAiAppointment(calendarEvents);
@@ -151,6 +161,10 @@ export default function App() {
 
     const newCalEvent = appointmentFromRequest(accepted, services);
     setRequests((prev) => prev.filter((r) => r.id !== id));
+    setSubmittedRequest((previous) => previous?.id === id ? { ...accepted, status: 'accepted' } : previous);
+    if (accepted.customerId) setCustomers((previous) => previous.map((customer) => customer.id === accepted.customerId
+      ? { ...customer, bookingsCount: customer.bookingsCount + 1, lastBooking: `${formatDate(accepted.date)}, ${newCalEvent.startTime}` }
+      : customer));
     setCalendarEvents((prev) => upsertAppointment(prev, newCalEvent));
     setCalendarDate(newCalEvent.date);
     if (route.requestId === id) navigate({ tab: 'home' });
@@ -172,6 +186,7 @@ export default function App() {
     const request = requests[index];
     setRejectedRequests(previous => [...previous, { request, index }]);
     setRequests(previous => previous.filter(item => item.id !== id));
+    setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'rejected' } : previous);
     if (route.requestId === id) navigate({ tab: 'home' });
     showToast(`Declined request from ${request.customerName}`, 'info');
   };
@@ -187,6 +202,7 @@ export default function App() {
       return restored;
     });
     setRejectedRequests(previous => previous.slice(0, -1));
+    setSubmittedRequest(previous => previous?.id === rejected.request.id ? { ...rejected.request, status: 'pending' } : previous);
     navigate({ tab: 'home', requestId: rejected.request.id });
     showToast(`Restored request from ${rejected.request.customerName}`);
   };
@@ -202,22 +218,63 @@ export default function App() {
     const error = validateBookingRequest(availabilityContext, updatedRequest, id);
     if (error) return error;
     setRequests(previous => previous.map(item => item.id === id ? updatedRequest : item));
+    setSubmittedRequest((previous) => previous?.id === id ? updatedRequest : previous);
     showToast('Appointment request rescheduled');
     return null;
   };
 
   const handleNewBookingRequest = (request: AppointmentRequest): string | null => {
-    const error = validateBookingRequest(availabilityContext, request);
+    const error = validateContact(request.customerName, request.customerPhone ?? '') ?? validateBookingRequest(availabilityContext, request);
     if (error) return error;
-    setRequests((prev) => [request, ...prev]);
-    showToast(`New booking request submitted for ${request.customerName}!`);
+    if (requests.some((item) => item.id === request.id)) return 'This request has already been submitted.';
+    const customer = customerForRequest(customers, request);
+    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false };
+    setRequests((previous) => [saved, ...previous]);
+    setCustomers((previous) => upsertCustomer(previous, customer));
+    showToast(`Booking request saved for ${request.customerName}`);
     return null;
+  };
+
+  const handleUpdateBookingRequest = (request: AppointmentRequest): string | null => {
+    const existing = requests.find((item) => item.id === request.id && item.status === 'pending');
+    if (!existing) return 'This request is no longer pending. Check its latest status before making changes.';
+    const error = validateContact(request.customerName, request.customerPhone ?? '') ?? validateBookingRequest(availabilityContext, request, request.id);
+    if (error) return error;
+    const customer = customerForRequest(customers, { ...request, customerId: existing.customerId });
+    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false };
+    setRequests((previous) => previous.map((item) => item.id === saved.id ? saved : item));
+    setCustomers((previous) => upsertCustomer(previous, customer));
+    setSubmittedRequest(saved);
+    showToast('Booking request updated');
+    return null;
+  };
+
+  const handleCancelBookingRequest = (id: string): string | null => {
+    if (!requests.some((item) => item.id === id && item.status === 'pending')) return 'This request is no longer pending.';
+    setRequests((previous) => previous.filter((item) => item.id !== id));
+    setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'cancelled' } : previous);
+    showToast('Booking request cancelled. The slot is available again.');
+    return null;
+  };
+
+  const handleViewRequest = (id: string) => {
+    setPublicMode(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('booking');
+    window.history.replaceState(null, '', url);
+    const appointment = calendarEvents.find((event) => event.id === `cal-${id}`);
+    if (appointment) {
+      openAppointment(appointment);
+    } else {
+      navigate({ tab: 'home', requestId: id });
+    }
   };
 
   const handleSimulateNewRequest = () => {
     const service = services.find((item) => item.name === 'Haircut' && item.onlineBooking);
     if (!service) { showToast('No online haircut service is available.', 'error'); return; }
-    const date = '2026-10-01';
+    const date = getNextAvailableDate(availabilityContext, service.id, getSalonNow(companySettings.timeZone).date);
+    if (!date) { showToast('No appointment slots are available in the next 90 days.', 'error'); return; }
     const available = employees.map((employee) => ({
       employee,
       slots: getAvailableSlots(availabilityContext, { date, serviceId: service.id, employeeId: employee.id }),
@@ -236,7 +293,9 @@ export default function App() {
       timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}`,
       timeAgo: 'Just now',
       staffName: available.employee.name,
-      channel: 'WhatsApp',
+      channel: 'Web',
+      customerPhone: '+41 79 555 99 99',
+      isAiBooked: false,
       status: 'pending',
     });
   };
@@ -275,7 +334,12 @@ export default function App() {
   };
 
   const handleDeleteCalendarEvent = (id: string) => {
+    const removed = calendarEvents.find((event) => event.id === id);
     setCalendarEvents(calendarEvents.filter((e) => e.id !== id));
+    setSubmittedRequest((previous) => previous && `cal-${previous.id}` === id ? { ...previous, status: 'cancelled' } : previous);
+    if (removed?.customerId) setCustomers((previous) => previous.map((customer) => customer.id === removed.customerId
+      ? { ...customer, bookingsCount: Math.max(0, customer.bookingsCount - 1), lastBooking: 'Appointment cancelled' }
+      : customer));
     showToast('Appointment removed from calendar');
   };
 
@@ -315,8 +379,8 @@ export default function App() {
       ...cust,
       id: `cust-${Date.now()}`,
       initials: initials || 'CU',
-      lastBooking: 'Today, 10:00',
-      bookingsCount: 1,
+      lastBooking: 'No confirmed bookings',
+      bookingsCount: 0,
     };
     setCustomers([newCustomer, ...customers]);
     showToast(`Customer ${cust.name} added`);
@@ -491,10 +555,18 @@ export default function App() {
     showToast(`Simulated CHF ${amount.toFixed(2)} checkout for ${serviceName}. No payment was taken.`, 'info');
   };
 
+  const bookingPage = <BookingPageView {...availabilityContext}
+    companySettings={companySettings} draft={bookingDraft} setDraft={setBookingDraft}
+    submittedRequest={submittedRequest} setSubmittedRequest={setSubmittedRequest}
+    onNewBookingRequest={handleNewBookingRequest} onUpdateBookingRequest={handleUpdateBookingRequest}
+    onCancelBookingRequest={handleCancelBookingRequest} onViewRequest={handleViewRequest} publicMode={publicMode} />;
+  if (publicMode) return <main className="min-h-screen bg-[#F8F9FD] text-slate-800">{bookingPage}</main>;
+
   return (
     <div className="flex min-h-screen bg-[#F8F9FD] text-slate-800">
       {/* Sidebar Navigation */}
       <Sidebar
+        companyName={companySettings.companyName}
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         isOpenMobile={isMobileMenuOpen}
@@ -618,6 +690,7 @@ export default function App() {
           {currentTab === 'services' && (
             <ServicesView
               services={services}
+              employees={employees}
               onAddService={handleAddService}
               onUpdateService={handleUpdateService}
               onDeleteService={handleDeleteService}
@@ -648,15 +721,12 @@ export default function App() {
               settings={companySettings}
               bookingHours={bookingHours}
               onSaveSettings={handleSaveSettings}
+              closedDates={closedDates} absences={absences} employees={employees}
+              onSaveClosedDates={setClosedDates} onSaveAbsences={setAbsences}
             />
           )}
 
-          {currentTab === 'booking-page' && (
-            <BookingPageView
-              {...availabilityContext}
-              onNewBookingRequest={handleNewBookingRequest}
-            />
-          )}
+          {currentTab === 'booking-page' && bookingPage}
         </main>
       </div>
 

@@ -106,6 +106,8 @@ export interface AppointmentRequest {
   serviceId?: string;
   employeeId?: string;
   customerName: string;
+  customerId?: string;
+  customerPhone?: string;
   serviceName: string;
   date: string; // YYYY-MM-DD, shared by requests and calendar entries
   dateStr: string; // e.g. "1 October 2026"
@@ -113,7 +115,9 @@ export interface AppointmentRequest {
   timeAgo: string; // e.g. "10 minutes ago"
   staffName?: string;
   channel?: 'WhatsApp' | 'Instagram' | 'Web';
-  status: 'pending' | 'accepted' | 'rejected';
+  /** Whether AI performed the booking, independently of the contact channel. */
+  isAiBooked?: boolean;
+  status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
 }
 
 export interface CalendarEvent {
@@ -121,6 +125,8 @@ export interface CalendarEvent {
   serviceId?: string;
   employeeId?: string;
   customerName: string;
+  customerId?: string;
+  customerPhone?: string;
   serviceName: string;
   staffName: string;
   date: string; // YYYY-MM-DD, never inferred from the visible calendar week
@@ -193,6 +199,8 @@ export interface ServiceItem {
   priceCHF: number;
   onlineBooking: boolean;
   assignedEmployeesCount: number;
+  /** Explicit eligibility; a display count alone never grants booking access. */
+  assignedEmployeeIds?: string[];
   category?: string;
   description?: string;
   prepMinutes?: number;
@@ -225,4 +233,21 @@ export interface BookingHoursDay {
   isOpen: boolean;
   from: string;
   to: string;
+}
+
+export interface ClosedDate {
+  id: string;
+  name: string;
+  /** Inclusive date-only bounds, YYYY-MM-DD. */
+  start: string;
+  end: string;
+}
+
+export interface StaffAbsence {
+  id: string;
+  employeeId: string;
+  /** Inclusive date-only bounds, YYYY-MM-DD. */
+  start: string;
+  end: string;
+  reason?: string;
 }

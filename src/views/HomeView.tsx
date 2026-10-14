@@ -164,6 +164,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <span>Staff: {currentRequest.staffName || 'Unassigned'}</span>
                     </p>
                     {currentRequest.channel && <p className="text-slate-400">Via {currentRequest.channel}</p>}
+                    {currentRequest.customerPhone && <p>Phone: {currentRequest.customerPhone}</p>}
                   </div>
                 </div>
               </div>

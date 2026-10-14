@@ -5,6 +5,28 @@ import type { CalendarEvent } from './types';
 const parseDate = (date: string) => new Date(`${date}T00:00:00.000Z`);
 const dayKeys: CalendarEvent['day'][] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+export const DEFAULT_SALON_TIME_ZONE = 'Europe/Zurich';
+
+/** Calendar date and clock time at the salon, independent of the browser zone. */
+export const getSalonNow = (timeZone = DEFAULT_SALON_TIME_ZONE, now = new Date()): { date: string; time: string } => {
+  // Older settings include a display suffix, such as "(GMT+01:00)".
+  const zone = timeZone.trim().split(/\s+/)[0] || DEFAULT_SALON_TIME_ZONE;
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  } catch {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: DEFAULT_SALON_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  }
+  const parts = Object.fromEntries(formatter.formatToParts(now).map(({ type, value }) => [type, value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+};
+
 export const addMinutes = (time: string, minutes: number): string => {
   const [hours, mins] = time.split(':').map(Number);
   const total = ((hours * 60 + mins + minutes) % 1440 + 1440) % 1440;

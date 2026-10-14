@@ -301,7 +301,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="w-full flex items-center gap-2 px-3 py-2.5 mt-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
                 <SettingsIcon className="w-3.5 h-3.5" aria-hidden="true" />Company settings
               </button>
-              <p className="px-3 py-2 text-[11px] leading-relaxed text-slate-400">Changes reset when this demo is refreshed.</p>
+              <p className="px-3 py-2 text-[11px] leading-relaxed text-slate-400">Bookings and booking settings stay in this tab after refresh. Conversations and checkout are simulated.</p>
             </div>
           )}
         </div>

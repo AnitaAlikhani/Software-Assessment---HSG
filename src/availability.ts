@@ -2,10 +2,15 @@ import type {
   AppointmentRequest,
   BookingHoursDay,
   CalendarEvent,
+  ClosedDate,
   Employee,
   ServiceItem,
   ShiftEntry,
+  StaffAbsence,
 } from './types';
+import { addDays, getSalonNow } from './scheduling';
+
+export { getSalonNow } from './scheduling';
 
 export interface AvailabilityContext {
   services: ServiceItem[];
@@ -14,6 +19,11 @@ export interface AvailabilityContext {
   shiftOverview: ShiftEntry[];
   events: CalendarEvent[];
   requests: AppointmentRequest[];
+  closedDates?: ClosedDate[];
+  absences?: StaffAbsence[];
+  timeZone?: string;
+  /** Optional clock for deterministic tests or a live form's refresh cycle. */
+  now?: Date;
 }
 
 export interface AvailabilitySelection {
@@ -31,6 +41,9 @@ const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 
 export const isBookableEmployee = (employee: Employee): boolean =>
   employee.status === 'Active' && employee.canBookOnline && !employee.hidden;
+
+export const isEmployeeAssignedToService = (service: ServiceItem, employee: Employee): boolean =>
+  service.assignedEmployeeIds?.includes(employee.id) ?? false;
 
 const parseDate = (value: string): Date | null => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -86,6 +99,9 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   const unavailable = (error: string): AvailabilityResult => ({ slots: [], error });
   const date = parseDate(selection.date);
   if (!date) return unavailable('Choose a valid appointment date.');
+  const now = context.now ?? new Date();
+  const salonNow = getSalonNow(context.timeZone, now);
+  if (selection.date < salonNow.date) return unavailable('Choose today or a future appointment date.');
 
   const service = context.services.find((item) => item.id === selection.serviceId);
   if (!service || !service.onlineBooking) return unavailable('This service is not available for online booking.');
@@ -94,6 +110,15 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
 
   const employee = context.employees.find((item) => item.id === selection.employeeId);
   if (!employee || !isBookableEmployee(employee)) return unavailable('This employee is not available for online booking.');
+  if (!isEmployeeAssignedToService(service, employee)) return unavailable('This employee does not provide the selected service.');
+
+  if (context.closedDates?.some((closure) => selection.date >= closure.start && selection.date <= closure.end)) {
+    return unavailable('The salon is closed on this date. Please choose another date.');
+  }
+  if (context.absences?.some((absence) => absence.employeeId === employee.id &&
+      selection.date >= absence.start && selection.date <= absence.end)) {
+    return unavailable('This employee is away on this date. Please choose another date or specialist.');
+  }
 
   const hours = context.bookingHours.find((day) => day.day === weekdays[date.getUTCDay()]);
   if (!hours || !hours.isOpen) return unavailable('The salon is closed on this date.');
@@ -140,8 +165,11 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   const slots: string[] = [];
   const firstStart = Math.ceil((window.start + timing.prep) / 30) * 30;
   const lastStart = window.end - timing.duration - timing.post;
+  const currentMinute = parseTime(salonNow.time)! + now.getUTCSeconds() / 60 + now.getUTCMilliseconds() / 60000;
   for (let start = firstStart; start <= lastStart; start += 30) {
     const candidate = { start: start - timing.prep, end: start + timing.duration + timing.post };
+    // Preparation also needs to happen in the future, not just the service start.
+    if (selection.date === salonNow.date && candidate.start < currentMinute) continue;
     // Strict inequalities allow one appointment to start exactly when another ends.
     if (!occupied.some((interval) => candidate.start < interval.end && candidate.end > interval.start)) {
       slots.push(formatTime(start));
@@ -152,6 +180,32 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
 
 export const getAvailableSlots = (context: AvailabilityContext, selection: AvailabilitySelection): string[] =>
   getAvailability(context, selection).slots;
+
+/** Find the earliest available date in the 90-day window beginning at fromDate. */
+export const getNextAvailableDate = (
+  context: AvailabilityContext,
+  serviceId: string,
+  fromDate: string,
+  employeeId?: string,
+  excludeRequestId?: string,
+): string | null => {
+  if (!parseDate(fromDate)) return null;
+  const snapshot = { ...context, now: context.now ?? new Date() };
+  const today = getSalonNow(context.timeZone, snapshot.now).date;
+  const firstDate = fromDate < today ? today : fromDate;
+  const service = context.services.find((item) => item.id === serviceId);
+  if (!service?.onlineBooking) return null;
+  const eligible = context.employees.filter((employee) =>
+    (!employeeId || employee.id === employeeId) && isBookableEmployee(employee) && isEmployeeAssignedToService(service, employee));
+  if (eligible.length === 0) return null;
+  for (let offset = 0; offset < 90; offset++) {
+    const date = addDays(firstDate, offset);
+    if (eligible.some((employee) => getAvailableSlots(snapshot, {
+      date, serviceId, employeeId: employee.id, excludeRequestId,
+    }).length > 0)) return date;
+  }
+  return null;
+};
 
 export const validateBookingRequest = (
   context: AvailabilityContext,
