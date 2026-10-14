@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Calendar,
+  MessageSquare,
   Store,
   CalendarDays,
   Users,
@@ -127,6 +128,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <Calendar className="w-4 h-4 shrink-0" />
             <span>Calendar</span>
+          </button>
+
+          {/* Conversations */}
+          <button
+            onClick={() => handleNav('conversations')}
+            aria-current={currentTab === 'conversations' ? 'page' : undefined}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+              currentTab === 'conversations'
+                ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            <span>Conversations</span>
           </button>
 
           {/* Your Booking Page */}
