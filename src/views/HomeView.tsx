@@ -116,7 +116,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <p className="font-medium text-slate-700">
                       {formatDate(currentRequest.date)}, from {currentRequest.timeStr}
                     </p>
-                    <p className="text-slate-400">{currentRequest.serviceName}</p>
+                    <p className="text-slate-400">{currentRequest.serviceName} · {currentRequest.staffName} · {currentRequest.channel ?? 'Web'}</p>
+                    {currentRequest.customerPhone && <p>Phone: {currentRequest.customerPhone}</p>}
                   </div>
                 </div>
               </div>
@@ -186,7 +187,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Next appointment</h3>
               <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                {nextAppointment?.dayName || 'WEDNESDAY'}
+                {nextAppointment?.dayName ?? ''}
               </span>
             </div>
 
@@ -211,15 +212,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
             ) : (
               <div className="text-center py-6 text-xs text-slate-400">
                 <Clock className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                No appointment scheduled for this slot
+                No upcoming appointments
               </div>
             )}
           </div>
 
-          <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Room 1 · Chair A</span>
-            <span className="text-emerald-600 font-medium">Confirmed</span>
-          </div>
+          {nextAppointment && <div className="pt-3 border-t border-slate-100 mt-4 text-[11px] text-emerald-600 font-medium">Confirmed</div>}
         </div>
       </div>
 

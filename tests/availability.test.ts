@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   getAvailableSlots,
+  getNextAvailableDate,
+  getSalonNow,
   isBookableEmployee,
+  isEmployeeAssignedToService,
   validateBookingRequest,
   type AvailabilityContext,
 } from '../src/availability.ts';
 import type { AppointmentRequest, CalendarEvent, Employee, ServiceItem } from '../src/types.ts';
+import { createDemoShifts, initialShiftOverview } from '../src/mockData.ts';
+import { addDays } from '../src/scheduling.ts';
 
 const DATE = '2026-10-08';
 const employee = (id = 'emp-1', name = 'Alex'): Employee => ({
@@ -15,7 +20,7 @@ const employee = (id = 'emp-1', name = 'Alex'): Employee => ({
 });
 const service = (partial: Partial<ServiceItem> = {}): ServiceItem => ({
   id: 'haircut', name: 'Haircut', durationMinutes: 30, priceCHF: 50,
-  onlineBooking: true, assignedEmployeesCount: 2, ...partial,
+  onlineBooking: true, assignedEmployeesCount: 2, assignedEmployeeIds: ['emp-1', 'emp-2'], ...partial,
 });
 const context = (): AvailabilityContext => ({
   employees: [employee(), employee('emp-2', 'Sam')],
@@ -26,6 +31,7 @@ const context = (): AvailabilityContext => ({
     { employeeId: 'emp-2', employeeName: 'Sam', initials: 'S', avatarColor: '', shifts: { [DATE]: { start: '09:00', end: '18:00' } } },
   ],
   events: [], requests: [],
+  now: new Date('2026-10-01T00:00:00Z'), timeZone: 'Europe/Zurich',
 });
 const selection = (partial = {}) => ({ date: DATE, serviceId: 'haircut', employeeId: 'emp-1', ...partial });
 const event = (partial: Partial<CalendarEvent> = {}): CalendarEvent => ({
@@ -95,6 +101,7 @@ test('other employee/date and non-pending requests do not hold capacity', () => 
     request({ id: 'other-day', date: '2026-10-15' }),
     request({ id: 'rejected', status: 'rejected' }),
     request({ id: 'accepted', status: 'accepted' }),
+    request({ id: 'cancelled', status: 'cancelled' }),
   ];
   assert.ok(getAvailableSlots(c, selection()).includes('10:00'));
 });
@@ -209,4 +216,125 @@ test('deleting an old event service does not remove the event occupancy', () => 
   c.events = [event({ serviceId: 'deleted-service', serviceName: 'Deleted service' })];
   assert.ok(!getAvailableSlots(c, selection()).includes('10:00'));
   assert.ok(getAvailableSlots(c, selection()).includes('10:30'));
+});
+
+test('past dates are rejected against the salon date, even near UTC midnight', () => {
+  const c = context();
+  c.now = new Date('2026-10-08T22:30:00Z'); // Already Friday in Zurich.
+  assert.deepEqual(getSalonNow(c.timeZone, c.now), { date: '2026-10-09', time: '00:30' });
+  assert.deepEqual(getAvailableSlots(c, selection()), []);
+  assert.match(validateBookingRequest(c, request())!, /today or a future/);
+  c.timeZone = 'America/New_York';
+  assert.deepEqual(getSalonNow(c.timeZone, c.now), { date: DATE, time: '18:30' });
+});
+
+test('same-day availability excludes elapsed starts and elapsed preparation time', () => {
+  const c = context();
+  c.now = new Date('2026-10-08T08:00:00Z'); // 10:00 local.
+  assert.ok(!getAvailableSlots(c, selection()).includes('09:30'));
+  assert.ok(getAvailableSlots(c, selection()).includes('10:00'));
+  c.now = new Date('2026-10-08T08:00:01Z');
+  assert.ok(!getAvailableSlots(c, selection()).includes('10:00'));
+  assert.match(validateBookingRequest(c, request())!, /no longer available/);
+  c.services[0].prepMinutes = 15;
+  c.now = new Date('2026-10-08T08:20:00Z');
+  assert.ok(!getAvailableSlots(c, selection()).includes('10:30'));
+  assert.ok(getAvailableSlots(c, selection()).includes('11:00'));
+  c.now = new Date('2026-10-08T16:00:00Z');
+  assert.deepEqual(getAvailableSlots(c, selection()), []);
+});
+
+test('salon clock uses daylight savings, IANA zones and legacy zone labels', () => {
+  assert.deepEqual(getSalonNow('Europe/Zurich', new Date('2026-10-25T00:30:00Z')), { date: '2026-10-25', time: '02:30' });
+  assert.deepEqual(getSalonNow('Europe/Zurich', new Date('2026-10-25T01:30:00Z')), { date: '2026-10-25', time: '02:30' });
+  assert.deepEqual(getSalonNow('Europe/Zurich (GMT+01:00)', new Date('2026-07-01T22:30:00Z')), { date: '2026-07-02', time: '00:30' });
+  assert.deepEqual(getSalonNow('Asia/Singapore', new Date('2026-12-31T18:30:00Z')), { date: '2027-01-01', time: '02:30' });
+});
+
+test('only explicit employee assignments grant access to a service', () => {
+  const c = context();
+  c.services[0].assignedEmployeeIds = ['emp-2'];
+  assert.equal(isEmployeeAssignedToService(c.services[0], c.employees[0]), false);
+  assert.equal(isEmployeeAssignedToService(c.services[0], c.employees[1]), true);
+  assert.deepEqual(getAvailableSlots(c, selection()), []);
+  assert.match(validateBookingRequest(c, request())!, /does not provide/);
+  assert.ok(getAvailableSlots(c, selection({ employeeId: 'emp-2' })).length > 0);
+  for (const assignedEmployeeIds of [[], undefined, ['deleted']]) {
+    c.services[0].assignedEmployeeIds = assignedEmployeeIds;
+    assert.deepEqual(getAvailableSlots(c, selection()), []);
+    assert.deepEqual(getAvailableSlots(c, selection({ employeeId: 'emp-2' })), []);
+  }
+});
+
+test('one-off salon closures block their whole inclusive date range', () => {
+  for (const [start, end] of [[DATE, DATE], ['2026-10-07', DATE], [DATE, '2026-10-09']]) {
+    const c = context();
+    c.closedDates = [{ id: 'closure', name: 'Holiday', start, end }];
+    assert.deepEqual(getAvailableSlots(c, selection()), []);
+    assert.match(validateBookingRequest(c, request())!, /salon is closed/);
+  }
+  const c = context();
+  c.closedDates = [{ id: 'closure', name: 'Holiday', start: '2026-10-09', end: '2026-10-10' }];
+  assert.ok(getAvailableSlots(c, selection()).length > 0);
+});
+
+test('staff absences only block the absent employee and include both date bounds', () => {
+  for (const [start, end] of [[DATE, DATE], ['2026-10-07', DATE], [DATE, '2026-10-09']]) {
+    const c = context();
+    c.absences = [{ id: 'absence', employeeId: 'emp-1', start, end, reason: 'Leave' }];
+    assert.deepEqual(getAvailableSlots(c, selection()), []);
+    assert.match(validateBookingRequest(c, request())!, /employee is away/);
+    assert.ok(getAvailableSlots(c, selection({ employeeId: 'emp-2' })).length > 0);
+  }
+});
+
+test('next available date respects service, employee, closures and editing self-exclusion', () => {
+  const c = context();
+  c.now = new Date('2026-10-08T06:00:00Z');
+  c.shiftOverview[0].shifts[DATE] = { start: '10:00', end: '10:30' };
+  c.requests = [request()];
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE, 'emp-1'), null);
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE, 'emp-1', 'request-1'), DATE);
+  assert.equal(getNextAvailableDate(c, 'haircut', '2026-10-01'), DATE);
+  c.closedDates = [{ id: 'closed', name: 'Closed', start: DATE, end: DATE }];
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE), null);
+  c.closedDates = [];
+  c.services[0].assignedEmployeeIds = [];
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE), null);
+  assert.equal(getNextAvailableDate(c, 'missing', DATE), null);
+  assert.equal(getNextAvailableDate(c, 'colour', 'bad-date'), null);
+});
+
+test('next-date search reaches day 90 and never exceeds its 90-day window', () => {
+  const c = context();
+  c.now = new Date('2026-10-08T06:00:00Z');
+  c.bookingHours = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    .map((day) => ({ day, isOpen: true, from: '09:00', to: '18:00' }));
+  c.shiftOverview = [c.shiftOverview[0]];
+  c.shiftOverview[0].shifts = { [addDays(DATE, 89)]: { start: '09:00', end: '18:00' } };
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE), addDays(DATE, 89));
+  c.shiftOverview[0].shifts = { [addDays(DATE, 90)]: { start: '09:00', end: '18:00' } };
+  assert.equal(getNextAvailableDate(c, 'haircut', DATE), null);
+});
+
+test('demo shifts roll forward with the salon date while preserving history and days off', () => {
+  const now = new Date('2027-01-03T23:30:00Z'); // Monday 4 January in Zurich.
+  const original = JSON.stringify(initialShiftOverview);
+  const shifts = createDemoShifts('Europe/Zurich', now);
+  assert.deepEqual(shifts[0].shifts['2027-01-04'], { start: '09:00', end: '18:00' });
+  assert.equal(shifts[1].shifts['2027-01-04'], null);
+  assert.deepEqual(shifts[1].shifts['2027-01-06'], { start: '10:00', end: '18:00' });
+  assert.equal(shifts[0].shifts['2027-01-09'], null);
+  assert.deepEqual(shifts[1].shifts['2027-01-09'], { start: '10:00', end: '18:00' });
+  assert.ok(Object.hasOwn(shifts[0].shifts, addDays('2027-01-04', 89)));
+  assert.ok(!Object.hasOwn(shifts[0].shifts, addDays('2027-01-04', 90)));
+  assert.deepEqual(shifts[0].shifts['2026-10-01'], initialShiftOverview[0].shifts['2026-10-01']);
+  shifts[0].shifts['2026-10-01']!.start = '12:00';
+  assert.equal(JSON.stringify(initialShiftOverview), original);
+  delete shifts[0].shifts['2027-01-04'];
+  const c = context();
+  c.now = now;
+  c.bookingHours = [{ day: 'Monday', isOpen: true, from: '09:00', to: '18:00' }];
+  c.shiftOverview = shifts;
+  assert.deepEqual(getAvailableSlots(c, selection({ date: '2027-01-04' })), []);
 });

@@ -18,6 +18,7 @@ import {
 import { NavigationTab } from '../types';
 
 interface SidebarProps {
+  companyName: string;
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
   isOpenMobile: boolean;
@@ -27,6 +28,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  companyName,
   currentTab,
   onSelectTab,
   isOpenMobile,
@@ -291,7 +293,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               B
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-slate-800 truncate">Bella Hair Salon</p>
+              <p className="text-xs font-semibold text-slate-800 truncate">{companyName}</p>
               <p className="text-[11px] text-slate-400 truncate">St. Gallen, Switzerland</p>
             </div>
           </div>

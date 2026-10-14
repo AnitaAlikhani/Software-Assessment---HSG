@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,6 +14,8 @@ import { BookingHoursDay, CalendarEvent, ServiceItem } from '../types';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, startOfWeek } from '../scheduling';
 
 interface CalendarViewProps {
+  focusedEventId?: string | null;
+  onFocusedEventOpened?: () => void;
   events: CalendarEvent[];
   services: ServiceItem[];
   bookingHours: BookingHoursDay[];
@@ -24,6 +26,8 @@ interface CalendarViewProps {
 }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({
+  focusedEventId,
+  onFocusedEventOpened,
   events,
   services,
   bookingHours,
@@ -34,6 +38,30 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusedEventId) {
+      const event = events.find((item) => item.id === focusedEventId);
+      if (event) setSelectedEvent(event);
+      onFocusedEventOpened?.();
+    }
+  }, [focusedEventId, events, onFocusedEventOpened]);
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const previous = document.activeElement as HTMLElement | null;
+    detailsRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedEvent(null);
+      if (event.key === 'Tab') {
+        const controls = detailsRef.current?.querySelectorAll<HTMLElement>('button, a[href], input, [tabindex="0"]');
+        const first = controls?.[0]; const last = controls?.[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === detailsRef.current)) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); previous?.focus(); };
+  }, [selectedEvent?.id]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newSlotDate, setNewSlotDate] = useState(date);
   const [formError, setFormError] = useState('');
@@ -309,7 +337,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       {/* Event Details Modal */}
       {selectedEvent && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95">
+          <div ref={detailsRef} role="dialog" aria-modal="true" aria-label="Appointment details" tabIndex={-1} className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#5551FF]">
@@ -320,6 +348,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </h3>
               </div>
               <button
+                aria-label="Close appointment details"
                 onClick={() => setSelectedEvent(null)}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
               >
@@ -340,6 +369,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <User className="w-4 h-4 text-slate-400" />
                 <span>Staff: <strong className="text-slate-800">{selectedEvent.staffName}</strong></span>
               </div>
+              {selectedEvent.customerPhone && <p className="text-sm text-slate-600">Phone: <strong>{selectedEvent.customerPhone}</strong></p>}
               {selectedEvent.isAiBooked && (
                 <div className="flex items-center gap-2 text-indigo-600 font-medium bg-indigo-50 p-2 rounded-xl">
                   <Sparkles className="w-4 h-4" />

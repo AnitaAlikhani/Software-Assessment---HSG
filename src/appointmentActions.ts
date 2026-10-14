@@ -20,6 +20,8 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
     serviceId: request.serviceId,
     employeeId: request.employeeId,
     customerName: request.customerName,
+    customerPhone: request.customerPhone,
+    customerId: request.customerId,
     serviceName: service?.name ?? request.serviceName,
     staffName: request.staffName || 'Eloise Denniese',
     date: request.date,
@@ -28,7 +30,7 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
     startTime,
     endTime: addMinutes(startTime, duration),
     colorTheme: 'yellow',
-    isAiBooked: request.channel === 'WhatsApp' || request.channel === 'Instagram',
+    isAiBooked: request.isAiBooked === true,
   };
 }
 
