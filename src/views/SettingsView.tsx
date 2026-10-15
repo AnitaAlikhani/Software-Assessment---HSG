@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   HelpCircle,
   Camera,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { CompanySettingsData, BookingHoursDay, SettingsSubTab, ClosedDate, StaffAbsence, Employee } from '../types';
 import { formatDate, getSalonNow } from '../scheduling';
+import { normalizeWebsiteUrl, validateLogoFile } from '../managementValidation';
 
 interface SettingsViewProps {
   settings: CompanySettingsData;
@@ -32,6 +33,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [closedDatesTab, setClosedDatesTab] = useState<'closed' | 'absences'>('closed');
   const [showHelp, setShowHelp] = useState(false);
   const [settingsError, setSettingsError] = useState('');
+  const [logoError, setLogoError] = useState('');
+  const [logoLoading, setLogoLoading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const logoRequest = useRef(0);
+  useEffect(() => () => { logoRequest.current += 1; }, []);
   const [dateError, setDateError] = useState('');
   const [dateFeedback, setDateFeedback] = useState('');
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
@@ -82,14 +88,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setHoursData((previous) => previous.map((day, i) => i === index ? { ...day, [field]: value } : day));
   };
 
+  const handleLogoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const request = ++logoRequest.current;
+    const error = validateLogoFile(file);
+    setLogoError(error ?? '');
+    if (error) { setLogoLoading(false); return; }
+    setLogoLoading(true);
+    const fail = () => { if (request === logoRequest.current) { setLogoError('This image could not be opened. Choose another PNG, JPEG or WebP file.'); setLogoLoading(false); } };
+    const reader = new FileReader();
+    reader.onerror = fail;
+    reader.onload = () => {
+      if (request !== logoRequest.current) return;
+      if (typeof reader.result !== 'string') { fail(); return; }
+      const dataUrl = reader.result;
+      const image = new Image();
+      image.onerror = fail;
+      image.onload = () => {
+        if (request !== logoRequest.current) return;
+        setFormData((previous) => ({ ...previous, logoDataUrl: dataUrl }));
+        setLogoLoading(false);
+      };
+      image.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = () => {
     if (!formData.companyName.trim()) { setSettingsError('Enter a company name.'); setActiveTab('basic'); return; }
     const invalidDay = hoursData.find((day) => day.isOpen && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(day.from) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(day.to) || day.to <= day.from));
     if (invalidDay) { setSettingsError(`${invalidDay.day}: closing time must be after opening time on the same day.`); setActiveTab('hours'); return; }
-    const invalidUrl = [formData.website, formData.legalNote].find((url) => url.trim() && !/^https?:\/\//i.test(url.trim()));
-    if (invalidUrl) { setSettingsError('Website and legal links must begin with https:// or http://.'); setActiveTab('profile'); return; }
+    const links: Partial<CompanySettingsData> = {};
+    for (const [key, label, allowMissingScheme] of [['website', 'Website', false], ['legalNote', 'Legal note', false], ['facebook', 'Facebook', true], ['xProfile', 'X profile', true], ['instagram', 'Instagram', true]] as const) {
+      const url = normalizeWebsiteUrl(formData[key], allowMissingScheme);
+      if (url === null) { setSettingsError(`${label}: enter a complete http:// or https:// link with a valid host, or leave it blank.`); setActiveTab('profile'); return; }
+      links[key] = url;
+    }
+    if (formData.customTerms && !formData.termsText?.trim()) { setSettingsError('Enter your custom terms and privacy text, or turn off custom terms.'); setActiveTab('profile'); return; }
     setSettingsError('');
-    const normalizedSettings = Object.fromEntries(Object.entries(formData).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])) as unknown as CompanySettingsData;
+    const normalizedSettings = { ...Object.fromEntries(Object.entries(formData).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])), ...links } as unknown as CompanySettingsData;
     setFormData(normalizedSettings);
     onSaveSettings(normalizedSettings, hoursData);
     setShowSavedFeedback(true);
@@ -117,7 +156,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={handleSave}
-            className="flex items-center gap-1.5 px-6 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
+            disabled={logoLoading}
+            className="flex min-h-11 items-center gap-1.5 px-6 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors disabled:opacity-50"
           >
             {showSavedFeedback && !hasSettingsChanges ? (
               <>
@@ -381,12 +421,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label className="font-semibold text-slate-700 block">
                     Company logo
                   </label>
-                  <div className="w-40 h-40 rounded-2xl bg-slate-100 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center p-4 hover:border-[#5551FF] transition-colors cursor-pointer text-slate-400 hover:text-slate-600">
-                    <Camera className="w-8 h-8 mb-2 opacity-60" />
-                    <span className="text-[11px] text-center font-medium">
-                      Upload logo
-                    </span>
+                  <div className="w-40 h-40 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden">
+                    {formData.logoDataUrl ? <img src={formData.logoDataUrl} alt="Company logo preview" className="h-full w-full object-contain" /> : <Camera className="w-8 h-8 text-slate-400" />}
                   </div>
+                  <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoChange} className="sr-only" aria-label="Choose company logo" />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoLoading} className="min-h-11 rounded-lg bg-indigo-50 px-3 font-semibold text-[#5551FF] disabled:opacity-50">{logoLoading ? 'Opening image…' : formData.logoDataUrl ? 'Change logo' : 'Upload logo'}</button>
+                    {formData.logoDataUrl && <button type="button" onClick={() => { logoRequest.current += 1; setFormData((previous) => ({ ...previous, logoDataUrl: undefined })); setLogoLoading(false); setLogoError(''); }} className="min-h-11 rounded-lg px-3 font-semibold text-rose-600">Remove logo</button>}
+                  </div>
+                  <p className="text-slate-500">PNG, JPEG or WebP, up to 500 KB. Select Save to apply the logo in this demo.</p>
+                  {logoError && <p role="alert" className="text-rose-700">{logoError}</p>}
                 </div>
               </div>
             </div>
@@ -596,6 +640,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       Define custom terms & conditions and data privacy text for the booking page
                     </span>
                   </label>
+                  {formData.customTerms && (
+                    <div className="mt-3">
+                      <label htmlFor="company-termsText" className="mb-1 block text-xs font-semibold text-slate-700">Custom terms and privacy text</label>
+                      <textarea id="company-termsText" rows={6} value={formData.termsText ?? ''} onChange={(event) => setFormData({ ...formData, termsText: event.target.value })} className="min-h-11 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base focus:border-[#5551FF] focus:outline-hidden sm:text-sm" />
+                      <p className="mt-1 text-xs text-slate-500">This text appears on the customer booking page after you select Save.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

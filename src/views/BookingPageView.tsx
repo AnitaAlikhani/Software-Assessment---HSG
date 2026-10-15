@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Copy, ExternalLink, CalendarDays, Clock, ArrowRight, Pencil, X } from 'lucide-react';
 import type { AppointmentRequest, CompanySettingsData, ServiceItem } from '../types';
-import { addMinutes, formatDate } from '../scheduling';
+import { addMinutes, formatDate, salonTimeZone } from '../scheduling';
 import {
   AvailabilityContext,
   getAvailableSlots,
@@ -50,13 +50,22 @@ const inputClass = 'min-h-11 w-full min-w-0 rounded-xl border border-slate-200 b
 const cardClass = (selected: boolean) => `min-w-0 rounded-xl border p-3.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${selected ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-slate-200 bg-white hover:border-indigo-300'}`;
 const stepClass = 'mb-3 block text-xs font-bold uppercase tracking-wider text-slate-500';
 
+/** Company profiles may contain a bare domain, but never an executable URL. */
+export const bookingProfileUrl = (value: string): string | null => {
+  if (!value.trim()) return null;
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value.trim()) ? value.trim() : `https://${value.trim()}`);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch { return null; }
+};
+
 export const BookingPageView: React.FC<BookingPageViewProps> = ({
   services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences,
   companySettings, draft, setDraft, submittedRequest, setSubmittedRequest,
   onNewBookingRequest, onUpdateBookingRequest, onCancelBookingRequest, onViewRequest,
   publicMode = false,
 }) => {
-  const timeZone = (companySettings.timeZone || 'Europe/Zurich').split(' ')[0];
+  const timeZone = salonTimeZone(companySettings.timeZone);
   const [clock, setClock] = useState(() => new Date());
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
@@ -97,6 +106,14 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   const currencyCode = companySettings.currency?.match(/\b([A-Z]{3})\s*$/)?.[1] ?? 'CHF';
   const formatPrice = (price: number) => `${currencyCode} ${price.toFixed(2)}`;
   const appointmentChosen = Boolean(selectedService && selectedEmployee && draft.date && selectedStartTime);
+  const profileLinks = [
+    { label: 'Website', value: companySettings.website },
+    { label: 'Facebook', value: companySettings.facebook },
+    { label: 'Instagram', value: companySettings.instagram },
+    { label: 'X', value: companySettings.xProfile },
+  ].map(link => ({ ...link, href: bookingProfileUrl(link.value) })).filter(link => link.href !== null);
+  const legalUrl = bookingProfileUrl(companySettings.legalNote);
+  const logoUrl = companySettings.logoDataUrl?.match(/^data:image\/(?:png|jpeg|gif|webp);base64,/) ? companySettings.logoDataUrl : null;
 
   useEffect(() => {
     const refresh = () => setClock(new Date());
@@ -267,13 +284,20 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
 
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs sm:p-8">
         <div className="mb-6 flex items-center gap-3 border-b border-slate-100 pb-5">
-          <div aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5551FF] text-lg font-bold text-white">{(companySettings.companyName || 'Salon').slice(0, 1)}</div>
+          {logoUrl ? <img src={logoUrl} alt={`${companySettings.companyName || 'Salon'} logo`} className="h-12 w-12 shrink-0 rounded-xl object-contain" /> : <div aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5551FF] text-lg font-bold text-white">{(companySettings.companyName || 'Salon').slice(0, 1)}</div>}
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900">{companySettings.companyName || 'Salon'}</h2>
             {address && <p className="mt-0.5 text-xs text-slate-500">{address}</p>}
             {companySettings.businessPhone && <a className="mt-1 inline-block text-xs text-indigo-600 underline-offset-2 hover:underline" href={`tel:${normalizePhone(companySettings.businessPhone)}`}>{companySettings.businessPhone}</a>}
           </div>
         </div>
+
+        {(companySettings.description.trim() || profileLinks.length > 0) && <section aria-label="About the salon" className="mb-6 space-y-3 border-b border-slate-100 pb-5">
+          {companySettings.description.trim() && <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{companySettings.description}</p>}
+          {profileLinks.length > 0 && <nav aria-label="Salon links" className="flex flex-wrap gap-x-4 gap-y-1">
+            {profileLinks.map(link => <a key={link.label} href={link.href!} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:underline">{link.label}<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>)}
+          </nav>}
+        </section>}
 
         {formError && <div ref={errorRef} tabIndex={-1} role="alert" className="mb-5 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 focus:outline-2 focus:outline-rose-500"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span>{formError}</span></div>}
 
@@ -337,6 +361,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                     }} className={cardClass(selectedService?.id === service.id)}>
                       <span className="flex items-start justify-between gap-3"><span className="min-w-0 text-sm font-bold text-slate-900">{service.name}</span><span className="shrink-0 whitespace-nowrap text-xs font-bold text-indigo-600">{formatPrice(service.priceCHF)}</span></span>
                       <span className="mt-1 block text-xs text-slate-500">{service.durationMinutes} minutes</span>
+                      {service.description?.trim() && <span className="mt-2 block whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{service.description}</span>}
                     </button>
                   ))}
                 </div>
@@ -414,6 +439,10 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             </div>
           </form>
         )}
+        {(companySettings.legalNote.trim() || (companySettings.customTerms && companySettings.termsText?.trim())) && <footer className="mt-6 space-y-3 border-t border-slate-100 pt-5 text-xs leading-relaxed text-slate-500">
+          {companySettings.legalNote.trim() && (legalUrl ? <a href={legalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold text-indigo-600 hover:underline">Legal information<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a> : <p className="whitespace-pre-wrap">{companySettings.legalNote}</p>)}
+          {companySettings.customTerms && companySettings.termsText?.trim() && <details className="rounded-xl border border-slate-200 p-3"><summary className="min-h-11 cursor-pointer content-center font-semibold text-slate-700">Booking terms</summary><p className="mt-2 whitespace-pre-wrap">{companySettings.termsText}</p></details>}
+        </footer>}
       </div>
     </div>
   );
