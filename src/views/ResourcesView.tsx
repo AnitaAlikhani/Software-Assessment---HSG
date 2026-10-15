@@ -148,7 +148,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
               <div className="text-xs text-slate-500 space-y-1">
                 <p>Type: <strong className="text-slate-700">{res.type}</strong></p>
-                <p>Capacity: <strong className="text-slate-700">{res.capacity} people</strong></p>
+                <p>Capacity: <strong className="text-slate-700">{res.capacity} {res.capacity === 1 ? 'person' : 'people'}</strong></p>
                 <p>Inventory record · booking automation unavailable</p>
               </div>
             </div>
