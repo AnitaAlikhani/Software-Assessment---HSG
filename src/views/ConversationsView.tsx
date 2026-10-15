@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -20,6 +20,8 @@ import { LANGUAGE_NAMES } from '../conversationData';
 interface ConversationsViewProps {
   conversations: Conversation[];
   selectedId: string | null;
+  mobileDetailOpen: boolean;
+  onBackToList: () => void;
   onSelect: (id: string) => void;
   onTakeOver: (id: string) => void;
   onLetAiContinue: (id: string) => void;
@@ -52,6 +54,8 @@ const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }>
 export const ConversationsView: React.FC<ConversationsViewProps> = ({
   conversations,
   selectedId,
+  mobileDetailOpen,
+  onBackToList,
   onSelect,
   onTakeOver,
   onLetAiContinue,
@@ -62,6 +66,21 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const [filter, setFilter] = useState<Filter>('all');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
+  const whatsAppDialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = whatsAppDialogRef.current;
+    if (!dialog) return;
+    if (showWhatsApp && !dialog.open) dialog.showModal();
+    if (!showWhatsApp && dialog.open) dialog.close();
+  }, [showWhatsApp]);
+
+  useEffect(() => {
+    if (!showWhatsApp) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [showWhatsApp]);
 
   const needsCount = conversations.filter(
     (c) => c.status === 'needs-attention'
@@ -113,7 +132,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
     return (
       <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-        <div className="max-w-[78%] relative">
+        <div className="max-w-[90%] sm:max-w-[78%] min-w-0 relative [overflow-wrap:anywhere]">
           {mine && (
             <span
               className={`absolute -top-2 right-3 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white border ${
@@ -163,13 +182,13 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px]">
         {/* Chat list */}
-        <div className="md:col-span-4 border-b md:border-b-0 md:border-r border-slate-200/70 flex flex-col">
+        <div className={`md:col-span-4 min-w-0 border-b md:border-b-0 md:border-r border-slate-200/70 flex-col ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
           <div className="flex items-center gap-3.5 px-4 pt-4 border-b border-slate-100 overflow-x-auto">
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setFilter(t.key)}
-                className={`pb-3 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+                className={`min-h-11 pb-3 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
                   filter === t.key
                     ? 'border-[#5551FF] text-slate-900'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -216,7 +235,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                           {c.customerName}
                         </span>
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
+                          className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
                         >
                           {c.language}
                         </span>
@@ -238,44 +257,52 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
         {/* Open chat */}
         {selected ? (
-          <div className="md:col-span-8 flex flex-col min-h-[520px]">
+          <div className={`md:col-span-8 min-w-0 flex-col min-h-[520px] ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
             {/* Chat header */}
-            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-slate-100">
+            <div className="flex flex-col gap-3 px-4 sm:px-6 py-4 border-b border-slate-100">
+              <button
+                type="button"
+                onClick={onBackToList}
+                className="md:hidden self-start inline-flex min-h-11 items-center gap-2 rounded-xl px-3 -ml-3 text-sm font-semibold text-[#5551FF] hover:bg-indigo-50"
+              >
+                <ArrowLeft className="w-5 h-5" aria-hidden="true" />
+                All conversations
+              </button>
               <div className="flex items-center gap-3 min-w-0">
                 <div
                   className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${selected.avatarColor}`}
                 >
                   {selected.initials}
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base font-bold text-slate-900 truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="min-w-0 text-base font-bold text-slate-900 [overflow-wrap:anywhere]">
                       {selected.customerName}
                     </h2>
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[selected.language]}`}
+                      className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[selected.language]}`}
                     >
                       {selected.language}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 truncate">
+                  <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                     {selected.phone} · {selected.channel}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={onOpenAiSettings}
                   title="Change in AI Assistant settings"
-                  className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
+                  className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
-                  <Bot className="w-3.5 h-3.5" />
+                  <Bot className="w-4 h-4 shrink-0" />
                   {aiSettings.askBeforeSending ? 'AI replies need your approval' : 'AI replies automatically'}
                 </button>
                 <button
                   onClick={() => setShowWhatsApp(true)}
-                  className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
+                  className="flex min-h-11 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
                 >
                   <span className="w-4 h-4 rounded-full bg-[#25D366] inline-block" />
                   Open in WhatsApp
@@ -285,18 +312,18 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
             {/* Translation chip */}
             {isTranslated(selected) && (
-              <div className="flex justify-center pt-3">
+              <div className="flex justify-center px-4 pt-3">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                  <Languages className="w-3.5 h-3.5" />
+                  <Languages className="w-3.5 h-3.5 shrink-0" />
                   Translating {LANGUAGE_NAMES[selected.language]} → English
                 </span>
               </div>
             )}
             {!aiSettings.translateChats && selected.language !== 'EN' && (
-              <div className="flex justify-center pt-3">
+              <div className="flex justify-center px-4 pt-3">
                 <button
                   onClick={onOpenAiSettings}
-                  className="text-[11px] font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full transition-colors"
+                  className="min-h-11 text-xs font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-xl transition-colors"
                 >
                   Translation is off. Turn it on in AI Assistant settings
                 </button>
@@ -305,24 +332,24 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
             {/* Attention banner */}
             {selected.status === 'needs-attention' && !selected.takenOver && (
-              <div className="mx-6 mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-300/70 bg-amber-50 px-4 py-3">
+              <div className="mx-4 sm:mx-6 mt-4 flex flex-wrap items-start gap-3 rounded-2xl border border-amber-300/70 bg-amber-50 px-4 py-3">
                 <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0">
                   <AlertTriangle className="w-4 h-4" />
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-[8rem]">
                   <p className="text-sm font-semibold text-slate-900">Needs your attention</p>
                   <p className="text-xs text-slate-500">{selected.attentionReason}</p>
                 </div>
-                <div className="flex gap-2 shrink-0">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => onTakeOver(selected.id)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors"
+                    className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors"
                   >
                     Take over
                   </button>
                   <button
                     onClick={() => onLetAiContinue(selected.id)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
+                    className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
                   >
                     Let AI continue
                   </button>
@@ -331,11 +358,11 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             )}
 
             {selected.takenOver && (
-              <div className="mx-6 mt-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+              <div className="mx-4 sm:mx-6 mt-4 flex flex-wrap items-start gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
                 <div className="w-8 h-8 rounded-full bg-[#5551FF] text-white flex items-center justify-center shrink-0">
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-[8rem]">
                   <p className="text-sm font-semibold text-slate-900">You've taken over</p>
                   <p className="text-xs text-slate-500">
                     The AI is paused for this chat. Your replies are translated automatically.
@@ -343,7 +370,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 </div>
                 <button
                   onClick={() => onLetAiContinue(selected.id)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shrink-0"
+                  className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
                 >
                   Hand back to AI
                 </button>
@@ -351,7 +378,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             )}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            <div className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
               {selected.messages.map((m, i) =>
                 renderBubble(
                   selected,
@@ -365,14 +392,14 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
 
             {/* Composer */}
-            <div className="px-6 pb-5 pt-3 border-t border-slate-100 space-y-3">
+            <div className="px-4 sm:px-6 pb-5 pt-3 border-t border-slate-100 space-y-3">
               {!locked && selected.quickReplies && selected.quickReplies.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {selected.quickReplies.map((q) => (
                     <button
                       key={q.en}
                       onClick={() => send(q.en, q.local, q.appointmentAction)}
-                      className="text-left text-[11px] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
+                      className="min-h-11 text-left text-xs [overflow-wrap:anywhere] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
                     >
                       {q.en}
                     </button>
@@ -387,6 +414,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 className="flex items-center gap-3"
               >
                 <input
+                  aria-label="Reply as owner"
                   value={draft}
                   onChange={(e) => {
                     const conversationId = selected.id;
@@ -401,12 +429,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                       ? 'Reply as owner'
                       : `Reply as owner, auto-translated to ${LANGUAGE_NAMES[selected.language]}`
                   }
-                  className="flex-1 px-4 py-2.5 text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="min-w-0 flex-1 min-h-11 px-4 py-2.5 text-base sm:text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
                 <button
                   type="submit"
                   disabled={locked || !draft.trim()}
-                  className="w-10 h-10 rounded-full bg-[#5551FF] text-white flex items-center justify-center hover:bg-[#433fd8] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-11 h-11 shrink-0 rounded-full bg-[#5551FF] text-white flex items-center justify-center hover:bg-[#433fd8] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   aria-label="Send reply"
                 >
                   <Send className="w-4 h-4" />
@@ -428,25 +456,33 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
       </div>
 
       {/* WhatsApp view: what the customer sees on their phone */}
-      {showWhatsApp && selected && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShowWhatsApp(false)}
+      {selected && (
+        <dialog
+          ref={whatsAppDialogRef}
+          aria-label={`WhatsApp preview for ${selected.customerName}`}
+          onCancel={() => setShowWhatsApp(false)}
+          onClose={() => setShowWhatsApp(false)}
+          onClick={(event) => {
+            if (event.target !== event.currentTarget) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+              setShowWhatsApp(false);
+            }
+          }}
+          className="fixed inset-0 m-auto p-0 w-[340px] max-w-[calc(100vw-2rem)] h-[640px] max-h-[calc(100dvh-2rem)] bg-[#0b141a] rounded-[2rem] border-[6px] border-slate-900 shadow-2xl overflow-hidden backdrop:bg-slate-900/50 backdrop:backdrop-blur-xs"
         >
-          <div
-            className="w-[340px] max-w-full h-[640px] bg-[#0b141a] rounded-[2.2rem] border-[6px] border-slate-900 shadow-2xl overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-3 px-3 py-3 bg-[#1f2c34] text-white">
+          <div className="h-full min-h-0 flex flex-col">
+            <div className="flex shrink-0 items-center gap-2 px-2 py-2 bg-[#1f2c34] text-white">
               <button
+                autoFocus
                 onClick={() => setShowWhatsApp(false)}
                 aria-label="Back to conversations"
-                className="p-1 rounded-full hover:bg-white/10"
+                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-white/10"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold ${selected.avatarColor}`}
+                className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${selected.avatarColor}`}
               >
                 {selected.initials}
               </div>
@@ -457,12 +493,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               <button
                 onClick={() => setShowWhatsApp(false)}
                 aria-label="Close"
-                className="p-1 rounded-full hover:bg-white/10"
+                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-white/10"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 py-4 space-y-2">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2">
               <p className="text-center text-[10px] text-white/50 pb-1">
                 What your customer sees in {selected.channel}
               </p>
@@ -471,7 +507,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 return (
                   <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                     <div
-                      className={`max-w-[82%] rounded-xl px-3 py-2 text-[13px] text-white leading-snug ${
+                      className={`max-w-[82%] min-w-0 [overflow-wrap:anywhere] rounded-xl px-3 py-2 text-[13px] text-white leading-snug ${
                         mine ? 'bg-[#005c4b]' : 'bg-[#202c33]'
                       }`}
                     >
@@ -484,13 +520,13 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 );
               })}
             </div>
-            <div className="px-3 py-3 bg-[#0b141a]">
+            <div className="shrink-0 px-3 py-3 bg-[#0b141a]">
               <div className="rounded-full bg-[#202c33] px-4 py-2 text-xs text-white/40">
                 Message
               </div>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

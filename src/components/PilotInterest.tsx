@@ -49,7 +49,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                 <h2 id="pilot-banner-title" className="text-sm font-semibold text-slate-900">
                   Interested in a future pilot?
                 </h2>
-                <p className="mt-1 text-xs leading-relaxed text-slate-600 sm:whitespace-nowrap">
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
                   If you’re interested in trying the AI receptionist, leave your email.
                 </p>
               </div>
@@ -60,7 +60,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                 onClick={onOpen}
                 aria-haspopup="dialog"
                 aria-controls="pilot-interest-dialog"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#5551FF] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#433fd8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#5551FF] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#433fd8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
               >
                 Register interest
                 <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
@@ -70,9 +70,12 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                 onClick={() => {
                   setIsVisible(false);
                   try { sessionStorage.setItem('bella-interest-dismissed', 'true'); } catch { /* The banner can still be dismissed when storage is unavailable. */ }
-                  requestAnimationFrame(() => document.querySelector<HTMLElement>('aside [aria-controls="pilot-interest-dialog"]')?.focus());
+                  requestAnimationFrame(() => {
+                    const target = document.querySelector<HTMLElement>('#main-content h1') ?? document.getElementById('main-content');
+                    if (target) { target.tabIndex = -1; target.focus({ preventScroll: true }); }
+                  });
                 }}
-                className="rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
+                className="min-h-11 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
               >
                 Not now
               </button>
@@ -106,7 +109,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
             autoFocus
             onClick={onClose}
             aria-label="Close interest form"
-            className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF]"
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>

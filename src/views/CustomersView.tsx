@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Search,
   SlidersHorizontal,
@@ -35,6 +35,22 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newLang, setNewLang] = useState<'EN' | 'FR' | 'DE' | 'IT'>('EN');
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (!showAddModal) return;
+    const trigger = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog?.showModal();
+    dialog?.querySelector<HTMLInputElement>('#customer-name')?.focus();
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [showAddModal]);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
   const filteredCustomers = selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter(
@@ -84,7 +100,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -93,7 +109,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
           {/* Search */}
-          <div className="relative flex-1 sm:w-64">
+          <div className="relative w-full min-w-0 sm:w-64 sm:flex-1 sm:min-w-40">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
               type="text"
@@ -101,18 +117,18 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               onChange={(e) => { setFilterQuery(e.target.value); if (selectedCustomerId) onClearSelection(); }}
               aria-label="Filter customers"
               placeholder="Filter by name, email or phone"
-              className="w-full pl-9 pr-3 py-2 bg-slate-100/90 text-xs rounded-xl border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden text-slate-700 placeholder-slate-400"
+              className="min-w-0 min-h-11 text-base sm:text-sm w-full pl-9 pr-3 py-2 bg-slate-100/90 rounded-xl border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden text-slate-700 placeholder-slate-400"
             />
           </div>
 
-          <button className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <button className="flex min-h-11 items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
             <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
             <span>Options</span>
           </button>
 
           <button
             onClick={handleExportCSV}
-            className="p-2 text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs"
             title="Download CSV"
             aria-label="Export customers CSV"
           >
@@ -121,7 +137,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
+            className="flex min-h-11 items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Customer</span>
@@ -135,11 +151,12 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       </div>}
 
       {/* Customers Table matching Figma Page 14 */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+      <p id="customers-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe horizontally to see contact details and actions. Names stay visible.</p>
+      <div role="region" aria-label="Customers" aria-describedby="customers-scroll-hint" tabIndex={0} className="relative max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF]">
         <div className="min-w-[780px]">
           {/* Header Row */}
-          <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 px-6 bg-slate-50/50">
-            <div className="col-span-3">Name</div>
+          <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-6 bg-slate-50">
+            <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-6 pr-3">Name</div>
             <div className="col-span-3">Email</div>
             <div className="col-span-2">Phone</div>
             <div className="col-span-1 text-center">Language</div>
@@ -154,14 +171,14 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 key={cust.id}
                 onClick={() => onOpenChat?.(cust.name)}
                 title={`Open conversation with ${cust.name}`}
-                className="grid grid-cols-12 items-center py-3.5 px-6 hover:bg-slate-50/60 transition-colors text-xs text-slate-700 group cursor-pointer"
+                className="grid grid-cols-12 items-center py-3.5 pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group cursor-pointer"
               >
                 {/* Name with initials circle */}
-                <div className="col-span-3 flex items-center gap-3">
+                <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-6 pr-3">
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
-                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} className="font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
+                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
                 </div>
 
                 {/* Email */}
@@ -191,7 +208,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 <div className="col-span-2 text-slate-500 truncate">{cust.lastBooking}</div>
 
                 {/* Bookings Count & Trash */}
-                <div className="col-span-1 flex items-center justify-end gap-3">
+                <div className="col-span-1 flex items-center justify-end gap-1">
                   <span className="font-semibold text-slate-800 tabular-nums">
                     {cust.bookingsCount}
                   </span>
@@ -200,7 +217,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                       e.stopPropagation();
                       onDeleteCustomer(cust.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-500 rounded-md transition-opacity"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
                     title="Delete customer"
                     aria-label={`Delete ${cust.name}`}
                   >
@@ -226,17 +243,18 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
       {/* Add Customer Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <dialog ref={dialogRef} aria-labelledby="customer-dialog-title" onCancel={(event) => { event.preventDefault(); setShowAddModal(false); }} className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs">
           <form
             onSubmit={handleSubmit}
-            className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in zoom-in-95"
+            className="w-full p-5 sm:p-6 space-y-4"
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900">Add Customer</h3>
+              <h3 id="customer-dialog-title" className="text-base font-bold text-slate-900">Add Customer</h3>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                aria-label="Close customer editor"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -244,45 +262,49 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Full Name *</label>
+                <label htmlFor="customer-name" className="font-semibold text-slate-700 block mb-1">Full Name *</label>
                 <input
+                  id="customer-name"
                   type="text"
                   required
                   placeholder="e.g. Sandra Meier"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Email Address</label>
+                <label htmlFor="customer-email" className="font-semibold text-slate-700 block mb-1">Email Address</label>
                 <input
+                  id="customer-email"
                   type="email"
                   placeholder="sandra.meier@example.ch"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Phone Number</label>
+                <label htmlFor="customer-phone" className="font-semibold text-slate-700 block mb-1">Phone Number</label>
                 <input
+                  id="customer-phone"
                   type="tel"
                   placeholder="+41 78 123 45 67"
                   value={newPhone}
                   onChange={(e) => setNewPhone(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Preferred Language</label>
+                <label htmlFor="customer-language" className="font-semibold text-slate-700 block mb-1">Preferred Language</label>
                 <select
+                  id="customer-language"
                   value={newLang}
                   onChange={(e) => setNewLang(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 >
                   <option value="EN">English (EN)</option>
                   <option value="FR">French (FR)</option>
@@ -296,19 +318,19 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
               >
                 Save Customer
               </button>
             </div>
           </form>
-        </div>
+        </dialog>
       )}
     </div>
   );

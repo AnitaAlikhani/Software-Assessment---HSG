@@ -13,7 +13,7 @@ const minutesAt = (time: string) => {
   const [hours, minutes] = time.split(':').map(Number);
   return hours * 60 + minutes;
 };
-const fieldStyle = 'w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700';
+const fieldStyle = 'min-h-11 w-full min-w-0 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-base sm:text-sm text-slate-700';
 
 export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, onUpdateShift }) => {
   const [weekStart, setWeekStart] = useState('2026-10-05');
@@ -55,6 +55,8 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
   useEffect(() => {
     if (!showEditor) return;
     const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     employeeSelectRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -78,6 +80,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
   }, [showEditor]);
@@ -99,15 +102,15 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {selectedEmployee && (
-            <button onClick={() => setSelectedEmployeeId(null)} aria-label="Back to Shift Plan overview" className="p-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600">
+            <button onClick={() => setSelectedEmployeeId(null)} aria-label="Back to Shift Plan overview" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600">
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}
-          <div>
+          <div className="min-w-0 [overflow-wrap:anywhere]">
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{selectedEmployee?.name ?? 'Shift Plan'}</h1>
             {selectedEmployee && <p className="text-xs text-slate-500 mt-1">Staff availability</p>}
           </div>
@@ -115,7 +118,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
         <button
           onClick={() => openEditor(selectedEmployee?.id ?? employees[0]?.id ?? '', weekStart, true)}
           disabled={employees.length === 0}
-          className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex min-h-11 shrink-0 items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-3.5 h-3.5" />New Shift
         </button>
@@ -125,14 +128,14 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setWeekStart(startOfWeek(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())))}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50"
+            className="min-h-11 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50"
           >Today</button>
-          <div className="flex items-center bg-white border border-slate-200 rounded-xl">
-            <button aria-label="Previous week" onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-2 text-slate-500 hover:text-slate-800"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="px-2 text-xs font-semibold text-slate-600 tabular-nums">{formatCalendarDate(weekStart)} - {formatCalendarDate(days[6])}</span>
-            <button aria-label="Next week" onClick={() => setWeekStart(addDays(weekStart, 7))} className="p-2 text-slate-500 hover:text-slate-800"><ChevronRight className="w-4 h-4" /></button>
+          <div className="flex max-w-full items-center bg-white border border-slate-200 rounded-xl">
+            <button aria-label="Previous week" onClick={() => setWeekStart(addDays(weekStart, -7))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="min-w-0 px-1 text-center text-xs font-semibold text-slate-600 tabular-nums">{formatCalendarDate(weekStart)} - {formatCalendarDate(days[6])}</span>
+            <button aria-label="Next week" onClick={() => setWeekStart(addDays(weekStart, 7))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronRight className="w-4 h-4" /></button>
           </div>
-          <input type="date" aria-label="Choose shift plan week" value={weekStart} onChange={(event) => { if (event.target.value) setWeekStart(startOfWeek(event.target.value)); }} className="px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-600" />
+          <input type="date" aria-label="Choose shift plan week" value={weekStart} onChange={(event) => { if (event.target.value) setWeekStart(startOfWeek(event.target.value)); }} className="min-h-11 max-w-full px-3 py-2 text-base sm:text-xs bg-white border border-slate-200 rounded-xl text-slate-600" />
         </div>
         {selectedEmployee && (
           <div className="flex items-center gap-3 px-3 py-2 text-xs text-slate-600 bg-slate-100/80 rounded-xl">
@@ -162,32 +165,34 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-4">
                   <span className={`text-xs font-semibold tabular-nums ${shift ? 'text-emerald-700' : 'text-slate-400'}`}>{shift ? `${shift.start} - ${shift.end}` : 'Unavailable'}</span>
-                  <button onClick={() => openEditor(selectedEmployee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${selectedEmployee.name} on ${formatDate(date)}`} className="px-3 py-1.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 rounded-xl">{shift ? 'Edit shift' : 'Add shift'}</button>
+                  <button onClick={() => openEditor(selectedEmployee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${selectedEmployee.name} on ${formatDate(date)}`} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 rounded-xl">{shift ? 'Edit shift' : 'Add shift'}</button>
                 </div>
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+        <div className="min-w-0">
+          <p className="mb-2 text-xs text-slate-500 xl:hidden">Scroll sideways to see all days, or select an employee for their daily schedule.</p>
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
           <table className="w-full min-w-[860px] text-xs text-left">
             <thead className="text-slate-400 bg-slate-50/50 border-b border-slate-100">
-              <tr><th scope="col" className="py-3.5 px-4 font-semibold">Employee</th>{days.map((date) => <th scope="col" key={date} className="py-3.5 px-2 text-center font-semibold whitespace-nowrap">{formatCalendarDate(date)}</th>)}</tr>
+              <tr><th scope="col" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 bg-slate-50 py-3.5 px-3 font-semibold border-r border-slate-100">Employee</th>{days.map((date) => <th scope="col" key={date} className="py-3.5 px-2 text-center font-semibold whitespace-nowrap">{formatCalendarDate(date)}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {employees.map((employee) => (
                 <tr key={employee.id} className="hover:bg-slate-50/60">
-                  <th scope="row" className="py-4 px-4">
-                    <button onClick={() => setSelectedEmployeeId(employee.id)} className="flex items-center gap-2.5 text-left text-slate-800 hover:text-[#5551FF]" aria-label={`View shifts for ${employee.name}`}>
+                  <th scope="row" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 bg-white py-4 px-3 border-r border-slate-100">
+                    <button onClick={() => setSelectedEmployeeId(employee.id)} className="flex min-h-11 w-full min-w-0 items-center gap-2.5 text-left text-slate-800 hover:text-[#5551FF]" aria-label={`View shifts for ${employee.name}`} title={employee.name}>
                       <span className="w-8 h-8 rounded-xl bg-purple-50 text-[#5551FF] flex items-center justify-center font-bold shrink-0">{employee.initials}</span>
-                      <span className="font-semibold max-w-36 truncate">{employee.name}</span>
+                      <span className="min-w-0 font-semibold truncate">{employee.name}</span>
                     </button>
                   </th>
                   {days.map((date) => {
                     const shift = shiftFor(employee.id, date);
                     return (
                       <td key={date} className="py-3 px-1 text-center">
-                        <button onClick={() => openEditor(employee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${employee.name} on ${formatDate(date)}`} className={`w-full whitespace-nowrap px-2 py-2 rounded-lg text-[11px] font-semibold tabular-nums border transition-colors ${shift ? 'bg-emerald-50 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100' : 'bg-slate-50 text-slate-400 border-transparent hover:bg-indigo-50 hover:text-[#5551FF]'}`}>{shift ? `${shift.start} - ${shift.end}` : 'Unavailable'}</button>
+                        <button onClick={() => openEditor(employee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${employee.name} on ${formatDate(date)}`} className={`min-h-11 w-full whitespace-nowrap px-2 py-2 rounded-lg text-[11px] font-semibold tabular-nums border transition-colors ${shift ? 'bg-emerald-50 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100' : 'bg-slate-50 text-slate-400 border-transparent hover:bg-indigo-50 hover:text-[#5551FF]'}`}>{shift ? `${shift.start} - ${shift.end}` : 'Unavailable'}</button>
                       </td>
                     );
                   })}
@@ -195,6 +200,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -204,7 +210,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
             <form onSubmit={saveShift} className="flex flex-col min-h-full gap-5 text-xs">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <h2 id="shift-editor-title" className="text-base font-bold text-slate-900">{shiftFor(editorEmployeeId, editorDate) ? 'Edit Shift' : 'New Shift'}</h2>
-                <button type="button" aria-label="Close shift editor" onClick={() => setShowEditor(false)} className="p-1 rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
+                <button type="button" aria-label="Close shift editor" onClick={() => setShowEditor(false)} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
               </div>
               <div>
                 <label htmlFor="shift-employee" className="font-semibold text-slate-700 block mb-1.5">Employee</label>
@@ -221,15 +227,15 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
                 <span className="font-semibold text-slate-700">Available on this date</span>
               </label>
               {available ? (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><label htmlFor="shift-start" className="font-semibold text-slate-700 block mb-1.5">Start time</label><input id="shift-start" type="time" required value={start} onChange={(event) => { setStart(event.target.value); setError(''); }} className={fieldStyle} /></div>
                   <div><label htmlFor="shift-end" className="font-semibold text-slate-700 block mb-1.5">End time</label><input id="shift-end" type="time" required value={end} onChange={(event) => { setEnd(event.target.value); setError(''); }} className={fieldStyle} /></div>
                 </div>
               ) : <p className="text-slate-500 leading-relaxed">Saving will remove any shift on this date. No booking slots will be offered for this employee on this date.</p>}
               {error && <p role="alert" className="text-rose-600">{error}</p>}
               <div className="flex gap-2 mt-auto pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowEditor(false)} className="flex-1 py-2.5 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
-                <button type="submit" className="flex-1 py-2.5 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs">Save</button>
+                <button type="button" onClick={() => setShowEditor(false)} className="min-h-11 flex-1 py-2.5 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
+                <button type="submit" className="min-h-11 flex-1 py-2.5 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs">Save</button>
               </div>
             </form>
           </div>

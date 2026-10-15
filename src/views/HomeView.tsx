@@ -170,10 +170,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
 
               {/* Actions: Accept, Move, Reject */}
-              <div className="flex flex-row sm:flex-col gap-2 w-full sm:w-auto shrink-0 justify-end">
+              <div className="grid grid-cols-1 min-[380px]:grid-cols-3 sm:flex sm:flex-col gap-2 w-full sm:w-auto shrink-0 justify-end">
                 <button
                   onClick={() => onAcceptRequest(currentRequest.id)}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200/60 shadow-2xs"
+                  className="min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200/60 shadow-2xs"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>Accept</span>
@@ -181,7 +181,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                 <button
                   onClick={() => openMoveDialog(currentRequest)}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors border border-slate-200/70"
+                  className="min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors border border-slate-200/70"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Move</span>
@@ -189,7 +189,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                 <button
                   onClick={() => onRejectRequest(currentRequest.id)}
-                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors border border-rose-200/60"
+                  className="min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors border border-rose-200/60"
                 >
                   <X className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>Reject</span>
@@ -457,7 +457,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               setMovingRequestId(null);
             }
           }}
-          className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs"
+          className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs"
         >
           <form
             onSubmit={(event) => {
@@ -476,7 +476,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           >
             <div className="flex items-start justify-between gap-3 mb-2">
               <h3 id="move-appointment-title" className="text-base font-bold text-slate-900">Reschedule appointment request</h3>
-              <button type="button" onClick={() => setMovingRequestId(null)} aria-label="Close reschedule dialog" className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
+              <button type="button" onClick={() => setMovingRequestId(null)} aria-label="Close reschedule dialog" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -501,7 +501,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     setRescheduleStart('');
                     setMoveError(null);
                   }}
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF]"
+                  className="w-full min-h-11 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF]"
                 />
               </div>
               <div>
@@ -512,7 +512,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   disabled={availableMoveSlots.length === 0}
                   required
                   onChange={(event) => { setRescheduleStart(event.target.value); setMoveError(null); }}
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF] disabled:opacity-60"
+                  className="w-full min-h-11 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF] disabled:opacity-60"
                 >
                   {availableMoveSlots.length === 0 && <option value="">No available times</option>}
                   {availableMoveSlots.map((start) => (
@@ -528,14 +528,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setMovingRequestId(null)}
-                  className="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                  className="min-h-11 flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!selectedMoveStart || !rescheduleDate}
-                  className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Confirm Move
                 </button>

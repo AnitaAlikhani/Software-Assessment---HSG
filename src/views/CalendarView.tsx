@@ -54,6 +54,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     };
   }, [selectedEvent?.id]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const addDialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = addDialogRef.current;
+    if (!dialog || !showAddModal) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [showAddModal]);
   const [newSlotDate, setNewSlotDate] = useState(date);
   const [formError, setFormError] = useState('');
   const [newSlotTime, setNewSlotTime] = useState('11:00');
@@ -78,7 +92,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     : activeView === '3-day'
       ? Array.from({ length: 3 }, (_, index) => makeDay(addDays(date, index)))
       : days;
-  const gridColumns = activeView === 'Day' ? 'grid-cols-2' : activeView === '3-day' ? 'grid-cols-4' : 'grid-cols-8';
+  const gridStyle = { gridTemplateColumns: `4rem repeat(${visibleDays.length}, minmax(0, 1fr))` };
   const navigationStep = activeView === 'Day' ? 1 : activeView === '3-day' ? 3 : 7;
   const visibleEvents = events
     .filter((event) => visibleDays.some((day) => day.key === event.date))
@@ -130,9 +144,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header / View Controller matching Figma */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
         {/* Title & Navigation */}
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -142,31 +156,32 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             {date.slice(0, 4)}
           </span>
 
-          <div className="flex flex-wrap items-center gap-1.5 ml-2">
-            <button onClick={() => onDateChange(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' }))} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <div className="flex max-w-full flex-wrap items-center gap-1.5">
+            <button onClick={() => onDateChange(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' }))} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
               Today
             </button>
-            <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-2xs">
-              <button aria-label="Previous date range" onClick={() => onDateChange(addDays(date, -navigationStep))} className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
+            <div className="flex max-w-full items-center bg-white border border-slate-200 rounded-xl shadow-2xs">
+              <button aria-label="Previous date range" onClick={() => onDateChange(addDays(date, -navigationStep))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <span className="text-xs font-medium text-slate-600 px-2">{dateRange}</span>
-              <button aria-label="Next date range" onClick={() => onDateChange(addDays(date, navigationStep))} className="p-1.5 text-slate-500 hover:text-slate-800 transition-colors">
+              <span className="min-w-0 text-center text-xs font-medium text-slate-600 px-1">{dateRange}</span>
+              <button aria-label="Next date range" onClick={() => onDateChange(addDays(date, navigationStep))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
-            <input type="date" aria-label="Calendar date" value={date} onChange={(e) => { if (e.target.value) onDateChange(e.target.value); }} className="w-32 px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-xl" />
+            <input type="date" aria-label="Calendar date" value={date} onChange={(e) => { if (e.target.value) onDateChange(e.target.value); }} className="min-h-11 w-40 min-w-0 px-2 py-1.5 text-base sm:text-xs bg-white border border-slate-200 rounded-xl" />
           </div>
         </div>
 
         {/* View switcher (List, Day, 3-day, Week, Filter) */}
-        <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
-          <div className="flex items-center bg-slate-100/90 p-1 rounded-xl text-xs font-medium text-slate-600">
+        <div className="flex max-w-full flex-wrap items-center gap-2 self-stretch xl:self-auto">
+          <div className="grid w-full grid-cols-4 items-center bg-slate-100/90 p-1 rounded-xl text-xs font-medium text-slate-600 sm:flex sm:w-auto">
             {(['List', 'Day', '3-day', 'Week'] as const).map((view) => (
               <button
                 key={view}
+                aria-pressed={activeView === view}
                 onClick={() => setActiveView(view)}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
+                className={`min-h-11 px-3 py-1.5 rounded-lg transition-all ${
                   activeView === view
                     ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                     : 'hover:text-slate-900 text-slate-500'
@@ -177,17 +192,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             ))}
           </div>
 
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <button className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
             <span>Filter</span>
           </button>
 
           <button
+            aria-label="Add appointment"
             onClick={() => { setNewSlotDate(date); setFormError(''); setShowAddModal(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-2xs transition-colors"
+            className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-2xs transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Add</span>
+            <span>Add</span>
           </button>
         </div>
       </div>
@@ -207,16 +223,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               aria-label={`Open appointment for ${ev.customerName} on ${formatCalendarDate(ev.date)} at ${ev.startTime}`}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedEvent(ev); } }}
               onClick={() => setSelectedEvent(ev)}
-              className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 hover:bg-indigo-50/50 border border-slate-100 transition-colors cursor-pointer"
+              className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center justify-between p-3.5 rounded-xl bg-slate-50 hover:bg-indigo-50/50 border border-slate-100 transition-colors cursor-pointer"
             >
-              <div className="flex items-center gap-4">
-                <div className="w-2 h-10 rounded-full bg-[#5551FF]" />
-                <div>
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="w-2 h-10 shrink-0 rounded-full bg-[#5551FF]" />
+                <div className="min-w-0 [overflow-wrap:anywhere]">
                   <p className="text-sm font-bold text-slate-900">{ev.customerName}</p>
                   <p className="text-xs text-slate-500">{ev.serviceName} · Staff: {ev.staffName}</p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="shrink-0 pl-6 sm:pl-0 sm:text-right">
                 <p className="text-xs font-semibold text-slate-800">{formatCalendarDate(ev.date)}</p>
                 <p className="text-xs text-[#5551FF] font-medium">{ev.startTime} - {ev.endTime}</p>
               </div>
@@ -224,11 +240,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
-          <div className="min-w-[760px]">
+        <div className="min-w-0">
+          {activeView !== 'Day' && <p className="mb-2 text-xs text-slate-500 xl:hidden">Scroll sideways to see all days. Use Day for a single-day view.</p>}
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+          <div className={activeView === 'Day' ? 'min-w-0' : activeView === '3-day' ? 'min-w-[640px]' : 'min-w-[760px]'}>
             {/* Days Column Headers */}
-            <div className={`grid ${gridColumns} border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50`}>
-              <div className="p-3.5 text-center text-slate-400 border-r border-slate-100">
+            <div style={gridStyle} className="grid border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50">
+              <div className="sticky left-0 z-10 bg-slate-50 px-1 py-3.5 text-center text-slate-400 border-r border-slate-100">
                 GMT+2
               </div>
               {visibleDays.map((d) => (
@@ -251,10 +269,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               {hours.map((hour) => (
                 <div
                   key={hour}
-                  className={`grid ${gridColumns} min-h-[58px] group`}
+                  style={gridStyle}
+                  className="grid min-h-[58px] group"
                 >
                   {/* Left Hour Label */}
-                  <div className="p-2.5 text-right text-xs font-medium text-slate-400 border-r border-slate-100 select-none">
+                  <div className="sticky left-0 z-10 bg-white p-2.5 text-right text-xs font-medium text-slate-400 border-r border-slate-100 select-none">
                     {hour}
                   </div>
 
@@ -276,7 +295,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             setShowAddModal(true);
                           }
                         }}
-                        className={`relative p-1 border-r last:border-r-0 border-slate-100 transition-colors ${
+                        className={`relative min-w-0 p-1 border-r last:border-r-0 border-slate-100 transition-colors ${
                           d.closed
                             ? 'bg-slate-50/70 cursor-not-allowed flex items-center justify-center'
                             : 'hover:bg-indigo-50/20 cursor-pointer'
@@ -309,7 +328,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               }`}
                             >
                               <div className="flex items-center justify-between gap-1">
-                                <span className="font-bold text-xs truncate">
+                                <span className="min-w-0 font-bold text-xs truncate">
                                   {ev.customerName}
                                 </span>
                                 {ev.isAiBooked && (
@@ -332,6 +351,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               ))}
             </div>
           </div>
+          </div>
         </div>
       )}
 
@@ -340,7 +360,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         <dialog ref={detailsRef} aria-labelledby="appointment-details-title" onCancel={e => { e.preventDefault(); setSelectedEvent(null); }} onClick={e => { if (e.target === e.currentTarget) setSelectedEvent(null); }} className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-2xl border-0 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 animate-in zoom-in-95">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
-              <div>
+              <div className="min-w-0 [overflow-wrap:anywhere]">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#5551FF]">
                   Appointment Details
                 </span>
@@ -352,13 +372,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 aria-label="Close appointment details"
                 autoFocus
                 onClick={() => setSelectedEvent(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="py-4 space-y-3 text-xs text-slate-600">
+            <div className="py-4 space-y-3 text-xs text-slate-600 [overflow-wrap:anywhere]">
               <div className="flex items-center gap-2">
                 <Scissors className="w-4 h-4 text-slate-400" />
                 <span>Service: <strong className="text-slate-800">{selectedEvent.serviceName}</strong></span>
@@ -389,13 +409,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   onDeleteEvent(selectedEvent.id);
                   setSelectedEvent(null);
                 }}
-                className="flex-1 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-colors"
               >
                 Cancel Appointment
               </button>
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="flex-1 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
               >
                 Close
               </button>
@@ -406,17 +426,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
       {/* Add New Appointment Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+        <dialog ref={addDialogRef} aria-labelledby="new-appointment-title" onCancel={e => { e.preventDefault(); setShowAddModal(false); }} onClick={e => { if (e.target === e.currentTarget) setShowAddModal(false); }} className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-2xl border-0 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs">
           <form
             onSubmit={handleCreateSubmit}
             className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in zoom-in-95"
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900">New Appointment</h3>
+              <h3 id="new-appointment-title" className="text-base font-bold text-slate-900">New Appointment</h3>
               <button
                 type="button"
+                aria-label="Close new appointment"
                 onClick={() => setShowAddModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                className="flex size-11 shrink-0 items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -424,24 +445,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Customer Name *</label>
+                <label htmlFor="appointment-customer" className="font-semibold text-slate-700 block mb-1">Customer Name *</label>
                 <input
+                  id="appointment-customer"
+                  autoFocus
                   type="text"
                   required
                   placeholder="e.g. Sophie Martin"
                   value={newCustomer}
                   onChange={(e) => setNewCustomer(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                  className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Service</label>
+                  <label htmlFor="appointment-service" className="font-semibold text-slate-700 block mb-1">Service</label>
                   <select
+                    id="appointment-service"
                     value={newService?.id ?? ''}
                     onChange={(e) => setNewServiceId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
                     {services.map((service) => (
                       <option key={service.id} value={service.id}>{service.name} ({service.durationMinutes} min, CHF {service.priceCHF})</option>
@@ -450,11 +474,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Staff Member</label>
+                  <label htmlFor="appointment-staff" className="font-semibold text-slate-700 block mb-1">Staff Member</label>
                   <select
+                    id="appointment-staff"
                     value={newStaff}
                     onChange={(e) => setNewStaff(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
                     <option value="Nilufar Ismayilova">Nilufar Ismayilova</option>
                     <option value="Eloise Denniese">Eloise Denniese</option>
@@ -462,7 +487,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="appointment-date" className="font-semibold text-slate-700 block mb-1">Date</label>
                   <input
@@ -471,16 +496,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     required
                     value={newSlotDate}
                     onChange={(e) => { setNewSlotDate(e.target.value); setFormError(''); }}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Start Time</label>
+                  <label htmlFor="appointment-time" className="font-semibold text-slate-700 block mb-1">Start Time</label>
                   <select
+                    id="appointment-time"
                     value={newSlotTime}
                     onChange={(e) => setNewSlotTime(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
                     {hours.map((h) => (
                       <option key={h} value={h}>
@@ -498,19 +524,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
               >
                 Create Appointment
               </button>
             </div>
           </form>
-        </div>
+        </dialog>
       )}
     </div>
   );

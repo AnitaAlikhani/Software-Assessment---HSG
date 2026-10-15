@@ -39,7 +39,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [absenceEmployeeId, setAbsenceEmployeeId] = useState('');
   const [rangeStart, setRangeStart] = useState(() => getSalonNow(initialSettings.timeZone).date);
   const [rangeEnd, setRangeEnd] = useState(() => getSalonNow(initialSettings.timeZone).date);
-  const dateInputClass = 'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-none focus:ring-2 focus:ring-[#5551FF]/20';
+  const dateInputClass = 'min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-none focus:ring-2 focus:ring-[#5551FF]/20';
   const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(initialSettings) || JSON.stringify(hoursData) !== JSON.stringify(initialBookingHours);
 
   const resetDateForm = () => {
@@ -97,7 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header matching Figma Page 21, 35 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -192,9 +192,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 Basic Information
               </h2>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              <div className="grid grid-cols-1 2xl:grid-cols-12 gap-8 items-start">
                 {/* Form fields (col 8) */}
-                <div className="lg:col-span-8 space-y-4 text-xs">
+                <div className="min-w-0 2xl:col-span-8 space-y-4 text-xs">
                   <div>
                     <label htmlFor="company-companyName" className="font-semibold text-slate-700 block mb-1">
                       Company name
@@ -205,13 +205,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onChange={(e) =>
                         setFormData({ ...formData, companyName: e.target.value })
                       }
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                      className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                     />
                   </div>
 
                   {/* Street & Postal & City */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
                       <label htmlFor="company-street" className="font-semibold text-slate-700 block mb-1">
                         Street and number
                       </label>
@@ -221,7 +221,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, street: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       />
                     </div>
                     <div>
@@ -234,7 +234,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, postalCode: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       />
                     </div>
                     <div>
@@ -247,7 +247,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, city: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       />
                     </div>
                   </div>
@@ -263,7 +263,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, country: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       >
                         <option value="Switzerland">Switzerland</option>
                         <option value="Germany">Germany</option>
@@ -281,7 +281,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, state: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       />
                     </div>
                   </div>
@@ -297,7 +297,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, industry: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       >
                         <option value="Hair & Beauty">Hair & Beauty</option>
                         <option value="Spa & Wellness">Spa & Wellness</option>
@@ -314,7 +314,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, businessPhone: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       />
                     </div>
                   </div>
@@ -329,7 +329,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         type="text"
                         disabled
                         value={formData.currency}
-                        className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-400"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-400"
                       />
                     </div>
                     <div>
@@ -341,7 +341,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         onChange={(e) =>
                           setFormData({ ...formData, branchLanguage: e.target.value })
                         }
-                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       >
                         <option value="English">English</option>
                         <option value="German">German</option>
@@ -361,7 +361,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onChange={(e) =>
                         setFormData({ ...formData, timeZone: e.target.value })
                       }
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                      className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                     >
                       <option value="Europe/Zurich (GMT+01:00)">
                         Europe/Zurich (GMT+01:00)
@@ -377,7 +377,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
 
                 {/* Company Logo Upload Box (col 4) matching Figma Page 21 */}
-                <div className="lg:col-span-4 space-y-2 text-xs">
+                <div className="2xl:col-span-4 space-y-2 text-xs">
                   <label className="font-semibold text-slate-700 block">
                     Company logo
                   </label>
@@ -403,15 +403,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {hoursData.map((item, index) => (
                   <div
                     key={item.day}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2.5 border-b border-slate-100"
+                    className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 py-2.5 border-b border-slate-100"
                   >
                     {/* Day & Open/Closed Switch */}
-                    <div className="flex items-center gap-4 w-40">
+                    <div className="flex w-full max-w-xs items-center justify-between gap-4">
                       <span className="font-bold text-slate-800 w-24">
                         {item.day}
                       </span>
 
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className="relative flex min-h-11 items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label={`${item.day} open for booking`}
@@ -419,7 +419,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           onChange={() => handleToggleDay(index)}
                           className="sr-only peer"
                         />
-                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5551FF]" />
+                        <div className="relative w-9 h-5 shrink-0 bg-slate-200 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-[#5551FF] peer-focus-visible:ring-offset-2 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5551FF]" />
                         <span className="text-xs font-semibold text-slate-600">
                           {item.isOpen ? 'Open' : 'Closed'}
                         </span>
@@ -428,11 +428,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* From - To Hours */}
                     {item.isOpen ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400">From</span>
-                        <input type="time" value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs" />
-                        <span className="text-slate-400">To</span>
-                        <input type="time" value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs" />
+                      <div className="grid w-full max-w-sm grid-cols-2 gap-3">
+                        <label className="min-w-0 space-y-1 text-slate-500"><span>From</span>
+                        <input type="time" value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="block min-h-11 min-w-0 w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
+                        <label className="min-w-0 space-y-1 text-slate-500"><span>To</span>
+                        <input type="time" value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="block min-h-11 min-w-0 w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
                       </div>
                     ) : (
                       <span className="text-slate-400 text-xs italic">
@@ -458,14 +458,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="space-y-2">
                 {closedDatesTab === 'closed' ? closedDates.map((item) => <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                   <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
-                  <button className="font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { setEditingDateId(item.id); setDateName(item.name); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
-                  <button className="p-1 text-slate-400 hover:text-rose-600" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Closure removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
+                  <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { setEditingDateId(item.id); setDateName(item.name); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
+                  <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Closure removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                 </div>) : absences.map((item) => {
                   const employeeName = employees.find((employee) => employee.id === item.employeeId)?.name || 'Removed employee';
                   return <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                     <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{employeeName}{item.reason && `: ${item.reason}`}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
-                    <button className="font-semibold text-[#5551FF]" aria-label={`Edit absence for ${employeeName}`} onClick={() => { setEditingDateId(item.id); setDateName(item.reason || ''); setAbsenceEmployeeId(item.employeeId); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
-                    <button className="p-1 text-slate-400 hover:text-rose-600" aria-label={`Delete absence for ${employeeName}`} onClick={() => { onSaveAbsences(absences.filter((absence) => absence.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Absence removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
+                    <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit absence for ${employeeName}`} onClick={() => { setEditingDateId(item.id); setDateName(item.reason || ''); setAbsenceEmployeeId(item.employeeId); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
+                    <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete absence for ${employeeName}`} onClick={() => { onSaveAbsences(absences.filter((absence) => absence.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Absence removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                   </div>;
                 })}
                 {(closedDatesTab === 'closed' ? closedDates.length : absences.length) === 0 && <p className="py-4 text-sm text-slate-500">{closedDatesTab === 'closed' ? 'No one-off closures added.' : 'No staff absences added.'}</p>}
@@ -504,7 +504,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       setFormData({ ...formData, description: e.target.value })
                     }
                     placeholder="Tell customers about your salon..."
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
@@ -518,7 +518,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) =>
                       setFormData({ ...formData, website: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
@@ -532,7 +532,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) =>
                       setFormData({ ...formData, facebook: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
@@ -546,7 +546,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) =>
                       setFormData({ ...formData, xProfile: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
@@ -560,7 +560,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) =>
                       setFormData({ ...formData, instagram: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
@@ -574,12 +574,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) =>
                       setFormData({ ...formData, legalNote: e.target.value })
                     }
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
                 <div className="pt-2">
-                  <label className="flex items-center gap-3 cursor-pointer">
+                  <label className="relative flex min-h-11 items-center gap-3 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={formData.customTerms}
@@ -591,7 +591,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       }
                       className="sr-only peer"
                     />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5551FF]" />
+                    <div className="relative w-9 h-5 shrink-0 bg-slate-200 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-[#5551FF] peer-focus-visible:ring-offset-2 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#5551FF]" />
                     <span className="text-xs font-semibold text-slate-700">
                       Define custom terms & conditions and data privacy text for the booking page
                     </span>
