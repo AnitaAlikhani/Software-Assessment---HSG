@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Plus } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { AiAssistantSettings, ChatLanguage } from '../types';
 import { LANGUAGE_NAMES } from '../conversationData';
 
@@ -30,35 +30,18 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   onSave,
 }) => {
   const [form, setForm] = useState<AiAssistantSettings>(initial);
-  const [newRule, setNewRule] = useState('');
   const [saved, setSaved] = useState(false);
 
   const update = <K extends keyof AiAssistantSettings>(
     key: K,
     value: AiAssistantSettings[K]
-  ) => setForm((prev) => ({ ...prev, [key]: value }));
+  ) => { setForm((prev) => ({ ...prev, [key]: value })); setSaved(false); };
 
   const toggleLanguage = (lang: ChatLanguage) =>
     update('answerLanguages', {
       ...form.answerLanguages,
       [lang]: !form.answerLanguages[lang],
     });
-
-  const toggleRule = (id: string) =>
-    update(
-      'handoverRules',
-      form.handoverRules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
-    );
-
-  const addRule = () => {
-    const label = newRule.trim();
-    if (!label) return;
-    update('handoverRules', [
-      ...form.handoverRules,
-      { id: `rule-${Date.now()}`, label, enabled: true },
-    ]);
-    setNewRule('');
-  };
 
   const handleSave = () => {
     onSave(form);
@@ -91,7 +74,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-8">
         <p className="text-sm text-slate-500 mb-8">
-          Control how your assistant replies to customers.
+          Configure the scripted conversation demo. Save to keep these settings in this browser tab.
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -106,8 +89,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
                     Ask me before sending replies
                   </p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                    The assistant writes a draft and waits for your approval. Off: it replies on
-                    its own.
+                    Review the scripted AI reply before sending it in the demo. When off, “Let AI continue” sends it immediately.
                   </p>
                 </div>
                 <Toggle
@@ -121,7 +103,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800">Translate chats for me</p>
                   <p className="text-xs text-slate-500 mt-1 max-w-sm">
-                    Show every message in its original language and in your language.
+                    Show scripted messages in English or German alongside the original. Typed replies are sent as written and are not automatically translated.
                   </p>
                 </div>
                 <Toggle
@@ -151,6 +133,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
               <h2 className="text-sm font-bold text-slate-900">
                 Languages the assistant answers in
               </h2>
+              <p className="text-xs text-slate-500">Disabled languages cannot send scripted AI replies. You can still reply yourself.</p>
               <div className="flex flex-wrap gap-2">
                 {languages.map((lang) => {
                   const on = form.answerLanguages[lang];
@@ -175,12 +158,14 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
             <section className="space-y-3">
               <h2 className="text-sm font-bold text-slate-900">Tone of voice</h2>
+              <p className="text-xs text-slate-500">Demo preview only. Scripted replies use fixed wording; tone customization is not available yet.</p>
               <div className="inline-flex max-w-full p-1 bg-slate-100 rounded-xl">
                 {(['friendly', 'formal'] as const).map((t) => (
                   <button
                     key={t}
-                    onClick={() => update('tone', t)}
-                    className={`min-h-11 px-4 sm:px-6 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
+                    disabled
+                    aria-pressed={form.tone === t}
+                    className={`min-h-11 px-4 sm:px-6 py-1.5 rounded-lg text-xs font-semibold capitalize opacity-60 cursor-not-allowed ${
                       form.tone === t
                         ? 'bg-[#5551FF] text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -196,43 +181,25 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
           {/* Right column */}
           <div className="space-y-8 lg:border-l lg:border-slate-100 lg:pl-10">
             <section className="space-y-3">
-              <h2 className="text-sm font-bold text-slate-900">Always hand over to me</h2>
+              <h2 className="text-sm font-bold text-slate-900">Handover rules — demo preview</h2>
               <p className="text-xs text-slate-500">
-                The assistant pauses and asks you to step in for:
+                The sample conversations demonstrate these handover situations. Automatic rule detection and custom rules are not available yet.
               </p>
               <div className="space-y-2.5">
                 {form.handoverRules.map((r) => (
                   <label
                     key={r.id}
-                    className="flex min-h-11 items-center gap-3 text-sm text-slate-700 cursor-pointer [overflow-wrap:anywhere]"
+                    className="flex min-h-11 items-center gap-3 text-sm text-slate-500 [overflow-wrap:anywhere]"
                   >
                     <input
                       type="checkbox"
                       checked={r.enabled}
-                      onChange={() => toggleRule(r.id)}
+                      disabled
                       className="w-4 h-4 shrink-0 rounded border-slate-300 accent-[#5551FF]"
                     />
                     {r.label}
                   </label>
                 ))}
-              </div>
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  aria-label="New handover rule"
-                  value={newRule}
-                  onChange={(e) => setNewRule(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addRule()}
-                  placeholder="Add a rule, e.g. Group bookings"
-                  className="min-w-0 flex-1 min-h-11 px-3 py-2 text-base sm:text-sm bg-white border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#5551FF]"
-                />
-                <button
-                  onClick={addRule}
-                  disabled={!newRule.trim()}
-                  className="flex min-h-11 shrink-0 items-center gap-1 px-3 py-2 text-xs font-semibold text-[#5551FF] hover:bg-[#5551FF]/8 rounded-xl transition-colors disabled:opacity-40"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add
-                </button>
               </div>
             </section>
 

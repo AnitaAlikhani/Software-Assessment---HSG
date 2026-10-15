@@ -31,6 +31,8 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
     endTime: addMinutes(startTime, duration),
     colorTheme: 'yellow',
     isAiBooked: request.isAiBooked === true,
+    prepMinutes: service?.prepMinutes ?? 0,
+    postMinutes: service?.postMinutes ?? 0,
   };
 }
 
@@ -45,14 +47,18 @@ export function appointmentFromConversationAction(
   const existing = events.find((event) => event.id === action.appointmentId);
   if (action.type === 'reschedule' && !existing) return null;
   const serviceName = action.type === 'book' ? action.serviceName : existing!.serviceName;
-  const service = services.find((item) => item.name === serviceName);
+  const service = action.type === 'reschedule' && existing?.serviceId
+    ? services.find(item => item.id === existing.serviceId)
+    : services.find((item) => item.name === serviceName);
   if (!service) return null;
   return {
     ...existing,
     id: action.appointmentId,
     customerName: conversation.customerName,
-    serviceName,
+    serviceName: service.name,
     serviceId: service.id,
+    prepMinutes: service.prepMinutes ?? 0,
+    postMinutes: service.postMinutes ?? 0,
     staffName: action.type === 'book' ? action.staffName : existing!.staffName,
     date: action.date,
     day: dayKeyForDate(action.date),
