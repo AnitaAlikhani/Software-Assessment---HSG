@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { Info, Calendar, Building2 } from 'lucide-react';
 
 export const AnalyticsView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'Appointments' | 'Messages' | 'Languages'>('Appointments');
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartScrolls = useHorizontalOverflow(chartRef);
   const [branch, setBranch] = useState('Bella Hair Salon');
   const [dateRange, setDateRange] = useState('05.09.2026 - 05.10.2026');
 
@@ -33,7 +36,7 @@ export const AnalyticsView: React.FC = () => {
           <select
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
-            className="px-3.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-2xs focus:outline-hidden"
+            className="min-h-11 px-3.5 py-1.5 bg-white border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-700 shadow-2xs focus:outline-hidden"
           >
             <option value="Bella Hair Salon">Bella Hair Salon</option>
           </select>
@@ -51,7 +54,7 @@ export const AnalyticsView: React.FC = () => {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`pb-3 transition-colors ${
+            className={`min-h-11 pb-3 pt-2 transition-colors ${
               activeTab === tab
                 ? 'text-[#5551FF] border-b-2 border-[#5551FF]'
                 : 'text-slate-400 hover:text-slate-700'
@@ -72,8 +75,8 @@ export const AnalyticsView: React.FC = () => {
         </div>
 
         {/* SVG Line Graph */}
-        <p id="analytics-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe the chart horizontally to see every date.</p>
-        <div role="region" aria-label="Appointment chart" aria-describedby="analytics-scroll-hint" tabIndex={0} className="relative max-w-full overflow-x-auto pt-4 pb-2 focus-visible:outline-2 focus-visible:outline-[#5551FF]">
+        {chartScrolls && <p id="analytics-scroll-hint" className="text-xs text-slate-500">Swipe the chart horizontally to see every date.</p>}
+        <div ref={chartRef} role="region" aria-label="Appointment chart" aria-describedby={chartScrolls ? 'analytics-scroll-hint' : undefined} tabIndex={chartScrolls ? 0 : undefined} className="relative max-w-full overflow-x-auto pt-4 pb-2 focus-visible:outline-2 focus-visible:outline-[#5551FF]">
           <div className="min-w-[640px]">
           <div className="h-52 w-full flex">
             {/* Y-axis labels */}
@@ -145,7 +148,7 @@ export const AnalyticsView: React.FC = () => {
       </div>
 
       {/* 3 Bottom Metric Cards matching Figma Page 13 */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Card 1: Number of Customers */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between space-y-4">
           <div className="flex items-center gap-1.5">

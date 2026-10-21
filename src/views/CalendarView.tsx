@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import {
   ChevronLeft,
   ChevronRight,
@@ -93,6 +94,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       ? Array.from({ length: 3 }, (_, index) => makeDay(addDays(date, index)))
       : days;
   const gridStyle = { gridTemplateColumns: `4rem repeat(${visibleDays.length}, minmax(0, 1fr))` };
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  const gridScrolls = useHorizontalOverflow(gridScrollRef, [activeView, visibleDays.length]);
+  useEffect(() => {
+    // On phones the week grid is wider than the card: bring the selected day's column into view.
+    const container = gridScrollRef.current;
+    const column = container?.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    if (!container || !column) return;
+    const timeColumnWidth = 64;
+    // Column position measured inside the scroll container (offsetLeft would be relative to the page).
+    const columnLeft = column.getBoundingClientRect().left - container.getBoundingClientRect().left + container.scrollLeft;
+    const columnRight = columnLeft + column.offsetWidth;
+    const visibleLeft = container.scrollLeft + timeColumnWidth;
+    const visibleRight = container.scrollLeft + container.clientWidth;
+    if (columnLeft < visibleLeft || columnRight > visibleRight) {
+      container.scrollLeft = Math.max(0, columnLeft - timeColumnWidth);
+    }
+  }, [date, activeView]);
   const navigationStep = activeView === 'Day' ? 1 : activeView === '3-day' ? 3 : 7;
   const visibleEvents = events
     .filter((event) => visibleDays.some((day) => day.key === event.date))
@@ -146,7 +164,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header / View Controller matching Figma */}
-      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+      <div className="flex flex-col min-[1350px]:flex-row items-start min-[1350px]:items-center justify-between gap-4">
         {/* Title & Navigation */}
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -174,14 +192,14 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
 
         {/* View switcher (List, Day, 3-day, Week, Filter) */}
-        <div className="flex max-w-full flex-wrap items-center gap-2 self-stretch xl:self-auto">
+        <div className="flex max-w-full flex-wrap items-center gap-2 self-stretch min-[1350px]:self-auto">
           <div className="grid w-full grid-cols-4 items-center bg-slate-100/90 p-1 rounded-xl text-xs font-medium text-slate-600 sm:flex sm:w-auto">
             {(['List', 'Day', '3-day', 'Week'] as const).map((view) => (
               <button
                 key={view}
                 aria-pressed={activeView === view}
                 onClick={() => setActiveView(view)}
-                className={`min-h-11 px-3 py-1.5 rounded-lg transition-all ${
+                className={`min-h-11 whitespace-nowrap px-2 py-1.5 rounded-lg transition-all sm:px-3 ${
                   activeView === view
                     ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                     : 'hover:text-slate-900 text-slate-500'
@@ -208,7 +226,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       </div>
 
-      {selectedEventId && !selectedEvent && <p role="status" className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">This appointment is no longer available. <button className="font-semibold text-[#5551FF] underline" onClick={() => onSelectEvent(null)}>View calendar</button></p>}
+      {selectedEventId && !selectedEvent && <p role="status" className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">This appointment is no longer available. <button className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-slate-50" onClick={() => onSelectEvent(null)}>View calendar</button></p>}
 
       {/* Calendar Grid View */}
       {activeView === 'List' ? (
@@ -241,9 +259,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       ) : (
         <div className="min-w-0">
-          {activeView !== 'Day' && <p className="mb-2 text-xs text-slate-500 xl:hidden">Scroll sideways to see all days. Use Day for a single-day view.</p>}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
-          <div className={activeView === 'Day' ? 'min-w-0' : activeView === '3-day' ? 'min-w-[640px]' : 'min-w-[760px]'}>
+          {gridScrolls && <p className="mb-2 text-xs text-slate-500">Scroll sideways to see all days. Use Day for a single-day view.</p>}
+          <div ref={gridScrollRef} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+          <div className={activeView === 'Week' ? 'min-w-[760px]' : 'min-w-0'}>
             {/* Days Column Headers */}
             <div style={gridStyle} className="grid border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50">
               <div className="sticky left-0 z-10 bg-slate-50 px-1 py-3.5 text-center text-slate-400 border-r border-slate-100">
@@ -252,6 +270,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               {visibleDays.map((d) => (
                 <div
                   key={d.key}
+                  data-date={d.key}
                   className={`p-3.5 text-center border-r last:border-r-0 border-slate-100 ${
                     d.closed ? 'text-slate-400 bg-slate-50/80' : 'text-slate-800'
                   }`}
@@ -328,7 +347,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               }`}
                             >
                               <div className="flex items-center justify-between gap-1">
-                                <span className="min-w-0 font-bold text-xs truncate">
+                                <span className="min-w-0 font-bold text-xs line-clamp-2 [overflow-wrap:anywhere]">
                                   {ev.customerName}
                                 </span>
                                 {ev.isAiBooked && (
@@ -468,7 +487,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
                     {services.map((service) => (
-                      <option key={service.id} value={service.id}>{service.name} ({service.durationMinutes} min, CHF {service.priceCHF})</option>
+                      <option key={service.id} value={service.id}>{service.name} · {service.durationMinutes} min</option>
                     ))}
                   </select>
                 </div>

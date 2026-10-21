@@ -67,6 +67,10 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const whatsAppDialogRef = useRef<HTMLDialogElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const wasDetailOpen = useRef(mobileDetailOpen);
 
   useEffect(() => {
     const dialog = whatsAppDialogRef.current;
@@ -95,6 +99,42 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
   const selected =
     conversations.find((c) => c.id === selectedId) ?? conversations[0] ?? null;
+  const selectedMessageCount = selected?.messages.length ?? 0;
+
+  // Phones show the chat as its own screen: bring it into view and move focus to its heading;
+  // going back returns focus to the conversation that was open.
+  useEffect(() => {
+    const phone = window.matchMedia('(max-width: 767px)').matches;
+    const wasOpen = wasDetailOpen.current;
+    wasDetailOpen.current = mobileDetailOpen;
+    if (!phone) return;
+    if (mobileDetailOpen && threadRef.current) {
+      const thread = threadRef.current;
+      const heading = thread.querySelector<HTMLElement>('h2');
+      // Scroll the window directly: scrollIntoView would align the card, not the thread, under the sticky header.
+      const headerHeight = document.querySelector('header')?.getBoundingClientRect().height ?? 0;
+      window.scrollTo({ top: thread.getBoundingClientRect().top + window.scrollY - headerHeight - 12 });
+      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+    } else if (!mobileDetailOpen && wasOpen && listRef.current) {
+      const row = listRef.current.querySelector<HTMLElement>('[aria-current="true"]') ?? listRef.current.querySelector<HTMLElement>('button');
+      row?.focus({ preventScroll: true });
+    }
+  }, [mobileDetailOpen, selectedId]);
+
+  // A Back gesture changes the conversation underneath an open preview: close it.
+  useEffect(() => { setShowWhatsApp(false); }, [selectedId, mobileDetailOpen]);
+
+  // The message pane scrolls on wide screens: keep the newest message in view, also when the
+  // banner above it changes size (take over / hand back) and when the pane itself resizes.
+  useEffect(() => {
+    const pane = messagesRef.current;
+    if (!pane) return;
+    const toBottom = () => { pane.scrollTop = pane.scrollHeight; };
+    toBottom();
+    const observer = new ResizeObserver(toBottom);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [selectedId, selectedMessageCount, selected?.takenOver, selected?.status]);
   const draft = selected ? drafts[selected.id] ?? '' : '';
 
   const tabs: { key: Filter; label: string }[] = [
@@ -180,15 +220,15 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
         Conversations
       </h1>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px]">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs md:overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px] md:h-[calc(100dvh-7rem)] md:min-h-[480px]">
         {/* Chat list */}
-        <div className={`md:col-span-4 min-w-0 border-b md:border-b-0 md:border-r border-slate-200/70 flex-col ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
-          <div className="flex items-center gap-3.5 px-4 pt-4 border-b border-slate-100 overflow-x-auto">
+        <div className={`md:col-span-4 lg:col-span-5 xl:col-span-4 min-w-0 min-h-0 border-b md:border-b-0 md:border-r border-slate-200/70 flex-col ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0 px-4 pt-3 border-b border-slate-100">
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setFilter(t.key)}
-                className={`min-h-11 pb-3 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center gap-1.5 ${
+                className={`min-h-11 min-w-11 px-1 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
                   filter === t.key
                     ? 'border-[#5551FF] text-slate-900'
                     : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -204,7 +244,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {visible.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-10 px-4">
                 No conversations in this view.
@@ -219,6 +259,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 <button
                   key={c.id}
                   onClick={() => onSelect(c.id)}
+                  aria-current={active ? 'true' : undefined}
                   className={`w-full text-left px-4 py-3.5 flex gap-3 border-b border-slate-100 transition-colors ${
                     active ? 'bg-[#5551FF]/7' : 'hover:bg-slate-50'
                   }`}
@@ -257,7 +298,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
         {/* Open chat */}
         {selected ? (
-          <div className={`md:col-span-8 min-w-0 flex-col min-h-[520px] ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
+          <div ref={threadRef} className={`md:col-span-8 lg:col-span-7 xl:col-span-8 min-w-0 min-h-[520px] md:min-h-0 flex-col ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
             {/* Chat header */}
             <div className="flex flex-col gap-3 px-4 sm:px-6 py-4 border-b border-slate-100">
               <button
@@ -378,7 +419,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             )}
 
             {/* Messages */}
-            <div className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-5 space-y-4">
+            <div ref={messagesRef} className="flex-1 min-w-0 md:min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-5 space-y-4">
               {selected.messages.map((m, i) =>
                 renderBubble(
                   selected,
@@ -392,7 +433,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
 
             {/* Composer */}
-            <div className="px-4 sm:px-6 pb-5 pt-3 border-t border-slate-100 space-y-3">
+            <div className="sticky bottom-0 z-10 rounded-b-2xl bg-white px-4 sm:px-6 pb-4 pt-3 border-t border-slate-100 space-y-3 md:static md:rounded-none">
               {!locked && selected.quickReplies && selected.quickReplies.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {selected.quickReplies.map((q) => (
@@ -449,7 +490,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
           </div>
         ) : (
-          <div className="md:col-span-8 flex items-center justify-center text-sm text-slate-400">
+          <div className="md:col-span-8 lg:col-span-7 xl:col-span-8 flex items-center justify-center text-sm text-slate-400">
             No conversations yet.
           </div>
         )}

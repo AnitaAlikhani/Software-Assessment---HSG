@@ -32,6 +32,18 @@ interface HeaderProps {
 
 type Dropdown = 'search' | 'notifications' | 'profile' | null;
 
+const useMediaQuery = (query: string) => {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+    update();
+    list.addEventListener('change', update);
+    return () => list.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+};
+
 export const Header: React.FC<HeaderProps> = ({
   onOpenMobileMenu, isMobileMenuOpen, searchQuery, onSearchChange, customers, appointmentRequests,
   calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment, onOpenPOSModal,
@@ -39,6 +51,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenConversations, onOpenSettings,
 }) => {
   const [openDropdown, setOpenDropdown] = useState<Dropdown>(null);
+  // Below 480px the search gets its own row under the icons, so it is rendered after them in the DOM
+  // (keyboard order = visual order); from 480px it sits between the menu button and the icons.
+  const narrowHeader = useMediaQuery('(max-width: 479px)');
+  const compactSearch = useMediaQuery('(min-width: 480px) and (max-width: 700px)');
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [readRevisions, setReadRevisions] = useState<Record<string, string[]>>({});
   const searchRef = useRef<HTMLDivElement>(null);
@@ -104,6 +120,8 @@ export const Header: React.FC<HeaderProps> = ({
     setOpenDropdown(null);
     setActiveResultIndex(-1);
     onSearchChange('');
+    // Release the field so the phone keyboard closes, also when the result is the page already shown.
+    searchInputRef.current?.blur();
     if (result.kind === 'customer') onSelectCustomer?.(result.record);
     else if (result.kind === 'request') onSelectRequest?.(result.record);
     else onSelectAppointment(result.record);
@@ -147,17 +165,8 @@ export const Header: React.FC<HeaderProps> = ({
     ]));
   };
 
-  return (
-    <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-y-2 px-4 sm:px-6 lg:px-8 py-2 sm:py-3.5 bg-white/95 backdrop-blur-md border-b border-slate-200/60">
-      <div className="flex items-center gap-3">
-        <button id="mobile-menu-trigger" type="button" onClick={onOpenMobileMenu}
-          className="lg:hidden flex h-11 w-11 items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl"
-          aria-label="Open navigation menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-sidebar">
-          <Menu className="w-5 h-5" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div ref={searchRef} className="relative order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-md sm:mx-6"
+  const searchField = (
+      <div ref={searchRef} className="w-full min-w-0 min-[480px]:relative min-[480px]:mx-3 min-[480px]:w-auto min-[480px]:flex-1 min-[480px]:max-w-md sm:mx-6"
         onBlur={(event) => closeWhenFocusLeaves(event, 'search')} onKeyDown={handleSearchKeyDown}>
         <label htmlFor="header-search" className="sr-only">Find customers, requests or appointments</label>
         <div className="relative">
@@ -169,11 +178,11 @@ export const Header: React.FC<HeaderProps> = ({
             autoComplete="off" value={searchQuery}
             onChange={(event) => { onSearchChange(event.target.value); setActiveResultIndex(-1); setOpenDropdown('search'); }}
             onFocus={() => setOpenDropdown('search')}
-            placeholder="Find customers or appointments"
+            placeholder={compactSearch ? 'Search' : 'Find customer or booking'}
             className="w-full min-h-11 pl-10 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-base sm:text-sm text-slate-700 placeholder-slate-400 rounded-full border border-transparent focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 transition-all" />
         </div>
         {searchIsOpen && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+          <div className="absolute top-full left-4 right-4 mt-2 bg-white rounded-2xl min-[480px]:left-0 min-[480px]:right-0 shadow-xl border border-slate-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
             <div id="header-search-results" role="listbox" aria-label="Search results" className="max-h-[min(20rem,calc(100dvh-9rem))] overflow-y-auto overscroll-contain">
               {searchResults.map((result, index) => {
                 const title = result.kind === 'customer' ? result.record.name : result.record.customerName;
@@ -200,7 +209,19 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
       </div>
+  );
 
+  return (
+    <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-y-2 px-4 sm:px-6 lg:px-8 py-2 sm:py-3.5 bg-white/95 backdrop-blur-md border-b border-slate-200/60">
+      <div className="flex items-center gap-3">
+        <button id="mobile-menu-trigger" type="button" onClick={onOpenMobileMenu}
+          className="lg:hidden flex h-11 w-11 items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl"
+          aria-label="Open navigation menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-sidebar">
+          <Menu className="w-5 h-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      {!narrowHeader && searchField}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <button type="button" onClick={onOpenConversations}
           className="relative flex h-11 w-11 items-center justify-center rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
@@ -230,7 +251,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <h2 id="header-notifications-title" className="font-semibold text-xs text-slate-800">Notifications</h2>
                 <span className="text-[11px] text-slate-400" aria-live="polite">{unreadCount} unread</span>
               </div>
-              {notifications.length > 0 && <button type="button" onClick={markAllRead} disabled={unreadCount === 0} className="text-[11px] font-semibold text-[#5551FF] hover:underline py-2 disabled:text-slate-400 disabled:no-underline">Mark all as read</button>}
+              {notifications.length > 0 && <button type="button" onClick={markAllRead} disabled={unreadCount === 0} className="inline-flex min-h-11 items-center text-[11px] font-semibold text-[#5551FF] hover:underline disabled:text-slate-400 disabled:no-underline">Mark all as read</button>}
               <div className="mt-2 min-h-0 space-y-2 max-h-72 overflow-y-auto overscroll-contain">
                 {notifications.map((notification) => {
                   const unread = isHeaderNotificationUnread(notification, readRevisions);
@@ -252,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
                 const attention = notifications.find((item) => item.kind === 'attention');
                 if (attention) markRead(attention);
                 setOpenDropdown(null); onOpenConversations();
-              }} className="w-full mt-3 pt-3 border-t border-slate-100 text-center text-xs font-semibold text-[#5551FF] hover:underline">View all conversations →</button>
+              }} className="mt-3 flex min-h-11 w-full items-center justify-center border-t border-slate-100 pt-2 text-center text-xs font-semibold text-[#5551FF] hover:underline">View all conversations →</button>
             </div>
           )}
         </div>
@@ -307,6 +328,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+      {narrowHeader && searchField}
     </header>
   );
 };

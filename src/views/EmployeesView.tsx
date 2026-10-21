@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import {
   Plus,
   ArrowLeft,
@@ -24,6 +25,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
   // Form State matching Figma Page 19, 33
   const [firstName, setFirstName] = useState('');
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrolls = useHorizontalOverflow(tableRef);
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [mobilePhone, setMobilePhone] = useState('');
@@ -237,12 +240,44 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           </div>
 
           {/* Employees Table matching Figma */}
-          <p id="employees-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe horizontally to see contact details and actions. Names stay visible.</p>
-          <div role="region" aria-label="Employees" aria-describedby="employees-scroll-hint" tabIndex={0} className="relative max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF]">
-            <div className="min-w-[760px]">
+          {/* Phones: one card per employee so every field is readable without sideways scrolling */}
+          <div className="space-y-2 md:hidden" aria-label="Employees">
+            {employees.map((emp) => (
+              <div key={emp.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-purple-50 text-[#5551FF] flex items-center justify-center font-bold text-[11px] shrink-0 border border-purple-100">
+                    {emp.initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{emp.name}</p>
+                    <span className="mt-0.5 inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">{emp.status}</span>
+                  </div>
+                  <button
+                    onClick={() => onDeleteEmployee(emp.id)}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
+                    aria-label={`Delete ${emp.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+                  <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{emp.email}</dd>
+                  <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{emp.phone}</dd>
+                  <dt className="text-slate-400">Location</dt><dd className="min-w-0 text-slate-500">{emp.location}</dd>
+                </dl>
+              </div>
+            ))}
+            {employees.length === 0 && (
+              <p className="rounded-2xl border border-slate-200/80 bg-white py-10 text-center text-xs text-slate-400">No employees yet. Add the first team member above.</p>
+            )}
+          </div>
+
+          {tableScrolls && <p id="employees-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see contact details and actions. Names stay visible.</p>}
+          <div ref={tableRef} role="region" aria-label="Employees" aria-describedby={tableScrolls ? 'employees-scroll-hint' : undefined} tabIndex={tableScrolls ? 0 : undefined} className="relative hidden max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF] md:block">
+            <div className="min-w-[700px]">
               {/* Table Header */}
-              <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-6 bg-slate-50">
-                <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-6 pr-3">Name</div>
+              <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-4 bg-slate-50">
+                <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
                 <div className="col-span-3">Email</div>
                 <div className="col-span-2 text-center">Account</div>
                 <div className="col-span-2">Phone</div>
@@ -254,20 +289,20 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 {employees.map((emp) => (
                   <div
                     key={emp.id}
-                    className="grid grid-cols-12 items-center py-4 pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group"
+                    className="grid grid-cols-12 items-center py-4 pr-4 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group"
                   >
                     {/* Name with initials circle */}
-                    <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-4 py-4 pl-6 pr-3">
+                    <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-4 py-4 pl-4 pr-3">
                       <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#5551FF] flex items-center justify-center font-bold text-[11px] shrink-0 border border-purple-100">
                         {emp.initials}
                       </div>
-                      <span className="font-semibold text-slate-900 truncate">
+                      <span className="font-semibold text-slate-900 truncate" title={emp.name}>
                         {emp.name}
                       </span>
                     </div>
 
                     {/* Email */}
-                    <div className="col-span-3 text-slate-600 truncate pr-2">
+                    <div className="col-span-3 text-slate-600 truncate pr-2" title={emp.email}>
                       {emp.email}
                     </div>
 
@@ -279,16 +314,16 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                     </div>
 
                     {/* Phone */}
-                    <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate">
+                    <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate" title={emp.phone}>
                       {emp.phone}
                     </div>
 
                     {/* Location & Delete */}
                     <div className="col-span-2 flex items-center justify-end gap-3 text-slate-500">
-                      <span className="truncate">{emp.location}</span>
+                      <span className="truncate" title={emp.location}>{emp.location}</span>
                       <button
                         onClick={() => onDeleteEmployee(emp.id)}
-                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
+                        className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
                         aria-label={`Delete ${emp.name}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import {
   Search,
   SlidersHorizontal,
@@ -21,6 +22,11 @@ interface CustomersViewProps {
   onOpenChat?: (customerName: string) => void;
 }
 
+const languageClass = (language: string) =>
+  language === 'EN' ? 'bg-amber-100/70 text-amber-800'
+    : language === 'FR' ? 'bg-purple-100/70 text-purple-800'
+    : 'bg-emerald-100/70 text-emerald-800';
+
 export const CustomersView: React.FC<CustomersViewProps> = ({
   customers,
   selectedCustomerId,
@@ -30,6 +36,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   onOpenChat,
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrolls = useHorizontalOverflow(tableRef);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -147,20 +155,51 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
       {selectedCustomerId && <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-slate-700">
         <span>{selectedCustomer ? `Showing ${selectedCustomer.name}` : 'This customer is no longer available.'}</span>
-        <button onClick={() => { setFilterQuery(''); onClearSelection(); }} className="font-semibold text-[#5551FF] underline">View all customers</button>
+        <button onClick={() => { setFilterQuery(''); onClearSelection(); }} className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-indigo-100/60">View all customers</button>
       </div>}
 
+      {/* Phones: one card per customer so every field is readable without sideways scrolling */}
+      <div className="space-y-2 md:hidden" aria-label="Customers">
+        {filteredCustomers.map((cust) => (
+          <div key={cust.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
+                {cust.initials}
+              </div>
+              <button onClick={() => onOpenChat?.(cust.name)} className="min-h-11 min-w-0 flex-1 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
+              <span className={`shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>{cust.language}</span>
+              <button
+                onClick={() => onDeleteCustomer(cust.id)}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
+                aria-label={`Delete ${cust.name}`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+              <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{cust.email}</dd>
+              <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{cust.phone}</dd>
+              <dt className="text-slate-400">Last booking</dt><dd className="min-w-0 text-slate-500">{cust.lastBooking}</dd>
+              <dt className="text-slate-400">Bookings</dt><dd className="min-w-0 font-semibold tabular-nums text-slate-800">{cust.bookingsCount}</dd>
+            </dl>
+          </div>
+        ))}
+        {filteredCustomers.length === 0 && (
+          <p className="rounded-2xl border border-slate-200/80 bg-white py-10 text-center text-xs text-slate-400">No customers found matching "{filterQuery}"</p>
+        )}
+      </div>
+
       {/* Customers Table matching Figma Page 14 */}
-      <p id="customers-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe horizontally to see contact details and actions. Names stay visible.</p>
-      <div role="region" aria-label="Customers" aria-describedby="customers-scroll-hint" tabIndex={0} className="relative max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF]">
-        <div className="min-w-[780px]">
+      {tableScrolls && <p id="customers-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see contact details and actions. Names stay visible.</p>}
+      <div ref={tableRef} role="region" aria-label="Customers" aria-describedby={tableScrolls ? 'customers-scroll-hint' : undefined} tabIndex={tableScrolls ? 0 : undefined} className="relative hidden max-w-full bg-white rounded-2xl md:rounded-b-none border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF] md:block">
+        <div className="min-w-[700px]">
           {/* Header Row */}
           <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-6 bg-slate-50">
-            <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-6 pr-3">Name</div>
+            <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
             <div className="col-span-3">Email</div>
             <div className="col-span-2">Phone</div>
-            <div className="col-span-1 text-center">Language</div>
-            <div className="col-span-2">Last booking</div>
+            <div className="col-span-1 text-center text-[11px]">Language</div>
+            <div className="col-span-2 pl-2">Last booking</div>
             <div className="col-span-1 text-right">Bookings</div>
           </div>
 
@@ -174,15 +213,15 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 className="grid grid-cols-12 items-center py-3.5 pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group cursor-pointer"
               >
                 {/* Name with initials circle */}
-                <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-6 pr-3">
+                <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
-                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
+                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} title={cust.name} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
                 </div>
 
                 {/* Email */}
-                <div className="col-span-3 text-slate-600 truncate pr-2">{cust.email}</div>
+                <div className="col-span-3 text-slate-600 truncate pr-2" title={cust.email}>{cust.email}</div>
 
                 {/* Phone */}
                 <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate">
@@ -191,21 +230,13 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
                 {/* Language Tag */}
                 <div className="col-span-1 flex justify-center">
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                      cust.language === 'EN'
-                        ? 'bg-amber-100/70 text-amber-800'
-                        : cust.language === 'FR'
-                        ? 'bg-purple-100/70 text-purple-800'
-                        : 'bg-emerald-100/70 text-emerald-800'
-                    }`}
-                  >
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>
                     {cust.language}
                   </span>
                 </div>
 
                 {/* Last Booking */}
-                <div className="col-span-2 text-slate-500 truncate">{cust.lastBooking}</div>
+                <div className="col-span-2 pl-2 text-slate-500 truncate">{cust.lastBooking}</div>
 
                 {/* Bookings Count & Trash */}
                 <div className="col-span-1 flex items-center justify-end gap-1">
@@ -227,18 +258,18 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               </div>
             ))}
 
-            {filteredCustomers.length === 0 && (
-              <div className="py-12 text-center text-xs text-slate-400">
-                No customers found matching "{filterQuery}"
-              </div>
-            )}
           </div>
         </div>
+        {filteredCustomers.length === 0 && (
+          <div className="py-12 text-center text-xs text-slate-400">
+            No customers found matching "{filterQuery}"
+          </div>
+        )}
 
-        {/* Table Footer Pagination matching Figma Page 14 */}
-        <div className="p-4 border-t border-slate-100 text-center text-xs text-slate-400">
-          {filteredCustomers.length ? 1 : 0}-{filteredCustomers.length} of {filteredCustomers.length} customers
-        </div>
+      </div>
+      {/* Table Footer Pagination matching Figma Page 14 */}
+      <div className="-mt-6 hidden rounded-b-2xl border border-t-0 border-slate-200/80 bg-white p-4 text-center text-xs text-slate-400 md:block">
+        {filteredCustomers.length ? 1 : 0}-{filteredCustomers.length} of {filteredCustomers.length} customers
       </div>
 
       {/* Add Customer Modal */}

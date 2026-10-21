@@ -204,6 +204,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 <input
                   id="resource-capacity"
                   type="number"
+                  inputMode="numeric"
                   min="1"
                   value={capacity}
                   onChange={(e) => setCapacity(Number(e.target.value))}
@@ -242,7 +243,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     type="checkbox"
                     checked={reserveEntireRoom}
                     onChange={(e) => setReserveEntireRoom(e.target.checked)}
-                    className="rounded text-[#5551FF] focus:ring-[#5551FF] mt-0.5"
+                    className="h-5 w-5 shrink-0 rounded accent-[#5551FF] mt-0.5"
                   />
                   <span>First booking reserves entire room</span>
                 </label>
@@ -252,7 +253,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     type="checkbox"
                     checked={visibleOnline}
                     onChange={(e) => setVisibleOnline(e.target.checked)}
-                    className="rounded text-[#5551FF] focus:ring-[#5551FF] mt-0.5"
+                    className="h-5 w-5 shrink-0 rounded accent-[#5551FF] mt-0.5"
                   />
                   <span>
                     Your customers can choose this resource in the booking widget (visible online)
@@ -264,7 +265,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     type="checkbox"
                     checked={allServices}
                     onChange={(e) => setAllServices(e.target.checked)}
-                    className="rounded text-[#5551FF] focus:ring-[#5551FF] mt-0.5"
+                    className="h-5 w-5 shrink-0 rounded accent-[#5551FF] mt-0.5"
                   />
                   <span>Can be booked for all services</span>
                 </label>
@@ -274,7 +275,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                     type="checkbox"
                     checked={generalHours}
                     onChange={(e) => setGeneralHours(e.target.checked)}
-                    className="rounded text-[#5551FF] focus:ring-[#5551FF] mt-0.5"
+                    className="h-5 w-5 shrink-0 rounded accent-[#5551FF] mt-0.5"
                   />
                   <span>Bookable during general booking hours</span>
                 </label>

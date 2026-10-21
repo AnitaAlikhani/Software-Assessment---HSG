@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { Plus, X, Trash2 } from 'lucide-react';
 import { Employee, ServiceItem } from '../types';
 
@@ -12,6 +13,8 @@ interface ServicesViewProps {
 
 export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees, onAddService, onUpdateService, onDeleteService }) => {
   const [editingService, setEditingService] = useState<ServiceItem | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrolls = useHorizontalOverflow(tableRef);
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [showInBooking, setShowInBooking] = useState(true);
@@ -37,6 +40,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
     if (!isOpen) return;
     const trigger = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     dialog?.querySelector<HTMLInputElement>('#service-name')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
@@ -48,7 +53,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => { document.removeEventListener('keydown', onKeyDown); trigger?.focus(); };
+    return () => { document.removeEventListener('keydown', onKeyDown); document.body.style.overflow = previousOverflow; trigger?.focus(); };
   }, [isOpen]);
 
   const startEdit = (service: ServiceItem) => {
@@ -104,11 +109,43 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
         </button>
       </div>
       <p className="text-sm text-slate-500">Choose which employees provide each service. Their shifts, availability and preparation time determine the bookable slots.</p>
-      <p id="services-scroll-hint" className="text-xs text-slate-500 xl:hidden">Swipe horizontally to see booking settings and actions. Service names stay visible.</p>
-      <div role="region" aria-label="Services" aria-describedby="services-scroll-hint" tabIndex={0} className="relative max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF]">
+      {/* Phones: one card per service with every setting reachable without sideways scrolling */}
+      <div className="space-y-2 md:hidden" aria-label="Services">
+        {services.map((service) => {
+          const assignments = resolveAssignments(service);
+          const unassigned = assignments.length === 0;
+          return <div key={service.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <button onClick={() => startEdit(service)} className="min-h-11 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button>
+                <p className="text-slate-500 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && ` (+ ${(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time)`} · {assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</p>
+              </div>
+              <span className="shrink-0 font-semibold tabular-nums">CHF {service.priceCHF.toFixed(2)}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 font-semibold text-slate-700">
+                <input type="checkbox" checked={service.onlineBooking}
+                  onChange={(event) => onUpdateService(service.id, { onlineBooking: event.target.checked, assignedEmployeeIds: assignments, assignedEmployeesCount: assignments.length })}
+                  disabled={!service.onlineBooking && unassigned} aria-describedby={unassigned ? `service-${service.id}-hint` : undefined}
+                  className="h-5 w-5 accent-[#5551FF]" />
+                Online booking
+              </label>
+              <div className="flex items-center gap-2">
+                <button onClick={() => startEdit(service)} className="min-h-11 min-w-11 px-2 font-semibold text-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button>
+                <button onClick={() => onDeleteService(service.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${service.name}`}><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+            {unassigned && <p id={`service-${service.id}-hint`} className="text-slate-500">Assign an employee in Edit service to offer it online.</p>}
+          </div>;
+        })}
+        {services.length === 0 && <p className="rounded-2xl border border-slate-200/80 bg-white p-8 text-center text-xs text-slate-500">No services yet. Add a service and assign the employees who provide it.</p>}
+      </div>
+
+      {tableScrolls && <p id="services-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see booking settings and actions. Service names stay visible.</p>}
+      <div ref={tableRef} role="region" aria-label="Services" aria-describedby={tableScrolls ? 'services-scroll-hint' : undefined} tabIndex={tableScrolls ? 0 : undefined} className="relative hidden max-w-full bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF] md:block">
         <table className="w-full min-w-[700px] text-xs text-left">
-          <thead className="text-slate-500 bg-slate-50/50 border-b border-slate-100">
-            <tr><th className="sticky left-0 z-10 w-44 min-w-44 bg-slate-50 py-3.5 px-4">Name</th><th className="py-3.5 px-4">Duration</th><th className="py-3.5 px-4">Price</th><th className="py-3.5 px-4">Online booking</th><th className="py-3.5 px-4">Employees</th><th className="relative py-3.5 px-4"><span className="sr-only">Actions</span></th></tr>
+          <thead className="text-slate-500 bg-slate-50 border-b border-slate-100">
+            <tr><th className="sticky left-0 z-10 w-40 min-w-40 bg-slate-50 py-3.5 px-4">Name</th><th className="py-3.5 px-4">Duration</th><th className="py-3.5 px-4">Price</th><th className="py-3.5 px-4">Online booking</th><th className="py-3.5 px-4">Employees</th><th className="relative py-3.5 px-4"><span className="sr-only">Actions</span></th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {services.map((service) => {
@@ -116,35 +153,36 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
               return <tr key={service.id} className="group hover:bg-slate-50">
                 <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 py-4 px-4"><button onClick={() => startEdit(service)} className="min-h-11 max-w-40 [overflow-wrap:anywhere] text-left font-semibold text-slate-900 hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button></td>
                 <td className="py-4 px-4 text-slate-600 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && <span className="block text-[11px] text-slate-400">+ {(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time</span>}</td>
-                <td className="py-4 px-4 font-semibold tabular-nums">CHF {service.priceCHF.toFixed(2)}</td>
+                <td className="py-4 px-4 font-semibold tabular-nums whitespace-nowrap">CHF {service.priceCHF.toFixed(2)}</td>
                 <td className="py-4 px-4">
                   <label className="relative inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
                   <input type="checkbox" aria-label={`Show ${service.name} in online booking`} checked={service.onlineBooking}
                     onChange={(event) => onUpdateService(service.id, { onlineBooking: event.target.checked, assignedEmployeeIds: assignments, assignedEmployeesCount: assignments.length })}
-                    disabled={!service.onlineBooking && assignments.length === 0} title={assignments.length === 0 ? 'Assign an employee in Edit service first' : undefined}
+                    disabled={!service.onlineBooking && assignments.length === 0} aria-describedby={assignments.length === 0 ? `service-${service.id}-table-hint` : undefined}
                     className="h-4 w-4 accent-[#5551FF]" />
                   </label>
+                  {assignments.length === 0 && <span id={`service-${service.id}-table-hint`} className="block max-w-28 text-[10px] leading-tight text-slate-400">Assign an employee first</span>}
                 </td>
-                <td className="py-4 px-4 text-slate-500">{assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</td>
+                <td className="py-4 px-4 text-slate-500 whitespace-nowrap">{assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</td>
                 <td className="py-4 px-2 sm:px-4"><div className="flex items-center justify-end gap-2"><button onClick={() => startEdit(service)} className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button><button onClick={() => onDeleteService(service.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${service.name}`}><Trash2 className="w-4 h-4" /></button></div></td>
               </tr>;
             })}
-            {services.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-slate-500">No services yet. Add a service and assign the employees who provide it.</td></tr>}
           </tbody>
         </table>
+        {services.length === 0 && <p className="p-8 text-center text-xs text-slate-500">No services yet. Add a service and assign the employees who provide it.</p>}
       </div>
       {isOpen && <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end" onClick={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
-        <form ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="service-title" onSubmit={handleSave} className="w-full max-w-lg bg-white h-full shadow-2xl p-6 sm:p-7 overflow-y-auto space-y-5 flex flex-col text-xs">
+        <form ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="service-title" onSubmit={handleSave} className="w-full max-w-lg bg-white h-full shadow-2xl p-6 sm:p-7 overflow-y-auto overscroll-contain space-y-5 flex flex-col text-xs">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100"><h2 id="service-title" className="text-base font-bold text-slate-900">{isCreating ? 'Create Service' : 'Edit Service'}</h2><button type="button" aria-label="Close service editor" onClick={closeModal} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button></div>
           <label className="flex min-h-11 items-center justify-between font-semibold text-slate-700">Show in online booking<input type="checkbox" checked={showInBooking} onChange={(event) => setShowInBooking(event.target.checked)} className="h-4 w-4 accent-[#5551FF]" /></label>
           <div><label htmlFor="service-name" className="font-semibold text-slate-700 block mb-1">Name</label><input id="service-name" required value={name} onChange={(event) => setName(event.target.value)} className={inputClass} /></div>
           <div><label htmlFor="service-category" className="font-semibold text-slate-700 block mb-1">Category</label><select id="service-category" value={category} onChange={(event) => setCategory(event.target.value)} className={inputClass}>{['No category', 'Hair', 'Haircut', 'Colour', 'Treatment'].map((item) => <option key={item}>{item}</option>)}</select></div>
           <div><label htmlFor="service-description" className="font-semibold text-slate-700 block mb-1">Description</label><textarea id="service-description" rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Help customers choose the right service." className={inputClass} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><label htmlFor="service-price" className="font-semibold text-slate-700 block mb-1">Price (CHF)</label><input id="service-price" type="number" required min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} className={inputClass} /></div>
-            <div><label htmlFor="service-duration" className="font-semibold text-slate-700 block mb-1">Duration (minutes)</label><input id="service-duration" type="number" required min="1" max="1439" step="1" value={duration} onChange={(event) => setDuration(event.target.value)} className={inputClass} /></div>
-            <div><label htmlFor="service-preparation" className="font-semibold text-slate-700 block mb-1">Preparation (minutes)</label><input id="service-preparation" type="number" required min="0" max="1439" step="1" value={prepTime} onChange={(event) => setPrepTime(event.target.value)} className={inputClass} /></div>
-            <div><label htmlFor="service-cleanup" className="font-semibold text-slate-700 block mb-1">Cleanup (minutes)</label><input id="service-cleanup" type="number" required min="0" max="1439" step="1" value={postTime} onChange={(event) => setPostTime(event.target.value)} className={inputClass} /></div>
+            <div><label htmlFor="service-price" className="font-semibold text-slate-700 block mb-1">Price (CHF)</label><input id="service-price" type="number" inputMode="decimal" required min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} className={inputClass} /></div>
+            <div><label htmlFor="service-duration" className="font-semibold text-slate-700 block mb-1">Duration (minutes)</label><input id="service-duration" type="number" inputMode="numeric" required min="1" max="1439" step="1" value={duration} onChange={(event) => setDuration(event.target.value)} className={inputClass} /></div>
+            <div><label htmlFor="service-preparation" className="font-semibold text-slate-700 block mb-1">Preparation (minutes)</label><input id="service-preparation" type="number" inputMode="numeric" required min="0" max="1439" step="1" value={prepTime} onChange={(event) => setPrepTime(event.target.value)} className={inputClass} /></div>
+            <div><label htmlFor="service-cleanup" className="font-semibold text-slate-700 block mb-1">Cleanup (minutes)</label><input id="service-cleanup" type="number" inputMode="numeric" required min="0" max="1439" step="1" value={postTime} onChange={(event) => setPostTime(event.target.value)} className={inputClass} /></div>
           </div>
           <p className="text-slate-500">Preparation is reserved before the appointment and cleanup afterwards. Customers see the appointment duration.</p>
           <fieldset className="space-y-2"><legend className="font-semibold text-slate-700 mb-2">Employees who provide this service</legend>

@@ -128,7 +128,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {currentRequest ? (
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
               {/* Date Block + Info */}
-              <div className="flex items-start gap-5">
+              <div className="flex items-start gap-3 sm:gap-5">
                 {/* Request date */}
                 <div className="flex flex-col items-center justify-center w-16 h-18 rounded-xl border border-slate-200/90 bg-white p-2 shrink-0 shadow-2xs">
                   <span className="text-[11px] font-bold text-slate-400 tracking-wider">
@@ -212,8 +212,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onClick={onSimulateNewRequest}
                   className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors border border-[#5551FF]/20"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Simulate incoming booking</span>
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">Simulate incoming booking</span>
                 </button>
               </div>}
             </div>
@@ -223,21 +223,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {(requests.length > 1 || (unavailableRequest && requests.length > 0)) && (
             <div className="mt-5 pt-4 border-t border-slate-100 space-y-2">
               <p className="text-xs font-semibold text-slate-500">{requests.length} pending {requests.length === 1 ? 'request' : 'requests'}</p>
-              <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1" aria-label="Pending appointment requests">
+              <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 sm:max-h-44" aria-label="Pending appointment requests">
                 {requests.map((request) => (
                   <button
                     key={request.id}
                     type="button"
                     aria-pressed={currentRequest?.id === request.id}
                     onClick={() => onSelectRequest(request.id)}
-                    className={`w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-xs border transition-colors ${
+                    className={`w-full flex min-h-11 flex-col items-start gap-0.5 rounded-xl px-3 py-2 text-left text-xs border transition-colors sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
                       currentRequest?.id === request.id
                         ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
                         : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-indigo-50/50'
                     }`}
                   >
-                    <span className="font-semibold">{request.customerName}</span>
-                    <span className="text-right tabular-nums">{formatCalendarDate(request.date)} · {request.timeStr}</span>
+                    <span className="min-w-0 max-w-full truncate font-semibold">{request.customerName}</span>
+                    <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500 sm:text-right">{formatCalendarDate(request.date)} · {request.timeStr}</span>
                   </button>
                 ))}
               </div>
@@ -279,7 +279,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAppointment(nextAppointment)}
-                className="font-semibold text-[#5551FF] hover:underline"
+                className="inline-flex min-h-11 items-center rounded-lg px-2 -mr-2 font-semibold text-[#5551FF] hover:underline"
               >
                 View appointment
               </button>
@@ -292,8 +292,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       <div className="lg:col-span-8 space-y-4">
         {/* Header & Export Button */}
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">
               Sample activity
             </h2>
@@ -302,7 +302,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
           <button
             onClick={onExportActivity}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200/80 shadow-2xs transition-colors"
+            className="flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200/80 shadow-2xs transition-colors"
           >
             <Share2 className="w-3.5 h-3.5 text-slate-500" />
             <span>Export sample</span>
@@ -310,7 +310,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         {/* 4 Stat Cards matching Figma */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* Messages */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
             <div className="flex items-center justify-between">
@@ -387,10 +387,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
         {/* Conversations card */}
         <div className="lg:col-span-4 bg-white rounded-2xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-slate-200/70 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-800">Conversations</h3>
             {needingAttention.length > 0 && (
-              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+              <span className="shrink-0 whitespace-nowrap text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
                 {needingAttention.length} need you
               </span>
             )}
@@ -433,7 +433,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
           <button
             onClick={() => onOpenConversations()}
-            className="w-full pt-3 border-t border-slate-100 text-left text-xs font-semibold text-[#5551FF] hover:underline"
+            className="flex min-h-11 w-full items-center border-t border-slate-100 pt-2 text-left text-xs font-semibold text-[#5551FF] hover:underline"
           >
             Open conversations →
           </button>
@@ -457,7 +457,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               setMovingRequestId(null);
             }
           }}
-          className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs"
+          className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 text-slate-800 shadow-2xl backdrop:bg-slate-900/40 backdrop:backdrop-blur-xs"
         >
           <form
             onSubmit={(event) => {
@@ -524,7 +524,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 )}
               </div>
               {moveError && <p role="alert" className="text-xs text-rose-600 rounded-xl bg-rose-50 p-3">{moveError}</p>}
-              <div className="flex gap-2 pt-3">
+              <div className="sticky -bottom-4 -mx-4 flex gap-2 border-t border-slate-100 bg-white px-4 pt-3 pb-4 shadow-[0_-6px_12px_-8px_rgba(15,23,42,0.25)] sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6 sm:-mb-6 -mb-4">
                 <button
                   type="button"
                   onClick={() => setMovingRequestId(null)}

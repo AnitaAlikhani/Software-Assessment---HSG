@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+/* Pull-to-refresh and rubber-banding must not fire from inside drawers, dialogs and popovers. */
+html, body {
+  overscroll-behavior-y: none;
+}
+
+/* iOS Safari zooms the page when a focused form control is smaller than 16px.
+   This rule is intentionally unlayered so it beats `text-xs`/`text-sm` utilities below 640px. */
+@media (max-width: 639px), ((pointer: coarse) and (max-width: 1023px)) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+@layer base {
+  /* Keep touch scrolling inside open dialogs: iOS Safari otherwise pans the page behind a modal
+     while its toolbar is collapsed, even with body overflow hidden. */
+  dialog[open] {
+    overscroll-behavior: contain;
+    touch-action: pan-y pinch-zoom;
+  }
+}

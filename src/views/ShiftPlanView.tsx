@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { ChevronLeft, ChevronRight, Plus, ArrowLeft, X, Info, Clock } from 'lucide-react';
 import { Employee, ShiftEntry } from '../types';
 import { addDays, formatCalendarDate, formatDate, startOfWeek } from '../scheduling';
@@ -26,6 +27,8 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
   const [end, setEnd] = useState('18:00');
   const [error, setError] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableScrolls = useHorizontalOverflow(tableRef, [selectedEmployeeId]);
   const employeeSelectRef = useRef<HTMLSelectElement>(null);
 
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
@@ -173,19 +176,19 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
         </div>
       ) : (
         <div className="min-w-0">
-          <p className="mb-2 text-xs text-slate-500 xl:hidden">Scroll sideways to see all days, or select an employee for their daily schedule.</p>
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
+          {tableScrolls && <p className="mb-2 text-xs text-slate-500">Scroll sideways to see all days, or select an employee for their daily schedule.</p>}
+          <div ref={tableRef} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-x-auto">
           <table className="w-full min-w-[860px] text-xs text-left">
-            <thead className="text-slate-400 bg-slate-50/50 border-b border-slate-100">
-              <tr><th scope="col" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 bg-slate-50 py-3.5 px-3 font-semibold border-r border-slate-100">Employee</th>{days.map((date) => <th scope="col" key={date} className="py-3.5 px-2 text-center font-semibold whitespace-nowrap">{formatCalendarDate(date)}</th>)}</tr>
+            <thead className="text-slate-400 bg-slate-50 border-b border-slate-100">
+              <tr><th scope="col" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 md:w-44 md:min-w-44 md:max-w-44 xl:w-56 xl:min-w-56 xl:max-w-56 bg-slate-50 py-3.5 px-3 font-semibold border-r border-slate-100">Employee</th>{days.map((date) => <th scope="col" key={date} className="py-3.5 px-2 text-center font-semibold whitespace-nowrap">{formatCalendarDate(date)}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {employees.map((employee) => (
-                <tr key={employee.id} className="hover:bg-slate-50/60">
-                  <th scope="row" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 bg-white py-4 px-3 border-r border-slate-100">
+                <tr key={employee.id} className="group hover:bg-slate-50/60">
+                  <th scope="row" className="sticky left-0 z-10 w-40 min-w-40 max-w-40 md:w-44 md:min-w-44 md:max-w-44 xl:w-56 xl:min-w-56 xl:max-w-56 bg-white group-hover:bg-slate-50 py-4 px-3 border-r border-slate-100">
                     <button onClick={() => setSelectedEmployeeId(employee.id)} className="flex min-h-11 w-full min-w-0 items-center gap-2.5 text-left text-slate-800 hover:text-[#5551FF]" aria-label={`View shifts for ${employee.name}`} title={employee.name}>
                       <span className="w-8 h-8 rounded-xl bg-purple-50 text-[#5551FF] flex items-center justify-center font-bold shrink-0">{employee.initials}</span>
-                      <span className="min-w-0 font-semibold truncate">{employee.name}</span>
+                      <span className="min-w-0 font-semibold line-clamp-2 [overflow-wrap:anywhere]">{employee.name}</span>
                     </button>
                   </th>
                   {days.map((date) => {
@@ -206,7 +209,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
 
       {showEditor && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end" onClick={(event) => { if (event.target === event.currentTarget) setShowEditor(false); }}>
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shift-editor-title" className="w-full max-w-md bg-white h-full shadow-2xl p-6 overflow-y-auto">
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shift-editor-title" className="w-full max-w-md bg-white h-full shadow-2xl p-4 sm:p-6 overflow-y-auto overscroll-contain">
             <form onSubmit={saveShift} className="flex flex-col min-h-full gap-5 text-xs">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <h2 id="shift-editor-title" className="text-base font-bold text-slate-900">{shiftFor(editorEmployeeId, editorDate) ? 'Edit Shift' : 'New Shift'}</h2>
@@ -233,7 +236,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
                 </div>
               ) : <p className="text-slate-500 leading-relaxed">Saving will remove any shift on this date. No booking slots will be offered for this employee on this date.</p>}
               {error && <p role="alert" className="text-rose-600">{error}</p>}
-              <div className="flex gap-2 mt-auto pt-4 border-t border-slate-100">
+              <div className="sticky -bottom-4 -mx-4 mt-auto flex gap-2 border-t border-slate-100 bg-white px-4 pt-3 pb-4 sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6">
                 <button type="button" onClick={() => setShowEditor(false)} className="min-h-11 flex-1 py-2.5 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
                 <button type="submit" className="min-h-11 flex-1 py-2.5 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs">Save</button>
               </div>

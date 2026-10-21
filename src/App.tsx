@@ -58,32 +58,49 @@ export default function App() {
   const [publicMode, setPublicMode] = useState(new URLSearchParams(window.location.search).get('booking') === '1');
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(window.location.hash));
   const currentTab = route.tab;
-  const navigate = (next: AppRoute) => {
+  const mainRef = useRef<HTMLElement>(null);
+  const focusMainHeading = () => {
+    if (document.querySelector('dialog[open]')) return;
+    const heading = mainRef.current?.querySelector<HTMLElement>('h1');
+    if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+    else mainRef.current?.focus({ preventScroll: true });
+  };
+  const navigate = (next: AppRoute, options: { replace?: boolean } = {}) => {
     const hash = routeHash(next);
-    if (window.location.hash !== hash) window.location.hash = hash;
+    if (window.location.hash !== hash) {
+      // Closing an overlay replaces the entry so the phone's Back gesture does not re-open it.
+      if (options.replace) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+      else window.location.hash = hash;
+    } else {
+      // The target is the page already shown (search result, notification, account menu): still give focus feedback.
+      requestAnimationFrame(focusMainHeading);
+    }
     setRoute(next);
   };
   const setCurrentTab = (tab: NavigationTab) => navigate({ tab });
-  const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const onHashChange = () => setRoute(parseRoute(window.location.hash));
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+  // Only a change of page resets the scroll position and moves focus to its heading.
+  // Selecting a record inside a page (request, customer, appointment, conversation) keeps the
+  // user's scroll position; on phones that selection is often several screens down.
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0 });
-    const frame = requestAnimationFrame(() => {
-      if (document.querySelector('dialog[open]')) return;
-      const heading = mainRef.current?.querySelector<HTMLElement>('h1');
-      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
-      else mainRef.current?.focus({ preventScroll: true });
-    });
+    const frame = requestAnimationFrame(focusMainHeading);
     return () => cancelAnimationFrame(frame);
-  }, [route.tab, route.requestId, route.customerId, route.appointmentId, route.conversationId]);
+  }, [route.tab]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPOSOpen, setIsPOSOpen] = useState(false);
   const [isPilotInterestOpen, setIsPilotInterestOpen] = useState(false);
+  useEffect(() => {
+    // A Back/Forward gesture changes the page behind an open drawer or dialog; close them.
+    setIsMobileMenuOpen(false);
+    setIsPOSOpen(false);
+    setIsPilotInterestOpen(false);
+  }, [route.tab, route.requestId, route.customerId, route.appointmentId, route.conversationId]);
   const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
@@ -146,7 +163,8 @@ export default function App() {
   const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ message, kind, action });
-    if (!action) toastTimer.current = setTimeout(() => setToast(null), kind === 'error' ? 7000 : 4000);
+    // Action toasts stay longer, but never forever: on phones the toast covers the next controls.
+    toastTimer.current = setTimeout(() => setToast(null), action ? 10000 : kind === 'error' ? 7000 : 4000);
   };
 
   // Home request actions
@@ -386,9 +404,16 @@ export default function App() {
     showToast(`Customer ${cust.name} added`);
   };
 
+  // Deleting is a single tap on touch screens, so every delete offers an Undo instead of a confirm dialog.
+  const restoreAt = <T extends { id: string }>(list: T[], item: T, index: number) =>
+    list.some((entry) => entry.id === item.id) ? list : [...list.slice(0, index), item, ...list.slice(index)];
+
   const handleDeleteCustomer = (id: string) => {
-    setCustomers(customers.filter((c) => c.id !== id));
-    showToast('Customer deleted');
+    const index = customers.findIndex((c) => c.id === id);
+    if (index < 0) return;
+    const removed = customers[index];
+    setCustomers((previous) => previous.filter((c) => c.id !== id));
+    showToast(`Customer ${removed.name} deleted`, 'info', { label: 'Undo', onClick: () => { setCustomers((previous) => restoreAt(previous, removed, index)); setToast(null); } });
   };
 
   // Resources
@@ -402,8 +427,11 @@ export default function App() {
   };
 
   const handleDeleteResource = (id: string) => {
-    setResources(resources.filter((r) => r.id !== id));
-    showToast('Resource removed');
+    const index = resources.findIndex((r) => r.id === id);
+    if (index < 0) return;
+    const removed = resources[index];
+    setResources((previous) => previous.filter((r) => r.id !== id));
+    showToast(`Resource ${removed.name} removed`, 'info', { label: 'Undo', onClick: () => { setResources((previous) => restoreAt(previous, removed, index)); setToast(null); } });
   };
 
   // Employees
@@ -423,8 +451,11 @@ export default function App() {
   };
 
   const handleDeleteEmployee = (id: string) => {
-    setEmployees(employees.filter((e) => e.id !== id));
-    showToast('Employee deleted');
+    const index = employees.findIndex((e) => e.id === id);
+    if (index < 0) return;
+    const removed = employees[index];
+    setEmployees((previous) => previous.filter((e) => e.id !== id));
+    showToast(`Employee ${removed.name} deleted`, 'info', { label: 'Undo', onClick: () => { setEmployees((previous) => restoreAt(previous, removed, index)); setToast(null); } });
   };
 
   // Services
@@ -445,8 +476,11 @@ export default function App() {
   };
 
   const handleDeleteService = (id: string) => {
-    setServices(services.filter((s) => s.id !== id));
-    showToast('Service deleted');
+    const index = services.findIndex((s) => s.id === id);
+    if (index < 0) return;
+    const removed = services[index];
+    setServices((previous) => previous.filter((s) => s.id !== id));
+    showToast(`Service ${removed.name} deleted`, 'info', { label: 'Undo', onClick: () => { setServices((previous) => restoreAt(previous, removed, index)); setToast(null); } });
   };
 
   // Settings
@@ -550,9 +584,15 @@ export default function App() {
     showToast('AI Assistant settings saved');
   };
 
-  // POS
+  // POS: the dialog shows its own confirmation; the toast would render behind the modal backdrop,
+  // so it is deferred until the dialog closes.
+  const pendingSaleToast = useRef<string | null>(null);
   const handleCompleteSale = (amount: number, serviceName: string) => {
-    showToast(`Simulated CHF ${amount.toFixed(2)} checkout for ${serviceName}. No payment was taken.`, 'info');
+    pendingSaleToast.current = `Simulated CHF ${amount.toFixed(2)} checkout for ${serviceName}. No payment was taken.`;
+  };
+  const closePOS = () => {
+    setIsPOSOpen(false);
+    if (pendingSaleToast.current) { showToast(pendingSaleToast.current, 'info'); pendingSaleToast.current = null; }
   };
 
   const bookingPage = <BookingPageView {...availabilityContext}
@@ -612,12 +652,12 @@ export default function App() {
         />
 
         {/* Main View Body */}
-        <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 pb-16 outline-none">
+        <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 overflow-x-clip pb-16 outline-none">
           {currentTab === 'home' && rejectedRequests.length > 0 && (
-            <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs sm:mx-8">
+            <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-xs sm:mx-8">
               <span>Request from {rejectedRequests.at(-1)?.request.customerName} declined.</span>
-              <button onClick={undoReject} className="font-semibold text-[#5551FF] underline">Undo rejection</button>
-              <button aria-label="Dismiss undo rejection" onClick={() => setRejectedRequests(previous => previous.slice(0, -1))} className="ml-auto rounded p-1 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+              <button onClick={undoReject} className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-slate-100">Undo rejection</button>
+              <button aria-label="Dismiss undo rejection" onClick={() => setRejectedRequests(previous => previous.slice(0, -1))} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-slate-100"><X className="h-4 w-4" /></button>
             </div>
           )}
           {currentTab === 'home' && (
@@ -646,7 +686,7 @@ export default function App() {
               services={services}
               date={selectedCalendarEvent?.date ?? calendarDate}
               selectedEventId={route.appointmentId ?? null}
-              onSelectEvent={event => event ? openAppointment(event) : navigate({ tab: 'calendar' })}
+              onSelectEvent={event => event ? openAppointment(event) : navigate({ tab: 'calendar' }, { replace: true })}
               onDateChange={date => { setCalendarDate(date); if (route.appointmentId) navigate({ tab: 'calendar' }); }}
               onAddEvent={handleAddCalendarEvent}
               onDeleteEvent={handleDeleteCalendarEvent}
@@ -736,7 +776,7 @@ export default function App() {
       {/* POS Quick Register Modal */}
       <POSModal
         isOpen={isPOSOpen}
-        onClose={() => setIsPOSOpen(false)}
+        onClose={closePOS}
         services={services}
         customers={customers}
         onCompleteSale={handleCompleteSale}
@@ -744,11 +784,14 @@ export default function App() {
 
       {/* Feedback distinguishes a completed action from a problem or demo information. */}
       {toast && (
-        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2.5rem)] flex-wrap items-center gap-2.5 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-semibold text-white shadow-xl">
+        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-5 sm:right-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap">
           {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
-          <span>{toast.message}</span>
-          {toast.action && <button onClick={toast.action.onClick} className="rounded px-2 py-1 text-indigo-200 underline hover:text-white">{toast.action.label}</button>}
-          <button aria-label="Dismiss notification" onClick={() => setToast(null)} className="rounded p-1 hover:bg-white/10"><X className="h-4 w-4" /></button>
+          <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{toast.message}</span>
+          {/* On phones an action gets its own row so the message keeps the full width. */}
+          <div className={`flex shrink-0 items-center justify-end gap-1 ${toast.action ? 'basis-full sm:basis-auto' : ''}`}>
+            {toast.action && <button onClick={toast.action.onClick} className="min-h-11 shrink-0 rounded-lg px-2 text-indigo-200 underline hover:bg-white/10 hover:text-white">{toast.action.label}</button>}
+            <button aria-label="Dismiss notification" onClick={() => setToast(null)} className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/10"><X className="h-4 w-4" /></button>
+          </div>
         </div>
       )}
     </div>

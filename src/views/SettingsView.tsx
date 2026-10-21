@@ -42,6 +42,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const dateInputClass = 'min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-none focus:ring-2 focus:ring-[#5551FF]/20';
   const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(initialSettings) || JSON.stringify(hoursData) !== JSON.stringify(initialBookingHours);
 
+  // On phones the edit form sits below the list: bring it into view so the tap has a visible result.
+  const focusDateForm = () => {
+    requestAnimationFrame(() => {
+      const field = document.getElementById(closedDatesTab === 'absences' ? 'absence-employee' : 'closure-name');
+      field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      field?.focus({ preventScroll: true });
+    });
+  };
   const resetDateForm = () => {
     setEditingDateId(null); setDateName(''); setAbsenceEmployeeId('');
     const today = getSalonNow(formData.timeZone).date;
@@ -230,6 +238,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </label>
                     <input id="company-postalCode"
                         type="text"
+                        inputMode="numeric"
+                        autoComplete="postal-code"
                         value={formData.postalCode}
                         onChange={(e) =>
                           setFormData({ ...formData, postalCode: e.target.value })
@@ -309,7 +319,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         Business phone
                       </label>
                     <input id="company-businessPhone"
-                        type="text"
+                        type="tel"
+                        autoComplete="tel"
                         value={formData.businessPhone}
                         onChange={(e) =>
                           setFormData({ ...formData, businessPhone: e.target.value })
@@ -403,7 +414,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {hoursData.map((item, index) => (
                   <div
                     key={item.day}
-                    className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 py-2.5 border-b border-slate-100"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2.5 border-b border-slate-100"
                   >
                     {/* Day & Open/Closed Switch */}
                     <div className="flex w-full max-w-xs items-center justify-between gap-4">
@@ -428,11 +439,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* From - To Hours */}
                     {item.isOpen ? (
-                      <div className="grid w-full max-w-sm grid-cols-2 gap-3">
+                      <div className="grid w-full max-w-sm grid-cols-1 gap-3 min-[360px]:grid-cols-2">
                         <label className="min-w-0 space-y-1 text-slate-500"><span>From</span>
-                        <input type="time" value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="block min-h-11 min-w-0 w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
+                        <input type="time" value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
                         <label className="min-w-0 space-y-1 text-slate-500"><span>To</span>
-                        <input type="time" value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="block min-h-11 min-w-0 w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
+                        <input type="time" value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
                       </div>
                     ) : (
                       <span className="text-slate-400 text-xs italic">
@@ -458,13 +469,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="space-y-2">
                 {closedDatesTab === 'closed' ? closedDates.map((item) => <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                   <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
-                  <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { setEditingDateId(item.id); setDateName(item.name); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
+                  <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { setEditingDateId(item.id); setDateName(item.name); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); focusDateForm(); }}>Edit</button>
                   <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Closure removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                 </div>) : absences.map((item) => {
                   const employeeName = employees.find((employee) => employee.id === item.employeeId)?.name || 'Removed employee';
                   return <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                     <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{employeeName}{item.reason && `: ${item.reason}`}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
-                    <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit absence for ${employeeName}`} onClick={() => { setEditingDateId(item.id); setDateName(item.reason || ''); setAbsenceEmployeeId(item.employeeId); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); }}>Edit</button>
+                    <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit absence for ${employeeName}`} onClick={() => { setEditingDateId(item.id); setDateName(item.reason || ''); setAbsenceEmployeeId(item.employeeId); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); focusDateForm(); }}>Edit</button>
                     <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete absence for ${employeeName}`} onClick={() => { onSaveAbsences(absences.filter((absence) => absence.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Absence removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                   </div>;
                 })}
