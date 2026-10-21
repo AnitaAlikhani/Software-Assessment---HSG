@@ -10,6 +10,8 @@ import {
 } from '../headerModels';
 
 interface HeaderProps {
+  companyName?: string;
+  companyLocation?: string;
   onOpenMobileMenu: () => void;
   isMobileMenuOpen: boolean;
   searchQuery: string;
@@ -45,6 +47,7 @@ const useMediaQuery = (query: string) => {
 };
 
 export const Header: React.FC<HeaderProps> = ({
+  companyName = '', companyLocation = '',
   onOpenMobileMenu, isMobileMenuOpen, searchQuery, onSearchChange, customers, appointmentRequests,
   calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment, onOpenPOSModal,
   needsAttentionCount, needsAttentionNames, needsAttentionRevision, needsAttentionUpdates, latestAiBooking,
@@ -317,7 +320,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute left-4 right-4 top-full mt-2 max-h-[calc(100dvh-8rem)] overflow-y-auto sm:left-auto sm:right-0 sm:w-64 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
               <div className="px-3 py-2 border-b border-slate-100">
                 <h2 id="header-account-title" className="font-semibold text-slate-800">Anna Weber</h2>
-                <p className="text-[11px] text-slate-400 mt-0.5">Bella Hair Salon · St. Gallen</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{[companyName, companyLocation].filter(Boolean).join(' · ')}</p>
               </div>
               <button type="button" onClick={() => { setOpenDropdown(null); onOpenSettings(); }}
                 className="w-full flex items-center gap-2 px-3 py-2.5 mt-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">

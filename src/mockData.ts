@@ -227,7 +227,63 @@ export const initialServices: ServiceItem[] = [
   },
 ];
 
-export const initialResources: Resource[] = [];
+export const initialResources: Resource[] = [
+  {
+    id: 'res-sample-styling-chair-1',
+    name: 'Styling Chair 1',
+    type: 'Chair',
+    capacity: 1,
+    color: '#FDE047',
+    reserveEntireRoom: false,
+    visibleOnline: false,
+    allServices: false,
+    generalHours: false,
+  },
+  {
+    id: 'res-sample-styling-chair-2',
+    name: 'Styling Chair 2',
+    type: 'Chair',
+    capacity: 1,
+    color: '#C4B5FD',
+    reserveEntireRoom: false,
+    visibleOnline: false,
+    allServices: false,
+    generalHours: false,
+  },
+  {
+    id: 'res-sample-hair-wash-station',
+    name: 'Hair Wash Station',
+    type: 'Equipment',
+    capacity: 1,
+    color: '#93C5FD',
+    reserveEntireRoom: false,
+    visibleOnline: false,
+    allServices: false,
+    generalHours: false,
+  },
+  {
+    id: 'res-sample-colour-studio',
+    name: 'Colour Studio',
+    type: 'Room',
+    capacity: 2,
+    color: '#F87171',
+    reserveEntireRoom: false,
+    visibleOnline: false,
+    allServices: false,
+    generalHours: false,
+  },
+  {
+    id: 'res-sample-hair-steamer',
+    name: 'Hair Steamer',
+    type: 'Equipment',
+    capacity: 1,
+    color: '#86EFAC',
+    reserveEntireRoom: false,
+    visibleOnline: false,
+    allServices: false,
+    generalHours: false,
+  },
+];
 
 export const initialShiftOverview: ShiftEntry[] = [
   {

@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { ChevronLeft, ChevronRight, Plus, ArrowLeft, X, Info, Clock } from 'lucide-react';
 import { Employee, ShiftEntry } from '../types';
-import { addDays, formatCalendarDate, formatDate, startOfWeek } from '../scheduling';
+import { addDays, currentSalonWeek, formatCalendarDate, formatDate, salonTimeZone, startOfWeek } from '../scheduling';
 
 interface ShiftPlanViewProps {
   employees: Employee[];
   shiftOverview: ShiftEntry[];
+  timeZone?: string;
   onUpdateShift: (employeeId: string, date: string, shift: { start: string; end: string } | null) => void;
 }
 
@@ -16,8 +17,8 @@ const minutesAt = (time: string) => {
 };
 const fieldStyle = 'min-h-11 w-full min-w-0 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-base sm:text-sm text-slate-700';
 
-export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, onUpdateShift }) => {
-  const [weekStart, setWeekStart] = useState('2026-10-05');
+export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, timeZone, onUpdateShift }) => {
+  const [weekStart, setWeekStart] = useState(() => currentSalonWeek(timeZone));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [editorEmployeeId, setEditorEmployeeId] = useState('');
@@ -130,7 +131,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
       <div className="flex flex-col sm:flex-row justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setWeekStart(startOfWeek(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())))}
+            onClick={() => setWeekStart(currentSalonWeek(timeZone))}
             className="min-h-11 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50"
           >Today</button>
           <div className="flex max-w-full items-center bg-white border border-slate-200 rounded-xl">
@@ -149,6 +150,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
         )}
       </div>
 
+      <p className="text-xs text-slate-500">Shift times are in {salonTimeZone(timeZone)}.</p>
       <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100/90 text-xs sm:text-sm text-indigo-900/80 leading-relaxed flex items-start gap-3">
         <Info className="w-4 h-4 text-[#5551FF] shrink-0 mt-0.5" />
         <p>Booking slots follow salon opening hours and staff shifts. An employee is unavailable on dates without a shift. Select a day to edit their availability.</p>

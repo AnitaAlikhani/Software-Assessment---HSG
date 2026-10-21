@@ -16,6 +16,8 @@ import {
   ConversationStatus,
 } from '../types';
 import { LANGUAGE_NAMES } from '../conversationData';
+import { conversationForSelection, messageForOwner, ownerLanguageName } from '../conversationPresentation';
+import { useDemoState } from '../useDemoState';
 
 interface ConversationsViewProps {
   conversations: Conversation[];
@@ -24,7 +26,7 @@ interface ConversationsViewProps {
   onBackToList: () => void;
   onSelect: (id: string) => void;
   onTakeOver: (id: string) => void;
-  onLetAiContinue: (id: string) => void;
+  onLetAiContinue: (id: string) => string | null;
   onOwnerReply: (
     id: string,
     english: string,
@@ -64,13 +66,38 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOpenAiSettings,
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useDemoState<Record<string, string>>('conversationDrafts', {});
   const [showWhatsApp, setShowWhatsApp] = useState(false);
   const whatsAppDialogRef = useRef<HTMLDialogElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const wasDetailOpen = useRef(mobileDetailOpen);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState('');
+  const reviewDialogRef = useRef<HTMLDialogElement>(null);
+  const reviewConversation = conversations.find(c => c.id === reviewId);
+  const reviewPresentation = reviewConversation?.aiFollowUp
+    ? messageForOwner(reviewConversation.aiFollowUp, reviewConversation.language, aiSettings)
+    : null;
+
+  useEffect(() => {
+    const dialog = reviewDialogRef.current;
+    if (!reviewId || !dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      else {
+        const heading = document.querySelector<HTMLElement>('#main-content h1');
+        if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+      }
+    };
+  }, [reviewId]);
 
   useEffect(() => {
     const dialog = whatsAppDialogRef.current;
@@ -97,8 +124,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     return true;
   });
 
-  const selected =
-    conversations.find((c) => c.id === selectedId) ?? conversations[0] ?? null;
+  const selected = conversationForSelection(conversations, selectedId);
+  const unavailableSelection = selectedId !== null && !selected;
   const selectedMessageCount = selected?.messages.length ?? 0;
 
   // Phones show the chat as its own screen: bring it into view and move focus to its heading;
@@ -121,8 +148,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     }
   }, [mobileDetailOpen, selectedId]);
 
-  // A Back gesture changes the conversation underneath an open preview: close it.
-  useEffect(() => { setShowWhatsApp(false); }, [selectedId, mobileDetailOpen]);
+  // A Back gesture changes the conversation underneath an open preview or approval: close it.
+  useEffect(() => { setReviewId(null); setShowWhatsApp(false); }, [selectedId, mobileDetailOpen]);
 
   // The message pane scrolls on wide screens: keep the newest message in view, also when the
   // banner above it changes size (take over / hand back) and when the pane itself resizes.
@@ -136,6 +163,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     return () => observer.disconnect();
   }, [selectedId, selectedMessageCount, selected?.takenOver, selected?.status]);
   const draft = selected ? drafts[selected.id] ?? '' : '';
+  const ownerLanguage = ownerLanguageName(aiSettings);
 
   const tabs: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -145,7 +173,17 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   ];
 
   const isTranslated = (c: Conversation) =>
-    aiSettings.translateChats && c.language !== 'EN';
+    aiSettings.translateChats && c.language !== (ownerLanguage === 'German' ? 'DE' : 'EN');
+
+  const continueWithAi = () => {
+    if (!selected) return;
+    if (aiSettings.askBeforeSending && selected.aiFollowUp) {
+      setReviewError('');
+      setReviewId(selected.id);
+    } else {
+      onLetAiContinue(selected.id);
+    }
+  };
 
   const locked = selected
     ? selected.status === 'needs-attention' && !selected.takenOver
@@ -161,7 +199,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
   const renderBubble = (c: Conversation, m: ChatMessage, flagged: boolean) => {
     const mine = m.sender !== 'customer';
-    const showBoth = isTranslated(c) && m.original !== m.translation;
+    const presentation = messageForOwner(m, c.language, aiSettings);
     const bubbleColor =
       m.sender === 'customer'
         ? 'bg-slate-100 text-slate-800'
@@ -189,24 +227,25 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               flagged ? 'ring-2 ring-amber-400' : ''
             }`}
           >
-            {showBoth ? (
+            {presentation.showOriginal ? (
               <>
                 <p className={`text-[11px] leading-snug ${subColor}`}>{m.original}</p>
                 <div
                   className={`my-1.5 h-px ${mine ? 'bg-white/30' : 'bg-slate-300/80'}`}
                 />
-                <p className="text-sm font-medium leading-snug">{m.translation}</p>
+                <p className="text-sm font-medium leading-snug">{presentation.text}</p>
               </>
             ) : (
               <p className="text-sm font-medium leading-snug">
-                {aiSettings.translateChats ? m.translation : m.original}
+                {presentation.text}
               </p>
             )}
             {m.untranslated && (
               <p className={`text-[10px] mt-1 italic ${subColor}`}>
-                Sent in English. Not translated in this demo.
+                Sent as written. Automatic translation is unavailable in this demo.
               </p>
             )}
+            {!m.untranslated && presentation.translationUnavailable && <p className={`text-[10px] mt-1 italic ${subColor}`}>{ownerLanguage} translation unavailable. Original message shown.</p>}
             <p className={`text-[10px] mt-1 text-right ${subColor}`}>{m.time}</p>
           </div>
         </div>
@@ -253,7 +292,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             {visible.map((c) => {
               const last = c.messages[c.messages.length - 1];
               const tag = STATUS_TAG[c.status];
-              const preview = aiSettings.translateChats ? last.translation : last.original;
+              const preview = last ? messageForOwner(last, c.language, aiSettings).text : 'No messages yet.';
               const active = selected?.id === c.id;
               return (
                 <button
@@ -298,7 +337,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
 
         {/* Open chat */}
         {selected ? (
-          <div ref={threadRef} className={`md:col-span-8 lg:col-span-7 xl:col-span-8 min-w-0 min-h-[520px] md:min-h-0 flex-col ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
+          <div id="conversation-thread" ref={threadRef} className={`md:col-span-8 lg:col-span-7 xl:col-span-8 min-w-0 min-h-[520px] md:min-h-0 flex-col ${mobileDetailOpen ? 'flex' : 'hidden md:flex'}`}>
             {/* Chat header */}
             <div className="flex flex-col gap-3 px-4 sm:px-6 py-4 border-b border-slate-100">
               <button
@@ -339,14 +378,14 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
                   <Bot className="w-4 h-4 shrink-0" />
-                  {aiSettings.askBeforeSending ? 'AI replies need your approval' : 'AI replies automatically'}
+                  {aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
                 </button>
                 <button
                   onClick={() => setShowWhatsApp(true)}
                   className="flex min-h-11 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
                 >
-                  <span className="w-4 h-4 rounded-full bg-[#25D366] inline-block" />
-                  Open in WhatsApp
+                  <span className={`w-4 h-4 rounded-full inline-block ${selected.channel === 'Instagram' ? 'bg-fuchsia-500' : 'bg-[#25D366]'}`} />
+                  Preview {selected.channel}
                 </button>
               </div>
             </div>
@@ -356,7 +395,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               <div className="flex justify-center px-4 pt-3">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                   <Languages className="w-3.5 h-3.5 shrink-0" />
-                  Translating {LANGUAGE_NAMES[selected.language]} → English
+                  Demo translations: {LANGUAGE_NAMES[selected.language]} → {ownerLanguage}
                 </span>
               </div>
             )}
@@ -389,10 +428,10 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     Take over
                   </button>
                   <button
-                    onClick={() => onLetAiContinue(selected.id)}
+                    onClick={continueWithAi}
                     className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
                   >
-                    Let AI continue
+                    {aiSettings.askBeforeSending && selected.aiFollowUp ? 'Review AI reply' : 'Let AI continue'}
                   </button>
                 </div>
               </div>
@@ -406,14 +445,14 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 <div className="flex-1 min-w-[8rem]">
                   <p className="text-sm font-semibold text-slate-900">You've taken over</p>
                   <p className="text-xs text-slate-500">
-                    The AI is paused for this chat. Your replies are translated automatically.
+                    The AI is paused for this chat. Suggested replies include a translation; typed replies are sent as written.
                   </p>
                 </div>
                 <button
-                  onClick={() => onLetAiContinue(selected.id)}
+                  onClick={continueWithAi}
                   className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors"
                 >
-                  Hand back to AI
+                  {aiSettings.askBeforeSending && selected.aiFollowUp ? 'Review AI reply' : 'Hand back to AI'}
                 </button>
               </div>
             )}
@@ -442,7 +481,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                       onClick={() => send(q.en, q.local, q.appointmentAction)}
                       className="min-h-11 text-left text-xs [overflow-wrap:anywhere] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
                     >
-                      {q.en}
+                      {messageForOwner({ original: q.local, translation: q.en }, selected.language, { ...aiSettings, translateChats: true }).text}
                     </button>
                   ))}
                 </div>
@@ -466,9 +505,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   placeholder={
                     locked
                       ? 'Take over to reply as the owner'
-                      : selected.language === 'EN'
-                      ? 'Reply as owner'
-                      : `Reply as owner, auto-translated to ${LANGUAGE_NAMES[selected.language]}`
+                      : 'Reply as owner (sent as written)'
                   }
                   className="min-w-0 flex-1 min-h-11 px-4 py-2.5 text-base sm:text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
@@ -490,17 +527,54 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
           </div>
         ) : (
-          <div className="md:col-span-8 lg:col-span-7 xl:col-span-8 flex items-center justify-center text-sm text-slate-400">
-            No conversations yet.
+          <div className="md:col-span-8 lg:col-span-7 xl:col-span-8 p-6 flex flex-col items-center justify-center gap-4 text-sm text-slate-600" role="status">
+            <p>{unavailableSelection ? 'This conversation is no longer available.' : 'No conversations yet.'}</p>
+            {unavailableSelection && <button type="button" onClick={onBackToList} className="min-h-11 rounded-xl px-4 py-2 font-semibold text-[#5551FF] bg-indigo-50">View all conversations</button>}
           </div>
         )}
       </div>
 
-      {/* WhatsApp view: what the customer sees on their phone */}
+      {reviewConversation?.aiFollowUp && (
+        <dialog
+          ref={reviewDialogRef}
+          aria-labelledby="ai-reply-review-title"
+          onCancel={event => { event.preventDefault(); setReviewId(null); }}
+          className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl backdrop:bg-slate-900/50"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <h2 id="ai-reply-review-title" className="text-lg font-bold text-slate-900">Review AI reply</h2>
+            <button autoFocus type="button" aria-label="Close AI reply review" onClick={() => setReviewId(null)} className="flex size-11 shrink-0 items-center justify-center rounded-xl hover:bg-slate-100"><X className="size-5" /></button>
+          </div>
+          <p className="mt-2 text-sm text-slate-600">Approve this scripted reply to {reviewConversation.customerName} in the demo. No external message will be sent.</p>
+          <div className="mt-4 space-y-3 rounded-xl bg-slate-50 p-4 text-sm [overflow-wrap:anywhere]">
+            <div><p className="mb-1 text-xs font-semibold text-slate-500">Customer receives ({LANGUAGE_NAMES[reviewConversation.language]})</p><p>{reviewConversation.aiFollowUp.original}</p></div>
+            {reviewPresentation?.showOriginal && <div><p className="mb-1 text-xs font-semibold text-slate-500">{ownerLanguage} translation</p><p>{reviewPresentation.text}</p></div>}
+            {reviewPresentation?.translationUnavailable && <p className="text-xs text-slate-500">{ownerLanguage} translation unavailable. Original reply shown.</p>}
+            {reviewConversation.aiFollowUp.appointmentAction && <p className="border-t border-slate-200 pt-3 text-xs text-slate-600">Appointment {reviewConversation.aiFollowUp.appointmentAction.type === 'book' ? 'booking' : 'change'}: {reviewConversation.aiFollowUp.appointmentAction.date} at {reviewConversation.aiFollowUp.appointmentAction.startTime}. Availability is checked before approval.</p>}
+          </div>
+          {!aiSettings.answerLanguages[reviewConversation.language] && <p className="mt-4 text-sm text-amber-700">Enable {LANGUAGE_NAMES[reviewConversation.language]} replies in AI Assistant settings before approving.</p>}
+          {reviewError && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{reviewError}</p>}
+          <div className="mt-5 flex flex-wrap justify-end gap-3">
+            <button type="button" onClick={() => setReviewId(null)} className="min-h-11 rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+            <button
+              type="button"
+              disabled={!aiSettings.answerLanguages[reviewConversation.language]}
+              onClick={() => {
+                const error = onLetAiContinue(reviewConversation.id);
+                if (error === null) setReviewId(null);
+                else setReviewError(error);
+              }}
+              className="min-h-11 rounded-xl bg-[#5551FF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            >Approve demo reply</button>
+          </div>
+        </dialog>
+      )}
+
+      {/* Local channel preview, not an external messaging connection. */}
       {selected && (
         <dialog
           ref={whatsAppDialogRef}
-          aria-label={`WhatsApp preview for ${selected.customerName}`}
+          aria-label={`${selected.channel} preview for ${selected.customerName}`}
           onCancel={() => setShowWhatsApp(false)}
           onClose={() => setShowWhatsApp(false)}
           onClick={(event) => {
@@ -541,7 +615,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2">
               <p className="text-center text-[10px] text-white/50 pb-1">
-                What your customer sees in {selected.channel}
+                {selected.channel} preview · Demo messages only
               </p>
               {selected.messages.map((m) => {
                 const mine = m.sender !== 'customer';
@@ -549,7 +623,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                     <div
                       className={`max-w-[82%] min-w-0 [overflow-wrap:anywhere] rounded-xl px-3 py-2 text-[13px] text-white leading-snug ${
-                        mine ? 'bg-[#005c4b]' : 'bg-[#202c33]'
+                        mine ? selected.channel === 'Instagram' ? 'bg-fuchsia-700' : 'bg-[#005c4b]' : 'bg-[#202c33]'
                       }`}
                     >
                       {m.original}
@@ -563,7 +637,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
             <div className="shrink-0 px-3 py-3 bg-[#0b141a]">
               <div className="rounded-full bg-[#202c33] px-4 py-2 text-xs text-white/40">
-                Message
+                Preview only · Sending is disabled
               </div>
             </div>
           </div>

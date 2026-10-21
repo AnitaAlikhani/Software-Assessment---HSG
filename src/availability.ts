@@ -31,6 +31,9 @@ export interface AvailabilitySelection {
   serviceId: string;
   employeeId: string;
   excludeRequestId?: string;
+  excludeEventId?: string;
+  /** Owner entry can use offline services/staff; physical availability still applies. */
+  mode?: 'online' | 'owner';
 }
 
 type Interval = { start: number; end: number };
@@ -104,12 +107,14 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   if (selection.date < salonNow.date) return unavailable('Choose today or a future appointment date.');
 
   const service = context.services.find((item) => item.id === selection.serviceId);
-  if (!service || !service.onlineBooking) return unavailable('This service is not available for online booking.');
+  if (!service) return unavailable('This service no longer exists. Please choose another service.');
+  if (selection.mode !== 'owner' && !service.onlineBooking) return unavailable('This service is not available for online booking.');
   const timing = serviceTiming(service);
   if (!timing) return unavailable('This service has an invalid duration or preparation time. Please update the service.');
 
   const employee = context.employees.find((item) => item.id === selection.employeeId);
-  if (!employee || !isBookableEmployee(employee)) return unavailable('This employee is not available for online booking.');
+  if (!employee || employee.status !== 'Active') return unavailable('This employee is not available. Please choose an active employee.');
+  if (selection.mode !== 'owner' && !isBookableEmployee(employee)) return unavailable('This employee is not available for online booking.');
   if (!isEmployeeAssignedToService(service, employee)) return unavailable('This employee does not provide the selected service.');
 
   if (context.closedDates?.some((closure) => selection.date >= closure.start && selection.date <= closure.end)) {
@@ -140,14 +145,17 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   const addOccupied = (record: CalendarEvent | AppointmentRequest, interval: Interval | null): boolean => {
     if (!interval) return false;
     const occupiedService = resolveRecordService(context, record);
-    const buffers = occupiedService ? serviceTiming(occupiedService) : { prep: 0, post: 0 };
+    const snapshot = 'startTime' in record && record.prepMinutes !== undefined && record.postMinutes !== undefined
+      ? { prep: record.prepMinutes, post: record.postMinutes } : null;
+    const buffers = snapshot ?? (occupiedService ? serviceTiming(occupiedService) : { prep: 0, post: 0 });
     if (!buffers) return false;
+    if (![buffers.prep, buffers.post].every(value => Number.isInteger(value) && value >= 0 && value < 1440)) return false;
     occupied.push({ start: interval.start - buffers.prep, end: interval.end + buffers.post });
     return true;
   };
 
   for (const event of context.events) {
-    if (event.date === selection.date && matchesEmployee(event, employee)) {
+    if (event.id !== selection.excludeEventId && event.date === selection.date && matchesEmployee(event, employee)) {
       if (!addOccupied(event, parseInterval(event.startTime, event.endTime))) {
         return unavailable('This employee has an appointment with invalid times. Please review the calendar.');
       }
@@ -180,6 +188,34 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
 
 export const getAvailableSlots = (context: AvailabilityContext, selection: AvailabilitySelection): string[] =>
   getAvailability(context, selection).slots;
+
+/** All owner and scripted-chat calendar writes use the same physical booking rules. */
+export const validateCalendarEvent = (
+  context: AvailabilityContext,
+  event: Omit<CalendarEvent, 'id'>,
+  excludeEventId?: string,
+): string | null => {
+  if (!event.customerName.trim()) return 'Enter a customer name.';
+  const service = resolveRecordService(context, event);
+  if (!service) return 'This service no longer exists. Please choose another service.';
+  const employees = event.employeeId !== undefined
+    ? context.employees.filter(employee => employee.id === event.employeeId)
+    : context.employees.filter(employee => employee.name === event.staffName);
+  if (employees.length !== 1) return 'Choose an active employee for this appointment.';
+  const availability = getAvailability(context, {
+    date: event.date, serviceId: service.id, employeeId: employees[0].id,
+    excludeEventId, mode: 'owner',
+  });
+  if (availability.error) return availability.error;
+  const interval = parseInterval(event.startTime, event.endTime);
+  if (!interval || interval.end - interval.start !== service.durationMinutes) {
+    return `Choose a valid ${service.durationMinutes}-minute slot on the same day.`;
+  }
+  if (!availability.slots.includes(event.startTime)) {
+    return 'This time is not available. Choose a slot within the employee’s shift and salon hours, without overlapping another booking.';
+  }
+  return null;
+};
 
 /** Find the earliest available date in the 90-day window beginning at fromDate. */
 export const getNextAvailableDate = (

@@ -7,17 +7,18 @@ import {
   Plus,
   Trash2,
   X,
-  Mail,
-  Phone,
-  Calendar,
+  MessageSquare,
 } from 'lucide-react';
 import { Customer } from '../types';
+import { createCsv } from '../csv';
+import { validateOptionalContact } from '../managementValidation';
 
 interface CustomersViewProps {
   customers: Customer[];
   selectedCustomerId: string | null;
   onClearSelection: () => void;
   onAddCustomer: (customer: Omit<Customer, 'id' | 'initials' | 'lastBooking' | 'bookingsCount'>) => void;
+  onUpdateCustomer: (id: string, customer: Partial<Customer>) => void;
   onDeleteCustomer: (id: string) => void;
   onOpenChat?: (customerName: string) => void;
 }
@@ -32,6 +33,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   selectedCustomerId,
   onClearSelection,
   onAddCustomer,
+  onUpdateCustomer,
   onDeleteCustomer,
   onOpenChat,
 }) => {
@@ -39,6 +41,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   const tableRef = useRef<HTMLDivElement>(null);
   const tableScrolls = useHorizontalOverflow(tableRef);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [formError, setFormError] = useState('');
+  const [showOptions, setShowOptions] = useState(false);
+  const [languageFilter, setLanguageFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('recent');
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -61,23 +68,34 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   }, [showAddModal]);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
-  const filteredCustomers = selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter(
+  const filteredCustomers = (selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter(
     (c) =>
       c.name.toLowerCase().includes(filterQuery.toLowerCase()) ||
       c.email.toLowerCase().includes(filterQuery.toLowerCase()) ||
       c.phone.includes(filterQuery)
-  );
+  )).filter((customer) => languageFilter === 'all' || customer.language === languageFilter).sort((a, b) =>
+    sortOrder === 'name' ? a.name.localeCompare(b.name) : sortOrder === 'bookings' ? b.bookingsCount - a.bookingsCount : 0);
+
+  const openEditor = (customer: Customer | null = null) => {
+    setEditingCustomer(customer);
+    setNewName(customer?.name ?? ''); setNewEmail(customer?.email ?? '');
+    setNewPhone(customer?.phone ?? ''); setNewLang(customer?.language ?? 'EN');
+    setFormError(''); setShowAddModal(true);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
-
-    onAddCustomer({
+    if (!newName.trim()) { setFormError('Enter a customer name.'); return; }
+    const error = validateOptionalContact(newEmail, newPhone);
+    if (error) { setFormError(error); return; }
+    const details = {
       name: newName.trim(),
-      email: newEmail.trim() || 'user@example.ch',
-      phone: newPhone.trim() || '+41 79 000 00 00',
+      email: newEmail.trim(),
+      phone: newPhone.trim(),
       language: newLang,
-    });
+    };
+    if (editingCustomer) onUpdateCustomer(editingCustomer.id, details);
+    else onAddCustomer(details);
 
     setNewName('');
     setNewEmail('');
@@ -87,24 +105,22 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
   const handleExportCSV = () => {
     const headers = ['Name', 'Email', 'Phone', 'Language', 'Last Booking', 'Bookings'];
-    const rows = customers.map((c) => [
-      `"${c.name}"`,
-      `"${c.email}"`,
-      `"${c.phone}"`,
-      `"${c.language}"`,
-      `"${c.lastBooking}"`,
+    const rows = filteredCustomers.map((c) => [
+      c.name,
+      c.email,
+      c.phone,
+      c.language,
+      c.lastBooking,
       c.bookingsCount,
     ]);
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const url = URL.createObjectURL(new Blob([createCsv([headers, ...rows])], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'customers_bella_salon.csv');
+    link.href = url;
+    link.download = 'customers.csv';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -129,7 +145,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             />
           </div>
 
-          <button className="flex min-h-11 items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <button onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="customer-options" className="flex min-h-11 items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
             <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
             <span>Options</span>
           </button>
@@ -137,14 +153,14 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
           <button
             onClick={handleExportCSV}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs"
-            title="Download CSV"
+            title="Export the customers currently shown"
             aria-label="Export customers CSV"
           >
             <Download className="w-4 h-4" />
           </button>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => openEditor()}
             className="flex min-h-11 items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -152,6 +168,13 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
           </button>
         </div>
       </div>
+
+      {showOptions && <div id="customer-options" className="flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 font-semibold text-slate-700">Language<select value={languageFilter} onChange={(event) => setLanguageFilter(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 px-3 text-base sm:text-sm"><option value="all">All languages</option>{['EN', 'FR', 'DE', 'IT'].map((language) => <option key={language}>{language}</option>)}</select></label>
+        <label className="flex min-w-0 flex-col gap-1 font-semibold text-slate-700">Sort by<select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 px-3 text-base sm:text-sm"><option value="recent">Default order</option><option value="name">Name A–Z</option><option value="bookings">Most bookings</option></select></label>
+        <button onClick={() => { setLanguageFilter('all'); setSortOrder('recent'); setFilterQuery(''); onClearSelection(); }} className="min-h-11 px-3 font-semibold text-[#5551FF]">Reset filters</button>
+        <p className="w-full text-slate-500">CSV export includes the customers currently shown, in this order.</p>
+      </div>}
 
       {selectedCustomerId && <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-slate-700">
         <span>{selectedCustomer ? `Showing ${selectedCustomer.name}` : 'This customer is no longer available.'}</span>
@@ -166,7 +189,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                 {cust.initials}
               </div>
-              <button onClick={() => onOpenChat?.(cust.name)} className="min-h-11 min-w-0 flex-1 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
+              <button onClick={() => openEditor(cust)} className="min-h-11 min-w-0 flex-1 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Edit ${cust.name}`} title={`Edit ${cust.name}`}>{cust.name}</button>
               <span className={`shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>{cust.language}</span>
               <button
                 onClick={() => onDeleteCustomer(cust.id)}
@@ -177,11 +200,12 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               </button>
             </div>
             <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
-              <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{cust.email}</dd>
-              <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{cust.phone}</dd>
+              <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{cust.email || '—'}</dd>
+              <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{cust.phone || '—'}</dd>
               <dt className="text-slate-400">Last booking</dt><dd className="min-w-0 text-slate-500">{cust.lastBooking}</dd>
               <dt className="text-slate-400">Bookings</dt><dd className="min-w-0 font-semibold tabular-nums text-slate-800">{cust.bookingsCount}</dd>
             </dl>
+            {onOpenChat && <button onClick={() => onOpenChat(cust.name)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg px-3 font-semibold text-[#5551FF] hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Open conversation with ${cust.name}`}><MessageSquare className="h-4 w-4" />Open conversation</button>}
           </div>
         ))}
         {filteredCustomers.length === 0 && (
@@ -192,15 +216,15 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       {/* Customers Table matching Figma Page 14 */}
       {tableScrolls && <p id="customers-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see contact details and actions. Names stay visible.</p>}
       <div ref={tableRef} role="region" aria-label="Customers" aria-describedby={tableScrolls ? 'customers-scroll-hint' : undefined} tabIndex={tableScrolls ? 0 : undefined} className="relative hidden max-w-full bg-white rounded-2xl md:rounded-b-none border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF] md:block">
-        <div className="min-w-[700px]">
+        <div className="min-w-[928px]">
           {/* Header Row */}
-          <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-6 bg-slate-50">
-            <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
-            <div className="col-span-3">Email</div>
-            <div className="col-span-2">Phone</div>
-            <div className="col-span-1 text-center text-[11px]">Language</div>
-            <div className="col-span-2 pl-2">Last booking</div>
-            <div className="col-span-1 text-right">Bookings</div>
+          <div className="grid grid-cols-[180px_minmax(180px,1fr)_140px_80px_160px_164px] border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-2 sm:pr-6 bg-slate-50">
+            <div className="sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
+            <div>Email</div>
+            <div>Phone</div>
+            <div className="text-center">Language</div>
+            <div>Last booking</div>
+            <div className="text-right">Bookings / Actions</div>
           </div>
 
           {/* Body Rows */}
@@ -208,41 +232,40 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             {filteredCustomers.map((cust) => (
               <div
                 key={cust.id}
-                onClick={() => onOpenChat?.(cust.name)}
-                title={`Open conversation with ${cust.name}`}
-                className="grid grid-cols-12 items-center py-3.5 pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group cursor-pointer"
+                className="grid grid-cols-[180px_minmax(180px,1fr)_140px_80px_160px_164px] items-center py-3.5 pr-2 sm:pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group"
               >
                 {/* Name with initials circle */}
-                <div className="col-span-3 sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">
+                <div className="sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
-                  <button onClick={e => { e.stopPropagation(); onOpenChat?.(cust.name); }} title={cust.name} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Open conversation with ${cust.name}`}>{cust.name}</button>
+                  <button onClick={() => openEditor(cust)} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Edit ${cust.name}`} title={`Edit ${cust.name}`}>{cust.name}</button>
                 </div>
 
                 {/* Email */}
-                <div className="col-span-3 text-slate-600 truncate pr-2" title={cust.email}>{cust.email}</div>
+                <div className="text-slate-600 truncate pr-2" title={cust.email}>{cust.email || '—'}</div>
 
                 {/* Phone */}
-                <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate">
-                  {cust.phone}
+                <div className="text-slate-600 font-mono text-[11px] truncate">
+                  {cust.phone || '—'}
                 </div>
 
                 {/* Language Tag */}
-                <div className="col-span-1 flex justify-center">
+                <div className="flex justify-center">
                   <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>
                     {cust.language}
                   </span>
                 </div>
 
                 {/* Last Booking */}
-                <div className="col-span-2 pl-2 text-slate-500 truncate">{cust.lastBooking}</div>
+                <div className="text-slate-500 truncate">{cust.lastBooking}</div>
 
                 {/* Bookings Count & Trash */}
-                <div className="col-span-1 flex items-center justify-end gap-1">
+                <div className="flex items-center justify-end gap-1">
                   <span className="font-semibold text-slate-800 tabular-nums">
                     {cust.bookingsCount}
                   </span>
+                  {onOpenChat && <button onClick={() => onOpenChat(cust.name)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-[#5551FF]" aria-label={`Open conversation with ${cust.name}`} title="Open conversation"><MessageSquare className="h-4 w-4" /></button>}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -280,7 +303,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             className="w-full p-5 sm:p-6 space-y-4"
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 id="customer-dialog-title" className="text-base font-bold text-slate-900">Add Customer</h3>
+              <h3 id="customer-dialog-title" className="text-base font-bold text-slate-900">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</h3>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
@@ -345,6 +368,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               </div>
             </div>
 
+            {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs text-rose-700">{formError}</p>}
             <div className="pt-3 flex gap-2">
               <button
                 type="button"

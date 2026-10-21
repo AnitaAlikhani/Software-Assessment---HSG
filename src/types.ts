@@ -33,6 +33,8 @@ export interface ChatMessage {
   original: string;
   /** The same message in the owner's language (English). */
   translation: string;
+  /** Optional reviewed German translation for scripted demo messages. */
+  translationDe?: string;
   time: string;
   /** True when the demo could not translate the owner's free-typed reply. */
   untranslated?: boolean;
@@ -137,6 +139,9 @@ export interface CalendarEvent {
   colorTheme: 'yellow' | 'green' | 'purple' | 'blue';
   isAiBooked?: boolean;
   outsideHoursApproved?: boolean;
+  /** Preserve the time reserved when booked, even after service changes. */
+  prepMinutes?: number;
+  postMinutes?: number;
 }
 
 export interface ShiftEntry {
@@ -226,6 +231,8 @@ export interface CompanySettingsData {
   instagram: string;
   legalNote: string;
   customTerms: boolean;
+  termsText?: string;
+  logoDataUrl?: string;
 }
 
 export interface BookingHoursDay {

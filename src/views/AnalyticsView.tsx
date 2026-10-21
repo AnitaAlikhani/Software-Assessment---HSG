@@ -1,288 +1,98 @@
 import React, { useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
-import { Info, Calendar, Building2 } from 'lucide-react';
+import { appointmentAnalytics, conversationAnalytics } from '../analytics';
+import { addDays, getSalonNow } from '../scheduling';
+import type { CalendarEvent, Conversation } from '../types';
 
-export const AnalyticsView: React.FC = () => {
+interface AnalyticsProps {
+  events: CalendarEvent[];
+  conversations: Conversation[];
+  companyName: string;
+  timeZone: string;
+}
+
+const Metric = ({ label, value }: { label: string; value: number }) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
+    <h3 className="text-sm font-semibold text-slate-600">{label}</h3>
+    <p className="mt-3 text-3xl font-bold tabular-nums text-[#5551FF]">{value}</p>
+  </div>
+);
+
+export const AnalyticsView: React.FC<AnalyticsProps> = ({ events, conversations, companyName, timeZone }) => {
   const [activeTab, setActiveTab] = useState<'Appointments' | 'Messages' | 'Languages'>('Appointments');
+  const today = getSalonNow(timeZone).date;
+  const [from, setFrom] = useState(() => addDays(today, -29));
+  const [to, setTo] = useState(today);
+  const appointments = appointmentAnalytics(events, from, to);
+  const messages = conversationAnalytics(conversations);
   const chartRef = useRef<HTMLDivElement>(null);
-  const chartScrolls = useHorizontalOverflow(chartRef);
-  const [branch, setBranch] = useState('Bella Hair Salon');
-  const [dateRange, setDateRange] = useState('05.09.2026 - 05.10.2026');
-
-  // Dates for the x-axis matching Figma
-  const dates = [
-    '05 Sep',
-    '08 Sep',
-    '11 Sep',
-    '14 Sep',
-    '17 Sep',
-    '20 Sep',
-    '23 Sep',
-    '26 Sep',
-    '29 Sep',
-    '02 Oct',
-    '05 Oct',
-  ];
+  const chartScrolls = useHorizontalOverflow(chartRef, [activeTab, Boolean(appointments.error)]);
+  const max = Math.max(1, ...appointments.series.map(point => point.count));
+  const pointX = (index: number) => appointments.series.length > 1 ? index * 1000 / (appointments.series.length - 1) : 500;
+  const points = appointments.series.map((point, index) => `${pointX(index)},${180 - point.count / max * 160}`).join(' ');
+  const dateLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
   return (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Header Controls matching Figma Page 13, 27 */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-          Analytics
-        </h1>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <select
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            className="min-h-11 px-3.5 py-1.5 bg-white border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-700 shadow-2xs focus:outline-hidden"
-          >
-            <option value="Bella Hair Salon">Bella Hair Salon</option>
-          </select>
-
-          <div className="flex items-center gap-2 px-3.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 shadow-2xs">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span className="tabular-nums">{dateRange}</span>
-          </div>
-        </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h1 className="text-2xl font-bold text-slate-900">Analytics</h1>
+          <p className="mt-1 text-xs text-slate-500">Based on appointments and conversations in this demo tab.</p></div>
+        <p className="max-w-full break-words rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold">{companyName}</p>
       </div>
-
-      {/* Tabs */}
-      <div className="flex items-center gap-6 border-b border-slate-200 text-xs font-bold">
-        {(['Appointments', 'Messages', 'Languages'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`min-h-11 pb-3 pt-2 transition-colors ${
-              activeTab === tab
-                ? 'text-[#5551FF] border-b-2 border-[#5551FF]'
-                : 'text-slate-400 hover:text-slate-700'
-            }`}
-          >
-            {tab}
-          </button>
+      <div role="tablist" aria-label="Analytics category" className="flex gap-5 border-b border-slate-200 text-sm font-semibold">
+        {(['Appointments', 'Messages', 'Languages'] as const).map(tab => (
+          <button key={tab} role="tab" id={`analytics-tab-${tab}`} tabIndex={activeTab === tab ? 0 : -1} aria-selected={activeTab === tab} aria-controls="analytics-panel" onClick={() => setActiveTab(tab)} onKeyDown={event => {
+            const tabs = ['Appointments', 'Messages', 'Languages'] as const;
+            const index = tabs.indexOf(tab);
+            const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+            if (next < 0) return;
+            event.preventDefault();
+            setActiveTab(tabs[next]);
+            document.getElementById(`analytics-tab-${tabs[next]}`)?.focus();
+          }} className={`min-h-11 pb-3 pt-2 ${activeTab === tab ? 'border-b-2 border-[#5551FF] text-[#5551FF]' : 'text-slate-500 hover:text-slate-900'}`}>{tab}</button>
         ))}
       </div>
-
-      {/* Main Chart Card matching Figma Page 13 */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-7 shadow-xs space-y-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base sm:text-lg font-bold text-slate-900">
-            3 Appointments
-          </h2>
-          <Info className="w-3.5 h-3.5 text-slate-400" />
-        </div>
-
-        {/* SVG Line Graph */}
-        {chartScrolls && <p id="analytics-scroll-hint" className="text-xs text-slate-500">Swipe the chart horizontally to see every date.</p>}
-        <div ref={chartRef} role="region" aria-label="Appointment chart" aria-describedby={chartScrolls ? 'analytics-scroll-hint' : undefined} tabIndex={chartScrolls ? 0 : undefined} className="relative max-w-full overflow-x-auto pt-4 pb-2 focus-visible:outline-2 focus-visible:outline-[#5551FF]">
-          <div className="min-w-[640px]">
-          <div className="h-52 w-full flex">
-            {/* Y-axis labels */}
-            <div className="flex flex-col justify-between text-[11px] text-slate-400 pr-3 pb-6 select-none tabular-nums text-right w-8">
-              <span>1</span>
-              <span>0.75</span>
-              <span>0.5</span>
-              <span>0.25</span>
-              <span>0</span>
-            </div>
-
-            {/* Chart Area */}
-            <div className="relative flex-1 pb-6">
-              {/* Horizontal grid lines */}
-              <div className="absolute inset-0 pb-6 flex flex-col justify-between pointer-events-none">
-                <div className="border-b border-slate-100 w-full" />
-                <div className="border-b border-slate-100 w-full" />
-                <div className="border-b border-slate-100 w-full" />
-                <div className="border-b border-slate-100 w-full" />
-                <div className="border-b border-slate-200 w-full" />
+      <section role="tabpanel" id="analytics-panel" aria-labelledby={`analytics-tab-${activeTab}`} className="space-y-6">
+        {activeTab === 'Appointments' ? <>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-0 text-xs font-semibold text-slate-600">From<input aria-label="From date" type="date" value={from} onChange={event => setFrom(event.target.value)} className="mt-1 block min-h-11 max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:text-sm" /></label>
+            <label className="min-w-0 text-xs font-semibold text-slate-600">To<input aria-label="To date" type="date" value={to} onChange={event => setTo(event.target.value)} className="mt-1 block min-h-11 max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:text-sm" /></label>
+            <button onClick={() => { setFrom(addDays(today, -29)); setTo(today); }} className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold">Last 30 days</button>
+          </div>
+          {appointments.error ? <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{appointments.error}</p> : <>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs">
+              <h2 className="text-lg font-bold">{appointments.total} {appointments.total === 1 ? 'Appointment' : 'Appointments'}</h2>
+              <p className="mt-1 text-xs text-slate-500">{dateLabel(from)} – {dateLabel(to)} · Counts use the company’s local appointment dates.</p>
+              {chartScrolls && <p id="analytics-scroll-hint" className="mt-3 text-xs text-slate-500">Swipe the chart horizontally to see every date.</p>}
+              <div ref={chartRef} role="region" aria-label="Appointment chart" aria-describedby={chartScrolls ? 'analytics-scroll-hint' : undefined} tabIndex={chartScrolls ? 0 : undefined} className="mt-5 max-w-full overflow-x-auto pb-2 focus-visible:outline-2 focus-visible:outline-[#5551FF]">
+                <div className="min-w-[640px] px-2">
+                  <svg role="img" aria-label={`Daily appointments from ${from} to ${to}; maximum ${max} per day`} viewBox="-35 0 1070 210" className="h-56 w-full">
+                    {[0, max].map(value => <g key={value}><line x1="0" x2="1000" y1={180 - value / max * 160} y2={180 - value / max * 160} stroke="#e2e8f0" /><text x="-12" y={184 - value / max * 160} textAnchor="end" fontSize="12" fill="#64748b">{value}</text></g>)}
+                    <polyline points={points} fill="none" stroke="#5551FF" strokeWidth="3" />
+                    {appointments.series.map((point, index) => point.count > 0 && <circle key={point.date} cx={pointX(index)} cy={180 - point.count / max * 160} r="4" fill="#5551FF"><title>{`${point.date}: ${point.count}`}</title></circle>)}
+                    {appointments.series.filter((_, index, all) => index === 0 || index === all.length - 1 || (index % Math.max(1, Math.ceil(all.length / 8)) === 0 && index < all.length - Math.ceil(all.length / 16))).map(point => {
+                      const index = appointments.series.findIndex(item => item.date === point.date);
+                      return <text key={point.date} x={pointX(index)} y="205" textAnchor={index === 0 ? 'start' : index === appointments.series.length - 1 ? 'end' : 'middle'} fontSize="11" fill="#64748b">{dateLabel(point.date)}</text>;
+                    })}
+                  </svg>
+                </div>
               </div>
-
-              {/* SVG Line Path matching the Figma curve (peaks near 29 Sep and 02 Oct) */}
-              <svg
-                viewBox="0 0 1000 200"
-                preserveAspectRatio="none"
-                className="w-full h-full overflow-visible"
-              >
-                <defs>
-                  <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#5551FF" stopOpacity="0.18" />
-                    <stop offset="100%" stopColor="#5551FF" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-
-                {/* Area under curve */}
-                <path
-                  d="M 0,200 L 700,200 L 730,20 L 770,195 L 820,25 L 850,200 L 1000,200 Z"
-                  fill="url(#chartGradient)"
-                />
-
-                {/* Line */}
-                <path
-                  d="M 0,200 L 700,200 L 730,20 L 770,195 L 820,25 L 850,200 L 1000,200"
-                  fill="none"
-                  stroke="#5551FF"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-
-                {/* Data points */}
-                <circle cx="730" cy="20" r="4" fill="#5551FF" stroke="#FFFFFF" strokeWidth="2" />
-                <circle cx="820" cy="25" r="4" fill="#5551FF" stroke="#FFFFFF" strokeWidth="2" />
-              </svg>
+              <details className="mt-3 text-xs text-slate-600"><summary className="min-h-11 cursor-pointer py-3 font-semibold">Daily totals</summary>
+                <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{appointments.series.map(point => <li key={point.date}>{point.date}: {point.count}</li>)}</ul>
+              </details>
             </div>
-          </div>
-
-          {/* X-axis Date Labels */}
-          <div className="relative ml-8 h-5 text-[11px] text-slate-400 select-none">
-            {dates.map((d, index) => (
-              <span key={d} className="absolute whitespace-nowrap" style={{ left: `${index * 100 / (dates.length - 1)}%`, transform: index === 0 ? undefined : `translateX(${index === dates.length - 1 ? '-100%' : '-50%'})` }}>
-                {d}
-              </span>
-            ))}
-          </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 3 Bottom Metric Cards matching Figma Page 13 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card 1: Number of Customers */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="flex items-center gap-1.5">
-            <h3 className="text-xs font-bold text-slate-800">Number of Customers</h3>
-            <Info className="w-3.5 h-3.5 text-slate-400" />
-          </div>
-
-          <div className="text-center py-2">
-            <span className="text-[11px] text-slate-400 font-medium block">Total</span>
-            <span className="text-3xl font-extrabold text-[#5551FF] tabular-nums">1</span>
-          </div>
-
-          <div className="space-y-2 text-xs pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-[11px]">New</span>
-              <div className="flex items-center gap-2">
-                <div className="w-20 h-1.5 bg-slate-100 rounded-full" />
-                <span className="font-semibold text-slate-800 tabular-nums">0</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-[11px] font-medium text-slate-700">New & Returning</span>
-              <div className="flex items-center gap-2">
-                <div className="w-20 h-1.5 bg-amber-400 rounded-full" />
-                <span className="font-semibold text-slate-800 tabular-nums">1</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-slate-500">
-              <span className="text-[11px]">Returning</span>
-              <div className="flex items-center gap-2">
-                <div className="w-20 h-1.5 bg-slate-100 rounded-full" />
-                <span className="font-semibold text-slate-800 tabular-nums">0</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: AI Assistant Metrics */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="flex items-center gap-1.5">
-            <h3 className="text-xs font-bold text-slate-800">AI Assistant</h3>
-            <Info className="w-3.5 h-3.5 text-slate-400" />
-          </div>
-
-          <div className="space-y-3.5 py-1 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-500">Messages handled</span>
-              <span className="font-bold text-slate-900 tabular-nums">24</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-slate-500">Bookings made by AI</span>
-              <span className="font-bold text-slate-900 tabular-nums">3</span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-slate-500">After-hours replies</span>
-              <span className="font-bold text-slate-900 tabular-nums">9</span>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-              <span className="text-slate-500">Avg. reply time</span>
-              <span className="font-bold text-[#5551FF] tabular-nums">12 sec</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Appointment Sources Donut Chart */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between space-y-4">
-          <div className="flex items-center gap-1.5">
-            <h3 className="text-xs font-bold text-slate-800">Appointment Sources</h3>
-            <Info className="w-3.5 h-3.5 text-slate-400" />
-          </div>
-
-          {/* Donut Chart SVG */}
-          <div className="flex items-center justify-center py-2">
-            <div className="relative w-28 h-28 flex items-center justify-center">
-              <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                {/* Background Track */}
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="transparent"
-                  stroke="#F1F5F9"
-                  strokeWidth="5"
-                />
-                {/* WhatsApp: 67% */}
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="transparent"
-                  stroke="#5551FF"
-                  strokeWidth="5"
-                  strokeDasharray="59 100"
-                  strokeDashoffset="0"
-                  strokeLinecap="round"
-                />
-                {/* Instagram: 33% */}
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="transparent"
-                  stroke="#FB923C"
-                  strokeWidth="5"
-                  strokeDasharray="29 100"
-                  strokeDashoffset="-59"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center flex-col">
-                <span className="text-xs font-extrabold text-slate-800">100%</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Legend matching Figma */}
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#5551FF]" />
-              <span className="font-medium text-slate-700">WhatsApp 67%</span>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#FB923C]" />
-              <span className="font-medium text-slate-700">Instagram 33%</span>
-            </div>
-          </div>
-        </div>
-      </div>
+            <div className="grid gap-4 md:grid-cols-3"><Metric label="Customers with appointments" value={appointments.customers} /><Metric label="AI bookings" value={appointments.aiBookings} /><Metric label="Other bookings" value={appointments.total - appointments.aiBookings} /></div>
+          </>}
+        </> : activeTab === 'Messages' ? <>
+          <h2 className="text-lg font-bold">{messages.total} messages</h2>
+          <p className="text-sm text-slate-500">All conversations in this demo tab. Date filtering is available for appointments; these demo messages have no recorded calendar dates.</p>
+          <div className="grid gap-4 md:grid-cols-3"><Metric label="Customer messages" value={messages.customer} /><Metric label="AI replies" value={messages.ai} /><Metric label="Owner replies" value={messages.owner} /></div>
+        </> : <>
+          <h2 className="text-lg font-bold">Conversation languages</h2>
+          <p className="text-sm text-slate-500">Customer language across all {conversations.length} conversations in this demo tab.</p>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{messages.languages.map(item => <Metric key={item.language} label={{ EN: 'English', FR: 'French', DE: 'German', IT: 'Italian' }[item.language]} value={item.count} />)}</div>
+        </>}
+      </section>
     </div>
   );
 };

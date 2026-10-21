@@ -11,18 +11,26 @@ import {
   Scissors,
   X,
 } from 'lucide-react';
-import { BookingHoursDay, CalendarEvent, ServiceItem } from '../types';
-import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, startOfWeek } from '../scheduling';
+import { AppointmentRequest, BookingHoursDay, CalendarEvent, ClosedDate, Employee, ServiceItem, ShiftEntry, StaffAbsence } from '../types';
+import { addDays, addMinutes, calendarHours, calendarTimeZoneOffset, dayKeyForDate, formatCalendarDate, getSalonNow, salonTimeZone, startOfWeek } from '../scheduling';
+import { getAvailableSlots, isEmployeeAssignedToService } from '../availability';
 
 interface CalendarViewProps {
   events: CalendarEvent[];
   services: ServiceItem[];
   bookingHours: BookingHoursDay[];
+  employees: Employee[];
+  shiftOverview: ShiftEntry[];
+  requests: AppointmentRequest[];
+  closedDates?: ClosedDate[];
+  absences?: StaffAbsence[];
+  timeZone?: string;
   date: string;
   selectedEventId: string | null;
   onSelectEvent: (event: CalendarEvent | null) => void;
   onDateChange: (date: string) => void;
-  onAddEvent: (event: Omit<CalendarEvent, 'id'>) => void;
+  onAddEvent: (event: Omit<CalendarEvent, 'id'>) => string | null;
+  onUpdateEvent: (id: string, event: Omit<CalendarEvent, 'id'>) => string | null;
   onDeleteEvent: (id: string) => void;
 }
 
@@ -30,14 +38,25 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   events,
   services,
   bookingHours,
+  employees,
+  shiftOverview,
+  requests,
+  closedDates = [],
+  absences = [],
+  timeZone,
   date,
   selectedEventId,
   onSelectEvent,
   onDateChange,
   onAddEvent,
+  onUpdateEvent,
   onDeleteEvent,
 }) => {
   const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
+  const [showFilters, setShowFilters] = useState(false);
+  const [staffFilter, setStaffFilter] = useState('');
+  const [serviceFilter, setServiceFilter] = useState('');
+  const [clock, setClock] = useState(() => new Date());
   const selectedEvent = events.find(event => event.id === selectedEventId) ?? null;
   const setSelectedEvent = onSelectEvent;
   const detailsRef = useRef<HTMLDialogElement>(null);
@@ -55,7 +74,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     };
   }, [selectedEvent?.id]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const editingEvent = events.find(event => event.id === editingEventId) ?? null;
   const addDialogRef = useRef<HTMLDialogElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const dialog = addDialogRef.current;
     if (!dialog || !showAddModal) return;
@@ -69,17 +91,64 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [showAddModal]);
+  useEffect(() => {
+    if (!showAddModal) return;
+    const refresh = () => setClock(new Date());
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [showAddModal]);
   const [newSlotDate, setNewSlotDate] = useState(date);
   const [formError, setFormError] = useState('');
-  const [newSlotTime, setNewSlotTime] = useState('11:00');
+  const [newSlotTime, setNewSlotTime] = useState('');
   const [newCustomer, setNewCustomer] = useState('');
   const [newServiceId, setNewServiceId] = useState(services[0]?.id ?? '');
-  const newService = services.find((service) => service.id === newServiceId) ?? services[0];
-  const [newStaff, setNewStaff] = useState('Nilufar Ismayilova');
+  const newService = services.find((service) => service.id === newServiceId);
+  const [newEmployeeId, setNewEmployeeId] = useState('');
+  const activeEmployees = employees.filter(employee => employee.status === 'Active');
+  const eligibleEmployees = newService ? activeEmployees.filter(employee => isEmployeeAssignedToService(newService, employee)) : [];
+  const newEmployee = eligibleEmployees.find(employee => employee.id === newEmployeeId);
+  const context = { services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, timeZone, now: clock };
+  const availableSlots = newService && newEmployee && newSlotDate ? getAvailableSlots(context, {
+    date: newSlotDate, serviceId: newService.id, employeeId: newEmployee.id,
+    mode: 'owner', excludeEventId: editingEventId ?? undefined,
+  }) : [];
+  const selectedStartTime = availableSlots.includes(newSlotTime) ? newSlotTime : '';
+  const createUnavailable = services.length === 0 || activeEmployees.length === 0;
+  const fail = (message: string) => {
+    setFormError(message);
+    requestAnimationFrame(() => errorRef.current?.focus());
+  };
+  const openCreate = (slotDate = date, preferredTime = '') => {
+    const service = services.find(item => item.id === serviceFilter) ?? services[0];
+    const eligible = service ? activeEmployees.filter(employee => isEmployeeAssignedToService(service, employee)) : [];
+    setEditingEventId(null);
+    setNewCustomer('');
+    setNewSlotDate(slotDate);
+    setNewServiceId(service?.id ?? '');
+    setNewEmployeeId(eligible.find(employee => employee.id === staffFilter)?.id ?? eligible[0]?.id ?? '');
+    setNewSlotTime(preferredTime);
+    setFormError('');
+    setClock(new Date());
+    setShowAddModal(true);
+  };
+  const openEdit = (event: CalendarEvent) => {
+    setEditingEventId(event.id);
+    setNewCustomer(event.customerName);
+    setNewSlotDate(event.date);
+    setNewServiceId(event.serviceId ?? services.find(service => service.name === event.serviceName)?.id ?? '');
+    setNewEmployeeId(event.employeeId ?? employees.find(employee => employee.name === event.staffName)?.id ?? '');
+    setNewSlotTime(event.startTime);
+    setFormError('');
+    setClock(new Date());
+    setSelectedEvent(null);
+    setShowAddModal(true);
+  };
 
   const isOpenDate = (value: string) => {
     const weekday = new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
-    return bookingHours.some((day) => day.day === weekday && day.isOpen && day.from < day.to);
+    return !closedDates.some(closure => value >= closure.start && value <= closure.end) &&
+      bookingHours.some((day) => day.day === weekday && day.isOpen && day.from < day.to);
   };
   const makeDay = (value: string) => ({
     key: value,
@@ -114,51 +183,44 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const navigationStep = activeView === 'Day' ? 1 : activeView === '3-day' ? 3 : 7;
   const visibleEvents = events
     .filter((event) => visibleDays.some((day) => day.key === event.date))
+    .filter(event => !staffFilter || (event.employeeId !== undefined ? event.employeeId === staffFilter : event.staffName === employees.find(employee => employee.id === staffFilter)?.name))
+    .filter(event => !serviceFilter || (event.serviceId !== undefined ? event.serviceId === serviceFilter : event.serviceName === services.find(service => service.id === serviceFilter)?.name))
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
   const dateRange = `${visibleDays[0].label} - ${visibleDays[visibleDays.length - 1].label}`;
 
-  const hours = [
-    '09:00',
-    '10:00',
-    '11:00',
-    '12:00',
-    '13:00',
-    '14:00',
-    '15:00',
-    '16:00',
-    '17:00',
-  ];
+  const hours = calendarHours(visibleDays.map(day => day.key), bookingHours, visibleEvents);
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustomer.trim() || !newSlotDate || !newService) return;
-    if (!isOpenDate(newSlotDate)) {
-      setFormError('The salon is closed on this date. Please choose an open day.');
-      return;
-    }
-    const endTime = addMinutes(newSlotTime, newService.durationMinutes);
-    if (endTime <= newSlotTime) {
-      setFormError('Please choose a start time that lets the appointment finish on the same day.');
-      return;
-    }
-    setFormError('');
-
-    onAddEvent({
+    if (!newCustomer.trim()) { fail('Enter the customer name.'); return; }
+    if (!newService) { fail('Choose an available service. Add a service in Services if none exist.'); return; }
+    if (!newEmployee) { fail('Choose an active employee assigned to this service.'); return; }
+    if (!newSlotDate || !selectedStartTime) { fail('Choose an available date and start time.'); return; }
+    if (editingEventId && !editingEvent) { fail('This appointment no longer exists. Close the editor and return to the calendar.'); return; }
+    const { id: _id, ...previous } = editingEvent ?? { id: '' };
+    const updatedEvent: Omit<CalendarEvent, 'id'> = {
+      ...previous,
       customerName: newCustomer.trim(),
+      serviceId: newService.id,
       serviceName: newService.name,
-      staffName: newStaff,
+      employeeId: newEmployee.id,
+      staffName: newEmployee.name,
       date: newSlotDate,
       day: dayKeyForDate(newSlotDate),
       dateDisplay: formatCalendarDate(newSlotDate),
-      startTime: newSlotTime,
-      endTime,
-      colorTheme: 'blue',
-      isAiBooked: false,
-    });
+      startTime: selectedStartTime,
+      endTime: addMinutes(selectedStartTime, newService.durationMinutes),
+      colorTheme: editingEvent?.colorTheme ?? 'blue',
+      isAiBooked: editingEvent?.isAiBooked ?? false,
+      outsideHoursApproved: false,
+    };
+    const error = editingEventId ? onUpdateEvent(editingEventId, updatedEvent) : onAddEvent(updatedEvent);
+    if (error) { setClock(new Date()); fail(error); return; }
 
     onDateChange(newSlotDate);
     setNewCustomer('');
     setShowAddModal(false);
+    setEditingEventId(null);
   };
 
   return (
@@ -175,7 +237,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </span>
 
           <div className="flex max-w-full flex-wrap items-center gap-1.5">
-            <button onClick={() => onDateChange(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' }))} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+            <button onClick={() => onDateChange(getSalonNow(timeZone).date)} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
               Today
             </button>
             <div className="flex max-w-full items-center bg-white border border-slate-200 rounded-xl shadow-2xs">
@@ -210,15 +272,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             ))}
           </div>
 
-          <button className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
+          <button aria-expanded={showFilters} aria-controls="calendar-filters" onClick={() => setShowFilters(value => !value)} className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>Filter</span>
+            <span>Filter{staffFilter || serviceFilter ? ' •' : ''}</span>
           </button>
 
           <button
             aria-label="Add appointment"
-            onClick={() => { setNewSlotDate(date); setFormError(''); setShowAddModal(true); }}
-            className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-2xs transition-colors"
+            disabled={createUnavailable}
+            onClick={() => openCreate()}
+            className="flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-2xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add</span>
@@ -226,6 +289,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       </div>
 
+      <p className="text-xs text-slate-500">Appointment times are in {salonTimeZone(timeZone)}.</p>
+      {showFilters && <section id="calendar-filters" aria-label="Calendar filters" className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <div>
+          <label htmlFor="calendar-staff-filter" className="mb-1 block text-xs font-semibold text-slate-600">Employee</label>
+          <select id="calendar-staff-filter" value={staffFilter} onChange={event => setStaffFilter(event.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base sm:text-sm">
+            <option value="">All employees</option>
+            {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="calendar-service-filter" className="mb-1 block text-xs font-semibold text-slate-600">Service</label>
+          <select id="calendar-service-filter" value={serviceFilter} onChange={event => setServiceFilter(event.target.value)} className="min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base sm:text-sm">
+            <option value="">All services</option>
+            {services.map(service => <option key={service.id} value={service.id}>{service.name}</option>)}
+          </select>
+        </div>
+        <button onClick={() => { setStaffFilter(''); setServiceFilter(''); }} className="min-h-11 rounded-xl px-3 text-sm font-semibold text-indigo-600 hover:bg-indigo-50">Clear filters</button>
+      </section>}
+      {(staffFilter || serviceFilter) && <p role="status" className="text-xs text-slate-500">{visibleEvents.length} appointments match the selected filters in this date range.</p>}
+      {services.length === 0 && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Add a service in Services before creating an appointment.</p>}
+      {services.length > 0 && activeEmployees.length === 0 && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Add an active employee and assign them to a service before creating an appointment.</p>}
       {selectedEventId && !selectedEvent && <p role="status" className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">This appointment is no longer available. <button className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-slate-50" onClick={() => onSelectEvent(null)}>View calendar</button></p>}
 
       {/* Calendar Grid View */}
@@ -265,7 +349,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             {/* Days Column Headers */}
             <div style={gridStyle} className="grid border-b border-slate-200/80 text-xs font-semibold text-slate-600 bg-slate-50/50">
               <div className="sticky left-0 z-10 bg-slate-50 px-1 py-3.5 text-center text-slate-400 border-r border-slate-100">
-                GMT+2
+                Time
               </div>
               {visibleDays.map((d) => (
                 <div
@@ -276,6 +360,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   }`}
                 >
                   <span className="font-semibold">{d.label}</span>
+                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400">{calendarTimeZoneOffset(d.key, timeZone)}</span>
                   {events.some((event) => event.date === d.key && event.outsideHoursApproved) && (
                     <span className="block text-[10px] font-medium text-indigo-600 mt-1">Owner-approved appointment</span>
                   )}
@@ -299,7 +384,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   {/* Day Slots */}
                   {visibleDays.map((d) => {
                     // Check if there is an event matching day and start hour
-                    const slotEvents = events.filter(
+                    const slotEvents = visibleEvents.filter(
                       (e) => e.date === d.key && e.startTime.startsWith(hour.slice(0, 2))
                     );
 
@@ -307,12 +392,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       <div
                         key={d.key}
                         onClick={() => {
-                          if (!d.closed) {
-                            setNewSlotDate(d.key);
-                            setFormError('');
-                            setNewSlotTime(hour);
-                            setShowAddModal(true);
-                          }
+                          if (!d.closed && !createUnavailable) openCreate(d.key, hour);
                         }}
                         className={`relative min-w-0 p-1 border-r last:border-r-0 border-slate-100 transition-colors ${
                           d.closed
@@ -422,6 +502,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               )}
             </div>
 
+            <button onClick={() => openEdit(selectedEvent)} className="mb-3 min-h-11 w-full rounded-xl bg-[#5551FF] px-3 py-2 text-sm font-semibold text-white hover:bg-[#433fd8]">Edit appointment</button>
             <div className="pt-2 flex gap-2">
               <button
                 onClick={() => {
@@ -451,10 +532,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in zoom-in-95"
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 id="new-appointment-title" className="text-base font-bold text-slate-900">New Appointment</h3>
+              <h3 id="new-appointment-title" className="text-base font-bold text-slate-900">{editingEventId ? 'Edit Appointment' : 'New Appointment'}</h3>
               <button
                 type="button"
-                aria-label="Close new appointment"
+                aria-label="Close appointment editor"
                 onClick={() => setShowAddModal(false)}
                 className="flex size-11 shrink-0 items-center justify-center text-slate-400 hover:text-slate-700 rounded-lg"
               >
@@ -482,10 +563,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <label htmlFor="appointment-service" className="font-semibold text-slate-700 block mb-1">Service</label>
                   <select
                     id="appointment-service"
+                    required
                     value={newService?.id ?? ''}
-                    onChange={(e) => setNewServiceId(e.target.value)}
+                    onChange={(e) => {
+                      const service = services.find(item => item.id === e.target.value);
+                      setNewServiceId(e.target.value);
+                      setNewEmployeeId(previous => activeEmployees.some(employee => employee.id === previous && service && isEmployeeAssignedToService(service, employee)) ? previous : '');
+                      setNewSlotTime('');
+                      setFormError('');
+                    }}
                     className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
+                    <option value="" disabled>Choose a service</option>
                     {services.map((service) => (
                       <option key={service.id} value={service.id}>{service.name} · {service.durationMinutes} min</option>
                     ))}
@@ -496,13 +585,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   <label htmlFor="appointment-staff" className="font-semibold text-slate-700 block mb-1">Staff Member</label>
                   <select
                     id="appointment-staff"
-                    value={newStaff}
-                    onChange={(e) => setNewStaff(e.target.value)}
+                    required
+                    value={newEmployee?.id ?? ''}
+                    onChange={(e) => { setNewEmployeeId(e.target.value); setNewSlotTime(''); setFormError(''); }}
                     className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
-                    <option value="Nilufar Ismayilova">Nilufar Ismayilova</option>
-                    <option value="Eloise Denniese">Eloise Denniese</option>
+                    <option value="" disabled>Choose an employee</option>
+                    {eligibleEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
                   </select>
+                  {newService && eligibleEmployees.length === 0 && <p className="mt-2 text-xs text-amber-700">No active employee is assigned to this service. Update the service’s employee assignments first.</p>}
                 </div>
               </div>
 
@@ -513,21 +604,25 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     id="appointment-date"
                     type="date"
                     required
+                    min={getSalonNow(timeZone, clock).date}
                     value={newSlotDate}
-                    onChange={(e) => { setNewSlotDate(e.target.value); setFormError(''); }}
+                    onChange={(e) => { setNewSlotDate(e.target.value); setNewSlotTime(''); setFormError(''); }}
                     className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="appointment-time" className="font-semibold text-slate-700 block mb-1">Start Time</label>
+                  <label htmlFor="appointment-time" className="font-semibold text-slate-700 block mb-1">Available start time</label>
                   <select
                     id="appointment-time"
-                    value={newSlotTime}
-                    onChange={(e) => setNewSlotTime(e.target.value)}
+                    required
+                    disabled={availableSlots.length === 0}
+                    value={selectedStartTime}
+                    onChange={(e) => { setNewSlotTime(e.target.value); setFormError(''); }}
                     className="min-h-11 w-full min-w-0 px-3 py-2 text-base sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                   >
-                    {hours.map((h) => (
+                    <option value="" disabled>{availableSlots.length ? 'Choose a time' : 'No available times'}</option>
+                    {availableSlots.map((h) => (
                       <option key={h} value={h}>
                         {h}
                       </option>
@@ -537,8 +632,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
             </div>
 
-            {newService && <p className="text-xs text-slate-500">{newService.durationMinutes} minutes · Ends at {addMinutes(newSlotTime, newService.durationMinutes)}</p>}
-            {formError && <p role="alert" className="text-xs text-rose-600">{formError}</p>}
+            {newEmployee && newSlotDate && availableSlots.length === 0 && <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">No times are available for this employee and service on this date. Choose another date or check opening hours, shifts, closures and existing appointments.</p>}
+            {newSlotTime && !selectedStartTime && availableSlots.length > 0 && <p role="status" className="text-xs text-amber-700">The previous time is unavailable. Choose another start time.</p>}
+            {newService && selectedStartTime && <p className="text-xs text-slate-500">{newService.durationMinutes} minutes · Ends at {addMinutes(selectedStartTime, newService.durationMinutes)} · {salonTimeZone(timeZone)}</p>}
+            {formError && <p ref={errorRef} tabIndex={-1} role="alert" className="text-xs text-rose-600 focus:outline-hidden">{formError}</p>}
             <div className="pt-3 flex gap-2">
               <button
                 type="button"
@@ -549,9 +646,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </button>
               <button
                 type="submit"
-                className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors"
+                disabled={!newService || !newEmployee || !selectedStartTime}
+                className="min-h-11 flex-1 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Create Appointment
+                {editingEventId ? 'Save changes' : 'Create Appointment'}
               </button>
             </div>
           </form>

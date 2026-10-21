@@ -9,50 +9,65 @@ import {
   Check,
 } from 'lucide-react';
 import { Employee } from '../types';
+import { validateOptionalContact } from '../managementValidation';
 
 interface EmployeesViewProps {
   employees: Employee[];
   onAddEmployee: (emp: Omit<Employee, 'id' | 'initials' | 'name'>) => void;
+  onUpdateEmployee: (id: string, employee: Partial<Employee>) => void;
   onDeleteEmployee: (id: string) => void;
+  companyName?: string;
 }
 
 export const EmployeesView: React.FC<EmployeesViewProps> = ({
   employees,
   onAddEmployee,
+  onUpdateEmployee,
   onDeleteEmployee,
+  companyName = 'Bella Hair Salon',
 }) => {
   const [isAddingMode, setIsAddingMode] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [formError, setFormError] = useState('');
 
   // Form State matching Figma Page 19, 33
   const [firstName, setFirstName] = useState('');
   const tableRef = useRef<HTMLDivElement>(null);
-  const tableScrolls = useHorizontalOverflow(tableRef);
+  const tableScrolls = useHorizontalOverflow(tableRef, [isAddingMode]);
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [mobilePhone, setMobilePhone] = useState('');
   const [hidden, setHidden] = useState(false);
-  const [branch, setBranch] = useState('Bella Hair Salon');
   const [canBookOnline, setCanBookOnline] = useState(true);
 
-  const handleSave = (addAnother = false) => {
-    if (!firstName.trim() || !lastName.trim()) return;
+  const openEditor = (employee: Employee | null = null) => {
+    setEditingEmployee(employee); setFirstName(employee?.firstName ?? ''); setLastName(employee?.lastName ?? '');
+    setEmail(employee?.email ?? ''); setMobilePhone(employee?.phone ?? '');
+    setHidden(employee?.hidden ?? false); setCanBookOnline(employee?.canBookOnline ?? true);
+    setFormError(''); setIsAddingMode(true);
+  };
 
-    onAddEmployee({
+  const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!firstName.trim() || !lastName.trim()) { setFormError('Enter the employee’s first and last names.'); return; }
+    const error = validateOptionalContact(email, mobilePhone);
+    if (error) { setFormError(error); return; }
+    const details: Omit<Employee, 'id' | 'initials' | 'name'> = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: email.trim() || 'employee@bellahair.ch',
-      phone: mobilePhone.trim() || '+41 79 000 00 00',
-      status: 'Active',
-      location: branch,
+      email: email.trim(),
+      phone: mobilePhone.trim(),
+      status: editingEmployee?.status ?? 'Active',
+      location: companyName,
       canBookOnline,
       hidden,
-    });
-
+    };
+    if (editingEmployee) onUpdateEmployee(editingEmployee.id, details);
+    else onAddEmployee(details);
+    const addAnother = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'another';
     if (addAnother) {
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setMobilePhone('');
+      openEditor();
+      event.currentTarget.querySelector<HTMLInputElement>('#employee-first-name')?.focus();
     } else {
       setIsAddingMode(false);
       setFirstName('');
@@ -76,11 +91,11 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               <ArrowLeft className="w-4 h-4" />
             </button>
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Add an employee
+              {editingEmployee ? 'Edit employee' : 'Add an employee'}
             </h1>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-xs space-y-6">
+          <form onSubmit={handleSave} className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-xs space-y-6">
             {/* Name Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
@@ -89,6 +104,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 </label>
                 <input
                   id="employee-first-name"
+                  autoFocus
                   type="text"
                   required
                   placeholder="e.g. Jessica"
@@ -167,18 +183,18 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               <label htmlFor="employee-branch" className="text-xs font-bold text-slate-700 block">Branches</label>
               <select
                 id="employee-branch"
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
+                value={companyName}
+                disabled
                 className="min-w-0 min-h-11 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm text-slate-700 focus:outline-hidden"
               >
-                <option value="Bella Hair Salon">Bella Hair Salon</option>
+                <option value={companyName}>{companyName}</option>
               </select>
             </div>
 
             {/* Branch Sub-settings */}
             <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60 space-y-3">
               <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                BELLA HAIR SALON
+                {companyName}
               </p>
 
               <label className="relative flex min-h-11 items-center gap-3 cursor-pointer">
@@ -196,24 +212,27 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             </div>
 
             {/* Buttons matching Figma */}
+            {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{formError}</p>}
             <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-3 justify-end">
               <button
-                type="button"
-                onClick={() => handleSave(true)}
-                className="px-5 py-2.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/10 hover:bg-[#5551FF]/18 rounded-xl transition-colors"
-              >
-                Save and add another employee
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSave(false)}
-                className="px-6 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
+                type="submit"
+                name="intent"
+                value="save"
+                className="min-h-11 px-6 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors sm:order-last"
               >
                 Save Employee
               </button>
+              {!editingEmployee && <button
+                type="submit"
+                name="intent"
+                value="another"
+                className="min-h-11 px-5 py-2.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/10 hover:bg-[#5551FF]/18 rounded-xl transition-colors"
+              >
+                Save and add another employee
+              </button>}
+
             </div>
-          </div>
+          </form>
         </div>
       ) : (
         /* Employees List Screen matching Figma Page 16, 30 */
@@ -224,7 +243,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             </h1>
 
             <button
-              onClick={() => setIsAddingMode(true)}
+              onClick={() => openEditor()}
               className="flex min-h-11 items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -235,7 +254,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           {/* Sub-header / Branch tab */}
           <div className="border-b border-slate-200/80">
             <span className="inline-block pb-2 text-xs font-bold text-[#5551FF] border-b-2 border-[#5551FF]">
-              Bella Hair Salon
+              {companyName}
             </span>
           </div>
 
@@ -249,7 +268,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                     {emp.initials}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{emp.name}</p>
+                    <button onClick={() => openEditor(emp)} aria-label={`Edit ${emp.name}`} title={`Edit ${emp.name}`} className="block min-h-11 w-full text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-[#5551FF]">{emp.name}</button>
                     <span className="mt-0.5 inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">{emp.status}</span>
                   </div>
                   <button
@@ -261,9 +280,9 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   </button>
                 </div>
                 <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
-                  <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{emp.email}</dd>
-                  <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{emp.phone}</dd>
-                  <dt className="text-slate-400">Location</dt><dd className="min-w-0 text-slate-500">{emp.location}</dd>
+                  <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{emp.email || '—'}</dd>
+                  <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{emp.phone || '—'}</dd>
+                  <dt className="text-slate-400">Location</dt><dd className="min-w-0 text-slate-500">{companyName}</dd>
                 </dl>
               </div>
             ))}
@@ -296,14 +315,14 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                       <div className="w-7 h-7 rounded-xl bg-purple-50 text-[#5551FF] flex items-center justify-center font-bold text-[11px] shrink-0 border border-purple-100">
                         {emp.initials}
                       </div>
-                      <span className="font-semibold text-slate-900 truncate" title={emp.name}>
+                      <button onClick={() => openEditor(emp)} aria-label={`Edit ${emp.name}`} title={`Edit ${emp.name}`} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline">
                         {emp.name}
-                      </span>
+                      </button>
                     </div>
 
                     {/* Email */}
                     <div className="col-span-3 text-slate-600 truncate pr-2" title={emp.email}>
-                      {emp.email}
+                      {emp.email || '—'}
                     </div>
 
                     {/* Account Status Badge */}
@@ -315,12 +334,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
                     {/* Phone */}
                     <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate" title={emp.phone}>
-                      {emp.phone}
+                      {emp.phone || '—'}
                     </div>
 
                     {/* Location & Delete */}
                     <div className="col-span-2 flex items-center justify-end gap-3 text-slate-500">
-                      <span className="truncate" title={emp.location}>{emp.location}</span>
+                      <span className="truncate" title={companyName}>{companyName}</span>
                       <button
                         onClick={() => onDeleteEmployee(emp.id)}
                         className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
