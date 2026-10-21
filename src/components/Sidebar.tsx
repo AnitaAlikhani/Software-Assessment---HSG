@@ -116,8 +116,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         aria-modal={isOpenMobile && !isDesktop ? true : undefined}
         aria-label="Main navigation"
         inert={!isDesktop && !isOpenMobile}
-        className={`fixed top-0 left-0 z-50 h-dvh w-64 max-w-[calc(100vw-2rem)] shrink-0 overflow-hidden bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 transition-transform duration-300 ease-in-out lg:visible lg:sticky lg:self-start lg:translate-x-0 ${
-          isOpenMobile ? 'visible translate-x-0' : 'invisible -translate-x-full'
+        className={`fixed top-0 left-0 z-50 h-dvh w-64 max-w-[calc(100vw-2rem)] shrink-0 overflow-y-auto overscroll-contain bg-[#F8F9FD] border-r border-slate-200/60 flex flex-col p-5 lg:visible lg:sticky lg:self-start lg:translate-x-0 ${
+          isOpenMobile
+            ? 'visible translate-x-0 [transition:translate_300ms_ease-in-out,visibility_0s]'
+            : 'invisible -translate-x-full [transition:translate_300ms_ease-in-out,visibility_0s_linear_300ms]'
         }`}
       >
         {/* Salon identity. Home is the single dashboard navigation item. */}
@@ -139,7 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation list */}
-        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain pr-1 text-sm font-medium text-slate-500">
+        <nav className="flex-1 space-y-1 pr-1 text-sm font-medium text-slate-500">
           {/* Home */}
           <button
             onClick={() => handleNav('home')}
@@ -335,7 +337,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* Persistent pilot interest button. */}
-        <div className="shrink-0 pt-4 border-t border-slate-200/60 mt-auto">
+        <div className="mt-auto shrink-0 border-t border-slate-200/60 pt-4">
           <button
             type="button"
             aria-haspopup="dialog"

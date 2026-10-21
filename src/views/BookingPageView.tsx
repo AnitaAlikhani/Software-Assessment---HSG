@@ -46,6 +46,8 @@ interface BookingPageViewProps extends AvailabilityContext {
 }
 
 const buttonClass = 'min-h-11 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600';
+// Time slots sit three or two per row: narrower padding so a label never breaks or spills.
+const slotButtonClass = buttonClass.replace('px-4', 'px-2');
 const inputClass = 'min-h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-base sm:text-sm text-slate-900 focus:border-indigo-600 focus:outline-2 focus:outline-indigo-100';
 const cardClass = (selected: boolean) => `min-w-0 rounded-xl border p-3.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${selected ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-slate-200 bg-white hover:border-indigo-300'}`;
 const stepClass = 'mb-3 block text-xs font-bold uppercase tracking-wider text-slate-500';
@@ -135,6 +137,13 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     if (!showForm) {
       headingRef.current?.focus();
       submitting.current = false;
+      requestAnimationFrame(() => {
+        // Keep the status heading below the sticky header (owner preview); the public page has none.
+        const heading = headingRef.current;
+        if (!heading) return;
+        const headerHeight = document.querySelector('header')?.getBoundingClientRect().height ?? 0;
+        window.scrollTo({ top: heading.getBoundingClientRect().top + window.scrollY - headerHeight - 16 });
+      });
     }
   }, [showForm, liveRequest?.id, liveRequest?.status]);
 
@@ -220,7 +229,11 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     setFormError('');
     setNotice('');
     setConfirmCancellation(false);
-    requestAnimationFrame(() => dateRef.current?.focus());
+    requestAnimationFrame(() => {
+      // The form replaces the status screen: bring the field out from under the sticky header.
+      dateRef.current?.scrollIntoView({ block: 'center' });
+      dateRef.current?.focus({ preventScroll: true });
+    });
   };
 
   const editRequest = () => {
@@ -233,7 +246,11 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     setFormError('');
     setNotice('Your current request stays reserved while you edit. It changes only when you save.');
     setConfirmCancellation(false);
-    requestAnimationFrame(() => dateRef.current?.focus());
+    requestAnimationFrame(() => {
+      // The form replaces the status screen: bring the field out from under the sticky header.
+      dateRef.current?.scrollIntoView({ block: 'center' });
+      dateRef.current?.focus({ preventScroll: true });
+    });
   };
 
   const cancelRequest = () => {
@@ -256,7 +273,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
 
   return (
     <div className="mx-auto min-w-0 max-w-4xl space-y-5 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200 [overflow-wrap:anywhere]">
-      {publicMode && <a href={window.location.pathname} className="inline-block text-sm font-semibold text-indigo-700 hover:underline">Back to owner preview</a>}
+      {publicMode && <a href={window.location.pathname} className="inline-flex min-h-11 items-center text-sm font-semibold text-indigo-700 hover:underline">Back to owner preview</a>}
       {!publicMode && (
         <div className="space-y-4 rounded-2xl bg-gradient-to-r from-[#5551FF] to-indigo-600 p-5 text-white shadow-lg shadow-indigo-500/10 sm:p-6">
           <div>
@@ -265,7 +282,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             <p className="mt-1 text-sm text-indigo-100">Try the customer journey, then review the request in Home.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <input aria-label="Customer booking link" readOnly value={bookingUrl.href} onFocus={(event) => event.target.select()} className="min-w-0 flex-1 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-xs text-white" />
+            <input aria-label="Customer booking link" readOnly value={bookingUrl.href} onFocus={(event) => event.target.select()} className="min-h-11 w-full min-w-0 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-base text-white sm:w-auto sm:flex-1 sm:text-xs" />
             <button type="button" onClick={handleCopy} className={`${buttonClass} flex items-center gap-2 bg-white/15 hover:bg-white/25`}>
               {copyState === 'copied' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
               {copyState === 'copied' ? 'Copied' : 'Copy link'}
@@ -288,7 +305,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900">{companySettings.companyName || 'Salon'}</h2>
             {address && <p className="mt-0.5 text-xs text-slate-500">{address}</p>}
-            {companySettings.businessPhone && <a className="mt-1 inline-block text-xs text-indigo-600 underline-offset-2 hover:underline" href={`tel:${normalizePhone(companySettings.businessPhone)}`}>{companySettings.businessPhone}</a>}
+            {companySettings.businessPhone && <a className="inline-flex min-h-11 items-center text-xs text-indigo-600 underline-offset-2 hover:underline" href={`tel:${normalizePhone(companySettings.businessPhone)}`}>{companySettings.businessPhone}</a>}
           </div>
         </div>
 
@@ -407,7 +424,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 {!selectedEmployee ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Choose a specialist to see their available times.</p> : availableSlots.length === 0 ? (
                   <div role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><strong>{selectedEmployee.name}</strong> has no available times on {draft.date ? formatDate(draft.date) : 'this date'}. Find their next available date, or choose a different specialist above.</div>
                 ) : <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                  {availableSlots.map((slot) => <button key={slot} type="button" aria-pressed={selectedStartTime === slot} onClick={() => updateDraft({ startTime: slot })} className={`${buttonClass} border text-center text-xs tabular-nums ${selectedStartTime === slot ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50'}`}>{slot} - {addMinutes(slot, selectedService?.durationMinutes ?? 30)}</button>)}
+                  {availableSlots.map((slot) => <button key={slot} type="button" aria-pressed={selectedStartTime === slot} onClick={() => updateDraft({ startTime: slot })} className={`${slotButtonClass} border text-center text-xs tabular-nums whitespace-nowrap ${selectedStartTime === slot ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50'}`}>{slot} - {addMinutes(slot, selectedService?.durationMinutes ?? 30)}</button>)}
                 </div>}
                 {draft.startTime && !selectedStartTime && selectedEmployee && <p role="status" className="mt-2 text-sm text-amber-800">Your previously selected time is no longer available. Please choose another time.</p>}
               </fieldset>

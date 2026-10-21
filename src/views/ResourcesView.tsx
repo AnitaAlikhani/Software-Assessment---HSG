@@ -214,6 +214,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 <input
                   id="resource-capacity"
                   type="number"
+                  inputMode="numeric"
                   required
                   min="1"
                   step="1"
@@ -250,7 +251,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               <fieldset disabled aria-describedby="resource-automation-note" className="space-y-3 rounded-xl bg-slate-50 p-4 text-slate-500">
                 <legend className="font-semibold">Booking automation — unavailable in this demo</legend>
                 <p id="resource-automation-note">These options are not connected to scheduling. The capacity above is for inventory reference only.</p>
-                {['Reserve the entire room on first booking', 'Show in the customer booking page', 'Apply to all services', 'Use general booking hours'].map((label) => <label key={label} className="flex items-start gap-2"><input type="checkbox" checked={false} readOnly className="mt-0.5" /><span>{label}</span></label>)}
+                {['Reserve the entire room on first booking', 'Show in the customer booking page', 'Apply to all services', 'Use general booking hours'].map((label) => <label key={label} className="flex min-h-11 items-start gap-2.5 py-2"><input type="checkbox" checked={false} readOnly className="mt-0.5 h-5 w-5 shrink-0 rounded accent-[#5551FF]" /><span>{label}</span></label>)}
               </fieldset>
               {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{formError}</p>}
 
