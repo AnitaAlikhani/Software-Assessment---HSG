@@ -34,6 +34,8 @@ export interface AvailabilitySelection {
   excludeEventId?: string;
   /** Owner entry can use offline services/staff; physical availability still applies. */
   mode?: 'online' | 'owner';
+  /** Owner approved this appointment outside salon hours: only the employee's shift limits it. */
+  outsideHoursApproved?: boolean;
 }
 
 type Interval = { start: number; end: number };
@@ -126,14 +128,17 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   }
 
   const hours = context.bookingHours.find((day) => day.day === weekdays[date.getUTCDay()]);
-  if (!hours || !hours.isOpen) return unavailable('The salon is closed on this date.');
-  const salonInterval = parseInterval(hours.from, hours.to);
-  if (!salonInterval) return unavailable('The salon opening hours are invalid for this date.');
+  const outsideHours = selection.mode === 'owner' && selection.outsideHoursApproved === true;
+  if (!outsideHours && (!hours || !hours.isOpen)) return unavailable('The salon is closed on this date.');
 
   const shift = context.shiftOverview.find((entry) => entry.employeeId === employee.id)?.shifts[selection.date];
   if (!shift) return unavailable('This employee has no shift on this date.');
   const shiftInterval = parseInterval(shift.start, shift.end);
   if (!shiftInterval) return unavailable('This employee has an invalid shift on this date.');
+
+  // Approved outside-hours bookings (e.g. Giulia's Saturday move) are bounded by the shift only.
+  const salonInterval = outsideHours ? shiftInterval : parseInterval(hours!.from, hours!.to);
+  if (!salonInterval) return unavailable('The salon opening hours are invalid for this date.');
 
   const window = {
     start: Math.max(salonInterval.start, shiftInterval.start),
@@ -204,7 +209,7 @@ export const validateCalendarEvent = (
   if (employees.length !== 1) return 'Choose an active employee for this appointment.';
   const availability = getAvailability(context, {
     date: event.date, serviceId: service.id, employeeId: employees[0].id,
-    excludeEventId, mode: 'owner',
+    excludeEventId, mode: 'owner', outsideHoursApproved: event.outsideHoursApproved,
   });
   if (availability.error) return availability.error;
   const interval = parseInterval(event.startTime, event.endTime);
