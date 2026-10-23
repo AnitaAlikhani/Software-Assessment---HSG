@@ -692,6 +692,9 @@ export default function App() {
       appointmentId: action?.appointmentId ?? c.appointmentId,
       // The scripted follow-up predates this reply and may now contradict the owner.
       aiFollowUp: undefined,
+      // Suggestions answer the customer's last message; once the owner has replied they
+      // are stale, and tapping one again sent a duplicate (or re-ran the booking).
+      quickReplies: undefined,
       messages: [...c.messages, {
         id: `msg-${Date.now()}`,
         sender: 'owner' as const,

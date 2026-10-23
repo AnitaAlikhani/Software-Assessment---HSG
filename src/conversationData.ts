@@ -1,9 +1,19 @@
 import { AiAssistantSettings, AppointmentAction, ChatLanguage, Conversation } from './types';
+import { addDays, getSalonNow } from './scheduling';
+
+// The chats say "Friday" / "Saturday", so point at the next one (1-7 days ahead).
+// Fixed dates went into the past and the booking was rejected with
+// "Choose today or a future appointment date."
+const upcomingWeekday = (weekday: number): string => {
+  const today = getSalonNow().date;
+  const current = new Date(`${today}T00:00:00Z`).getUTCDay();
+  return addDays(today, ((weekday - current + 6) % 7) + 1);
+};
 
 const camilleBooking: AppointmentAction = {
   type: 'book',
   appointmentId: 'cal-camille',
-  date: '2026-10-09',
+  date: upcomingWeekday(5), // Friday
   startTime: '11:00',
   serviceName: 'Colouring',
   staffName: 'Nilufar Ismayilova',
@@ -136,7 +146,7 @@ export const initialConversations: Conversation[] = [
         appointmentAction: {
           type: 'reschedule',
           appointmentId: 'cal-giulia',
-          date: '2026-10-10',
+          date: upcomingWeekday(6), // Saturday
           startTime: '10:00',
           outsideHoursApproved: true,
         },
