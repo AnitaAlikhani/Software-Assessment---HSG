@@ -189,12 +189,26 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     ? selected.status === 'needs-attention' && !selected.takenOver
     : true;
 
-  const send = (english: string, local?: string, appointmentAction?: AppointmentAction) => {
-    if (!selected || !english.trim()) return;
+  const send = (english: string, local?: string, appointmentAction?: AppointmentAction): boolean => {
+    if (!selected || !english.trim()) return false;
     const conversationId = selected.id;
     if (onOwnerReply(conversationId, english.trim(), local, appointmentAction)) {
       setDrafts((previous) => ({ ...previous, [conversationId]: '' }));
+      return true;
     }
+    return false;
+  };
+
+  // Suggestions are hidden after sending, but fast repeated taps land before that re-render
+  // and each one sent a reply again. Only one suggestion per chat may be sent (the owner
+  // picks one of the options), so remember the chat and ignore further taps.
+  const sentQuickReplies = useRef(new Set<string>());
+  const sendQuickReply = (conversationId: string, q: { en: string; local: string; appointmentAction?: AppointmentAction }) => {
+    const key = conversationId;
+    if (sentQuickReplies.current.has(key)) return;
+    sentQuickReplies.current.add(key);
+    // A rejected booking keeps the suggestion, so allow another try.
+    if (!send(q.en, q.local, q.appointmentAction)) sentQuickReplies.current.delete(key);
   };
 
   const renderBubble = (c: Conversation, m: ChatMessage, flagged: boolean) => {
@@ -478,7 +492,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   {selected.quickReplies.map((q) => (
                     <button
                       key={q.en}
-                      onClick={() => send(q.en, q.local, q.appointmentAction)}
+                      onClick={() => sendQuickReply(selected.id, q)}
                       className="min-h-11 text-left text-xs [overflow-wrap:anywhere] font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 border border-[#5551FF]/20 rounded-xl px-3 py-1.5 transition-colors"
                     >
                       {messageForOwner({ original: q.local, translation: q.en }, selected.language, { ...aiSettings, translateChats: true }).text}
