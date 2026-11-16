@@ -90,7 +90,7 @@ async function json<T>(prompt: string, schema: unknown): Promise<T> {
           responseJsonSchema: schema,
           temperature: 0.3,
           // Short chat replies need no long reasoning; this keeps answers to a few seconds.
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
       return JSON.parse(response.text ?? '{}') as T;
