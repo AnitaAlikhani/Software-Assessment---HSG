@@ -29,6 +29,7 @@ import {
 } from './mockData';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { BottomNav } from './components/BottomNav';
 import { HomeView } from './views/HomeView';
 import { CalendarView } from './views/CalendarView';
 import { ShiftPlanView } from './views/ShiftPlanView';
@@ -823,7 +824,7 @@ export default function App() {
         />
 
         {/* Main View Body */}
-        <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 overflow-x-clip pb-16 outline-none">
+        <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 overflow-x-clip pb-28 lg:pb-16 outline-none">
           {currentTab === 'home' && rejectedRequests.length > 0 && (
             <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-xs sm:mx-8">
               <span>Request from {rejectedRequests.at(-1)?.request.customerName} declined.</span>
@@ -956,6 +957,17 @@ export default function App() {
 
           {currentTab === 'booking-page' && bookingPage}
         </main>
+
+        {/* Phones and tablets: app-style tab bar. Hidden inside an open chat, like messaging apps. */}
+        <BottomNav
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          onOpenMore={() => setIsMobileMenuOpen(true)}
+          isMoreOpen={isMobileMenuOpen}
+          homeBadge={requests.length}
+          chatsBadge={needsAttention.length}
+          hideOnPhone={currentTab === 'conversations' && Boolean(route.conversationId)}
+        />
       </div>
 
       {/* POS Quick Register Modal */}
@@ -969,7 +981,7 @@ export default function App() {
 
       {/* Feedback distinguishes a completed action from a problem or demo information. */}
       {toast && (
-        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-5 sm:right-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap">
+        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-24 sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap">
           {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{toast.message}</span>
           {/* On phones an action gets its own row so the message keeps the full width. */}

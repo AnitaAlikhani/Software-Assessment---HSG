@@ -592,9 +592,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   disabled={locked}
                   placeholder={
                     locked
-                      ? 'Take over to reply as the owner'
+                      ? 'Take over to reply'
                       : selected.live
-                        ? 'Reply as owner (the AI translates it)'
+                        ? 'Reply (AI translates it)'
                         : 'Reply as owner (sent as written)'
                   }
                   className="min-w-0 flex-1 min-h-11 px-4 py-2.5 text-base sm:text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
