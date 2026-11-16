@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { emptyState, type LiveState } from './whatsappCore';
+import { emptyState, type LiveState } from './whatsappCore.js';
 
 // Upstash Redis over its REST API (free tier, added from the Vercel Marketplace).
 // Vercel's Upstash integration sets KV_REST_API_*; a direct Upstash setup sets UPSTASH_*.

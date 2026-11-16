@@ -1,5 +1,5 @@
-import { AiAssistantSettings, AppointmentAction, ChatLanguage, Conversation } from './types';
-import { addDays, getSalonNow } from './scheduling';
+import type { AiAssistantSettings, AppointmentAction, ChatLanguage, Conversation } from './types.js';
+import { addDays, getSalonNow } from './scheduling.js';
 
 // The chats say "Friday" / "Saturday", so point at the next one (1-7 days ahead).
 // Fixed dates went into the past and the booking was rejected with

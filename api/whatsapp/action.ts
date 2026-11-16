@@ -1,9 +1,9 @@
-import { translateOwnerReply } from '../../server/ai';
-import { hasLiveAccess } from '../../server/access';
-import { loadState, saveState, storeConfigured } from '../../server/store';
-import { sendWhatsAppText } from '../../server/whatsappApi';
-import { addReply, liveId, publicConversations } from '../../server/whatsappCore';
-import { LANGUAGE_NAMES } from '../../src/conversationData';
+import { translateOwnerReply } from '../../server/ai.js';
+import { hasLiveAccess } from '../../server/access.js';
+import { loadState, saveState, storeConfigured } from '../../server/store.js';
+import { sendWhatsAppText } from '../../server/whatsappApi.js';
+import { addReply, liveId, publicConversations } from '../../server/whatsappCore.js';
+import { LANGUAGE_NAMES } from '../../src/conversationData.js';
 
 type Action =
   | { type: 'reply'; conversationId: string; text: string }

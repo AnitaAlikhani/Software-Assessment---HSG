@@ -1,8 +1,8 @@
 import process from 'node:process';
-import { analyzeIncoming } from '../../server/ai';
-import { loadState, saveState, storeConfigured } from '../../server/store';
-import { sendWhatsAppText } from '../../server/whatsappApi';
-import { addCustomerMessage, addReply, needsOwner, parseWebhook, toChatLanguage, verifySignature } from '../../server/whatsappCore';
+import { analyzeIncoming } from '../../server/ai.js';
+import { loadState, saveState, storeConfigured } from '../../server/store.js';
+import { sendWhatsAppText } from '../../server/whatsappApi.js';
+import { addCustomerMessage, addReply, needsOwner, parseWebhook, toChatLanguage, verifySignature } from '../../server/whatsappCore.js';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {

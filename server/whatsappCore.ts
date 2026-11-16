@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types';
+import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types.js';
 
 /** One WhatsApp chat as the server keeps it. The phone number never leaves the server. */
 export interface LiveConversation {

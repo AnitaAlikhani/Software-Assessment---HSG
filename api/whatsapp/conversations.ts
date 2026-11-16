@@ -1,6 +1,6 @@
-import { loadState, storeConfigured } from '../../server/store';
-import { publicConversations } from '../../server/whatsappCore';
-import { hasLiveAccess } from '../../server/access';
+import { loadState, storeConfigured } from '../../server/store.js';
+import { publicConversations } from '../../server/whatsappCore.js';
+import { hasLiveAccess } from '../../server/access.js';
 
 /** The website polls this every few seconds to show live WhatsApp chats. */
 export async function GET(request: Request) {

@@ -1,8 +1,8 @@
 import process from 'node:process';
 import { GoogleGenAI } from '@google/genai';
-import { initialAiSettings } from '../src/conversationData';
-import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData';
-import type { ChatMessage } from '../src/types';
+import { initialAiSettings } from '../src/conversationData.js';
+import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
+import type { ChatMessage } from '../src/types.js';
 
 const model = () => process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
 let client: GoogleGenAI | null = null;

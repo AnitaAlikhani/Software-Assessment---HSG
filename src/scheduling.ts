@@ -1,4 +1,4 @@
-import type { BookingHoursDay, CalendarEvent } from './types';
+import type { BookingHoursDay, CalendarEvent } from './types.js';
 
 // Date-only values are parsed and formatted in UTC so browser time zones cannot
 // move an appointment onto the previous or following day.

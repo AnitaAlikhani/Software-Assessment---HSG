@@ -1,4 +1,4 @@
-import {
+import type {
   AppointmentRequest,
   CalendarEvent,
   Customer,
@@ -8,8 +8,8 @@ import {
   CompanySettingsData,
   BookingHoursDay,
   ShiftEntry,
-} from './types';
-import { addDays, getSalonNow, startOfWeek } from './scheduling';
+} from './types.js';
+import { addDays, getSalonNow, startOfWeek } from './scheduling.js';
 
 export const initialAppointmentRequests: AppointmentRequest[] = [
   {
