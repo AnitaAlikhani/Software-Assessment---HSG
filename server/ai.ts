@@ -12,10 +12,31 @@ import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALO
  */
 export const models = () => [
   ...(process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : []),
+  // Lite models: fast, with the largest free quotas.
   'gemini-flash-lite-latest',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite',
+  // Bigger Flash models: smaller free quotas each, but every one counts separately.
   'gemini-flash-latest',
   'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  // Open Gemma models: separate free quotas. No JSON mode, so the format goes into the prompt (see json()).
+  'gemma-4-31b-it',
+  'gemma-4-26b-a4b-it',
 ].filter((name, index, all) => all.indexOf(name) === index);
+
+const isGemma = (name: string) => name.startsWith('gemma');
+
+/** Pulls the JSON object out of a plain-text answer like "```json {...} ```". */
+function parseJsonText<T>(text: string): T {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('The model did not answer with JSON');
+  return JSON.parse(text.slice(start, end + 1)) as T;
+}
 /** Each try gets this long, so a visitor never waits more than about half a minute. */
 const ATTEMPT_MS = 12_000;
 let client: GoogleGenAI | null = null;
@@ -132,7 +153,7 @@ const history = (messages: ChatMessage[]) =>
 
 /** Errors where another model may still work: busy, rate-limited, unknown model, unsupported option, or our timeout. */
 const tryNext = (error: unknown) =>
-  /"code":\s*(400|404|429|500|503)|UNAVAILABLE|RESOURCE_EXHAUSTED|NOT_FOUND|INVALID_ARGUMENT|timed out/.test(String((error as Error)?.message ?? error));
+  /"code":\s*(400|404|429|500|503)|UNAVAILABLE|RESOURCE_EXHAUSTED|NOT_FOUND|INVALID_ARGUMENT|timed out|did not answer with JSON|JSON/.test(String((error as Error)?.message ?? error));
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -142,25 +163,36 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
+/** Stop trying more models after this long, so a visitor gets an answer (or a "busy" note) in time. */
+const TOTAL_BUDGET_MS = 40_000;
+
 async function json<T>(prompt: string, schema: unknown, systemInstruction = salonContext()): Promise<T> {
   let lastError: unknown;
+  const started = Date.now();
   for (const name of models()) {
+    if (Date.now() - started > TOTAL_BUDGET_MS) break;
     // Some models reject the thinking setting; then the same model is tried once without it.
-    for (const thinking of [true, false]) {
+    for (const thinking of isGemma(name) ? [false] : [true, false]) {
       try {
-        const response = await withTimeout(ai().models.generateContent({
-          model: name,
-          contents: prompt,
-          config: {
-            systemInstruction,
-            responseMimeType: 'application/json',
-            responseJsonSchema: schema,
-            temperature: 0.3,
-            // Short chat replies need little reasoning; this keeps answers fast.
-            ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
-          },
-        }), ATTEMPT_MS);
-        return JSON.parse(response.text ?? '{}') as T;
+        const response = await withTimeout(ai().models.generateContent(isGemma(name)
+          ? {
+              model: name,
+              contents: `${systemInstruction}\n\n---\n\n${prompt}\n\n---\nAnswer with one JSON object only, no other text. It must match this JSON schema:\n${JSON.stringify(schema)}`,
+              config: { temperature: 0.3 },
+            }
+          : {
+              model: name,
+              contents: prompt,
+              config: {
+                systemInstruction,
+                responseMimeType: 'application/json',
+                responseJsonSchema: schema,
+                temperature: 0.3,
+                // Short chat replies need little reasoning; this keeps answers fast.
+                ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+              },
+            }), isGemma(name) ? 25_000 : ATTEMPT_MS);
+        return isGemma(name) ? parseJsonText<T>(response.text ?? '') : JSON.parse(response.text ?? '{}') as T;
       } catch (error) {
         lastError = error;
         const message = String((error as Error)?.message ?? error);
@@ -218,12 +250,27 @@ export async function translateOwnerReply(text: string, customerLanguage: string
 }
 
 /** For the owner's AI check: which free models answer right now, and how fast. */
-export async function checkModels() {
+export async function checkModels(full = false) {
   const results: { model: string; ok: boolean; ms: number; error?: string }[] = [];
   for (const name of models()) {
     const started = Date.now();
     try {
-      await withTimeout(ai().models.generateContent({ model: name, contents: 'Reply with the word OK.' }), ATTEMPT_MS);
+      if (full && isGemma(name)) {
+        const response = await withTimeout(ai().models.generateContent({
+          model: name,
+          contents: `${salonContext()}\n\n---\n\nNew customer message:\nBonjour, une coupe demain à 15h ? Je suis Claire.\n\n---\nAnswer with one JSON object only, no other text. It must match this JSON schema:\n${JSON.stringify(analysisSchema)}`,
+        }), 25_000);
+        parseJsonText(response.text ?? '');
+        results.push({ model: name, ok: true, ms: Date.now() - started });
+        continue;
+      }
+      await withTimeout(ai().models.generateContent(full
+        ? {
+            model: name,
+            contents: 'New customer message:\nBonjour, une coupe demain à 15h ? Je suis Claire.',
+            config: { systemInstruction: salonContext(), responseMimeType: 'application/json', responseJsonSchema: analysisSchema, temperature: 0.3 },
+          }
+        : { model: name, contents: 'Reply with the word OK.' }), ATTEMPT_MS);
       results.push({ model: name, ok: true, ms: Date.now() - started });
     } catch (error) {
       const message = String((error as Error)?.message ?? error);
@@ -232,4 +279,14 @@ export async function checkModels() {
     }
   }
   return results;
+}
+
+/** Names of the models this key can use for chat, for picking free fallbacks. */
+export async function listModelNames() {
+  const names: string[] = [];
+  const pager = await ai().models.list({ config: { pageSize: 200 } });
+  for await (const model of pager) {
+    if (model.supportedActions?.includes('generateContent') && model.name) names.push(model.name.replace(/^models\//, ''));
+  }
+  return names;
 }
