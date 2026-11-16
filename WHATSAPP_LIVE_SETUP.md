@@ -13,6 +13,19 @@ Tester's WhatsApp ──► Meta test number ──► /api/whatsapp/webhook ─
 Website (Conversations, "Live" chats) ◄── /api/whatsapp/conversations (every 4 seconds)
 ```
 
+## Website test chat (works today, no Meta needed)
+
+Meta locked the new WhatsApp business account until the business is verified, so testers use the
+website chat instead. It works like WhatsApp: testers write in any language, the AI answers in that language,
+and the owner sees the chat under **Conversations** with a green **Live** label.
+
+- **Tester link:** `https://slotbee.vercel.app/?chat=1&live=YOUR_LIVE_ACCESS_KEY`
+- **Owner link:** `https://slotbee.vercel.app/?live=YOUR_LIVE_ACCESS_KEY` → Conversations
+- The owner can **Take over** and reply in English or German; the tester gets it in their language.
+
+It needs only Steps 3 and 4 below (Gemini key, Upstash, Vercel settings). The WhatsApp steps are for later,
+if the business account is verified.
+
 ## What you need (all free)
 
 | What | Where | Used for |
