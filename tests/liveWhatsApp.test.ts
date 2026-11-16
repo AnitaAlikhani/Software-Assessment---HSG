@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { initialAiSettings } from '../src/conversationData';
 import { isLiveConversation } from '../src/liveWhatsApp';
 import { ConversationsView } from '../src/views/ConversationsView';
-import { salonContext } from '../server/ai';
+import { salonContext, salonNow } from '../server/ai';
 import {
   addCustomerMessage,
   addReply,
@@ -166,4 +166,8 @@ test('reads private Telegram text messages and shows them as live Telegram chats
   assert.equal(shown.channel, 'Telegram');
   assert.equal(shown.phone, 'Telegram user');
   assert.equal(shown.languageLabel, 'Portuguese');
+});
+
+test('the AI is told the current salon date and time', () => {
+  assert.equal(salonNow(new Date('2026-11-16T18:19:00Z')), 'Monday, 16 November 2026 at 19:19');
 });

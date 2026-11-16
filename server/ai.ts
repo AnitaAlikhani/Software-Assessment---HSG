@@ -123,8 +123,17 @@ async function json<T>(prompt: string, schema: unknown, systemInstruction = salo
 }
 
 /** Reads a new customer message, translates it for the owner and drafts the AI reply. */
-export const analyzeIncoming = (earlier: ChatMessage[], text: string) =>
-  json<IncomingAnalysis>(`Conversation so far:\n${history(earlier)}\n\nNew customer message:\n${text}`, analysisSchema);
+/** "Monday, 16 November 2026, 19:19" in salon time, so "tomorrow" or "next Friday" mean the right day. */
+export const salonNow = (now = new Date()) =>
+  now.toLocaleString('en-GB', {
+    timeZone: 'Europe/Zurich', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+export const analyzeIncoming = (earlier: ChatMessage[], text: string, now = new Date()) =>
+  json<IncomingAnalysis>(
+    `Right now it is ${salonNow(now)} (salon time, Europe/Zurich). Use this for words like "today", "tomorrow" or "next week", and only suggest times that are in the future and inside opening hours.\n\nConversation so far:\n${history(earlier)}\n\nNew customer message:\n${text}`,
+    analysisSchema,
+  );
 
 export interface OwnerReplyTranslation {
   customerText: string;
