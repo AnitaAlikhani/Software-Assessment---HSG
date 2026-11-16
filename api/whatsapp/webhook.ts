@@ -1,8 +1,8 @@
 import process from 'node:process';
 import { analyzeIncoming } from '../../server/ai.js';
-import { loadState, saveState, storeConfigured } from '../../server/store.js';
+import { claimMessage, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
-import { addCustomerMessage, addReply, needsOwner, parseWebhook, toChatLanguage, verifySignature } from '../../server/whatsappCore.js';
+import { addCustomerMessage, addReply, needsOwner, parseWebhook, stateFor, toChatLanguage, verifySignature } from '../../server/whatsappCore.js';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {
@@ -28,10 +28,11 @@ export async function POST(request: Request) {
   const incoming = parseWebhook(body);
   if (incoming.length === 0) return new Response('OK'); // delivery/read receipts
 
-  const state = await loadState();
   for (const message of incoming) {
-    if (state.processedIds.includes(message.id)) continue; // Meta retried a webhook we already handled
-    const earlier = state.conversations.find(item => item.waId === message.waId)?.messages ?? [];
+    if (!(await claimMessage(message.id))) continue; // Meta retried a webhook we already handled
+    const existing = await loadConversation(message.waId);
+    const state = stateFor(existing);
+    const earlier = existing?.messages ?? [];
     try {
       const analysis = await analyzeIncoming(earlier, message.text);
       const conversation = addCustomerMessage(
@@ -54,7 +55,8 @@ export async function POST(request: Request) {
       needsOwner(conversation, 'The AI could not answer this message. Please reply yourself.');
       console.error(error);
     }
+    const conversation = state.conversations.find(item => item.waId === message.waId);
+    if (conversation) await saveConversation(conversation);
   }
-  await saveState(state);
   return new Response('OK');
 }

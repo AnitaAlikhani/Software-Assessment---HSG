@@ -1,8 +1,8 @@
 import { translateOwnerReply } from '../../server/ai.js';
 import { hasLiveAccess } from '../../server/access.js';
-import { loadState, saveState, storeConfigured } from '../../server/store.js';
+import { listConversations, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
-import { addReply, liveId, publicConversations } from '../../server/whatsappCore.js';
+import { addReply, publicConversations } from '../../server/whatsappCore.js';
 import { LANGUAGE_NAMES } from '../../src/conversationData.js';
 
 type Action =
@@ -18,8 +18,8 @@ export async function POST(request: Request) {
   let action: Action;
   try { action = (await request.json()) as Action; } catch { return Response.json({ error: 'Bad request' }, { status: 400 }); }
 
-  const state = await loadState();
-  const conversation = state.conversations.find(item => liveId(item.waId) === action.conversationId);
+  const waId = typeof action.conversationId === 'string' && action.conversationId.startsWith('live-') ? action.conversationId.slice(5) : '';
+  const conversation = waId ? await loadConversation(waId) : null;
   if (!conversation) return Response.json({ error: 'This chat no longer exists' }, { status: 404 });
 
   if (action.type === 'take-over') {
@@ -53,6 +53,6 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unknown action' }, { status: 400 });
   }
 
-  await saveState(state);
-  return Response.json({ conversations: publicConversations(state) });
+  await saveConversation(conversation);
+  return Response.json({ conversations: publicConversations({ conversations: await listConversations() }) });
 }

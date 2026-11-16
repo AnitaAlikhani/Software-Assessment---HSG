@@ -158,8 +158,12 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
   };
 }
 
-export const publicConversations = (state: LiveState) =>
+export const publicConversations = (state: Pick<LiveState, 'conversations'>) =>
   [...state.conversations].sort((a, b) => b.updatedAt - a.updatedAt).map(toPublicConversation);
+
+/** A working copy that holds just one chat, for code that loads and saves chats one by one. */
+export const stateFor = (conversation: LiveConversation | null): LiveState =>
+  ({ conversations: conversation ? [conversation] : [], processedIds: [] });
 
 /** What the visitor sees in the website chat: their own words and the replies in their language. */
 export interface VisitorMessage {

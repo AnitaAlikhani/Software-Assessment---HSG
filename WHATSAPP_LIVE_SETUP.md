@@ -98,8 +98,8 @@ Handover topics mark the chat **Needs you** on the website. The rules are in `se
 ## Privacy
 
 Testers' messages and names are saved in Upstash. The website shows only a shortened phone number.
-Tell testers this before they write. After the 2 weeks, delete the data: Upstash console → Data Browser →
-delete the key `slotbee:live-whatsapp`. Also remove the test phones in Meta and delete the system user token.
+Tell testers this before they write. Each chat is deleted automatically after 30 days. To delete earlier:
+Upstash console → Data Browser → delete all keys that start with `slotbee:live:`. Also remove the test phones in Meta and delete the system user token.
 
 ## If something does not work
 

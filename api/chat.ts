@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { analyzeIncoming } from '../server/ai.js';
 import { hasLiveAccess } from '../server/access.js';
-import { loadState, saveState, storeConfigured } from '../server/store.js';
+import { loadConversation, saveConversation, storeConfigured } from '../server/store.js';
 import {
   addCustomerMessage,
   addReply,
   isValidSessionId,
   needsOwner,
+  stateFor,
   toChatLanguage,
   visitorMessages,
   webChatId,
@@ -30,9 +31,8 @@ export async function GET(request: Request) {
   if (blocked) return blocked;
   const sessionId = new URL(request.url).searchParams.get('session');
   if (!isValidSessionId(sessionId)) return Response.json({ error: 'Bad session' }, { status: 400 });
-  const state = await loadState();
-  const conversation = state.conversations.find(item => item.waId === webChatId(sessionId));
-  return Response.json({ messages: visitorMessages(conversation) }, { headers: noStore });
+  const conversation = await loadConversation(webChatId(sessionId));
+  return Response.json({ messages: visitorMessages(conversation ?? undefined) }, { headers: noStore });
 }
 
 /** A visitor writes to the salon from the website chat. The AI answers like it would on WhatsApp. */
@@ -47,9 +47,9 @@ export async function POST(request: Request) {
   const name = (typeof body.name === 'string' ? body.name.trim().slice(0, 40) : '') || 'Website visitor';
   if (!isValidSessionId(sessionId) || !text) return Response.json({ error: 'Bad request' }, { status: 400 });
 
-  const state = await loadState();
   const waId = webChatId(sessionId);
-  const existing = state.conversations.find(item => item.waId === waId);
+  const existing = await loadConversation(waId);
+  const state = stateFor(existing);
   if ((existing?.messages.length ?? 0) >= MAX_MESSAGES_PER_CHAT) {
     return Response.json({ error: 'This test chat is full. Please start a new chat.' }, { status: 429 });
   }
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
       : addCustomerMessage(state, incoming, { original: text, translation: text }, 'EN');
     needsOwner(conversation, 'The AI could not answer this message. Please reply yourself.');
   }
-  await saveState(state);
-  const conversation = state.conversations.find(item => item.waId === waId);
+  const conversation = state.conversations.find(item => item.waId === waId)!;
+  await saveConversation(conversation);
   return Response.json({ messages: visitorMessages(conversation), aiFailed }, { headers: noStore });
 }
