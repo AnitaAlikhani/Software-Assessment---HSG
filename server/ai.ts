@@ -96,7 +96,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
-async function json<T>(prompt: string, schema: unknown): Promise<T> {
+async function json<T>(prompt: string, schema: unknown, systemInstruction = salonContext()): Promise<T> {
   let lastError: unknown;
   for (const name of models()) {
     try {
@@ -104,7 +104,7 @@ async function json<T>(prompt: string, schema: unknown): Promise<T> {
         model: name,
         contents: prompt,
         config: {
-          systemInstruction: salonContext(),
+          systemInstruction,
           responseMimeType: 'application/json',
           responseJsonSchema: schema,
           temperature: 0.3,
@@ -135,14 +135,15 @@ export interface OwnerReplyTranslation {
 /** The owner types in their own language; the customer receives it in theirs. */
 export const translateOwnerReply = (text: string, customerLanguage: string) =>
   json<OwnerReplyTranslation>(
-    `The salon owner wrote this reply. Translate it into ${customerLanguage} for the customer without adding anything. Also give it in English and German.\n\nOwner reply:\n${text}`,
+    `Translate this message from a hair salon owner to a customer.\nTarget language for customerText: ${customerLanguage}.\nKeep the meaning, tone, times and prices exactly. Add nothing.\n\nMessage:\n${text}`,
     {
       type: 'object',
       properties: {
-        customerText: { type: 'string' },
-        translationEn: { type: 'string' },
-        translationDe: { type: 'string' },
+        customerText: { type: 'string', description: `The message translated into ${customerLanguage}` },
+        translationEn: { type: 'string', description: 'The message in English' },
+        translationDe: { type: 'string', description: 'The message in German' },
       },
       required: ['customerText', 'translationEn', 'translationDe'],
     },
+    'You are a precise translator. You only translate; you never answer or change the message.',
   );
