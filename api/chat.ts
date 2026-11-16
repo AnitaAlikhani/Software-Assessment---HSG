@@ -54,6 +54,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'This test chat is full. Please start a new chat.' }, { status: 429 });
   }
 
+  let aiFailed = false;
   const incoming = { id: `web-${randomUUID()}`, waId, name, text, timestamp: Date.now(), channel: 'Website' as const };
   try {
     const analysis = await analyzeIncoming(existing?.messages ?? [], text);
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
   } catch (error) {
     // Keep the message so the owner can still answer it.
     console.error(error);
+    aiFailed = true;
     const conversation = state.processedIds.includes(incoming.id)
       ? state.conversations.find(item => item.waId === waId)!
       : addCustomerMessage(state, incoming, { original: text, translation: text }, 'EN');
@@ -78,5 +80,5 @@ export async function POST(request: Request) {
   }
   await saveState(state);
   const conversation = state.conversations.find(item => item.waId === waId);
-  return Response.json({ messages: visitorMessages(conversation) }, { headers: noStore });
+  return Response.json({ messages: visitorMessages(conversation), aiFailed }, { headers: noStore });
 }

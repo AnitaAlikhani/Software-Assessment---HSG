@@ -73,18 +73,30 @@ const analysisSchema = {
 const history = (messages: ChatMessage[]) =>
   messages.slice(-10).map(message => `${message.sender === 'customer' ? 'Customer' : 'Salon'}: ${message.original}`).join('\n') || '(no earlier messages)';
 
+/** Google answers 429/503 when the free model is busy. Those usually pass within seconds. */
+const isBusy = (error: unknown) => /"code":\s*(429|500|503)|UNAVAILABLE|RESOURCE_EXHAUSTED/.test(String((error as Error)?.message ?? error));
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function json<T>(prompt: string, schema: unknown): Promise<T> {
-  const response = await ai().models.generateContent({
-    model: model(),
-    contents: prompt,
-    config: {
-      systemInstruction: salonContext(),
-      responseMimeType: 'application/json',
-      responseJsonSchema: schema,
-      temperature: 0.3,
-    },
-  });
-  return JSON.parse(response.text ?? '{}') as T;
+  const delays = [1500, 4000];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await ai().models.generateContent({
+        model: model(),
+        contents: prompt,
+        config: {
+          systemInstruction: salonContext(),
+          responseMimeType: 'application/json',
+          responseJsonSchema: schema,
+          temperature: 0.3,
+        },
+      });
+      return JSON.parse(response.text ?? '{}') as T;
+    } catch (error) {
+      if (attempt >= delays.length || !isBusy(error)) throw error;
+      await wait(delays[attempt]);
+    }
+  }
 }
 
 /** Reads a new customer message, translates it for the owner and drafts the AI reply. */

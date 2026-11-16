@@ -38,6 +38,8 @@ export default function CustomerChat() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const sendingRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const salon = initialCompanySettings.companyName;
 
@@ -50,7 +52,8 @@ export default function CustomerChat() {
         const response = await fetch(`/api/chat?session=${session}`, { headers: { 'x-live-key': key }, cache: 'no-store' });
         if (response.ok) {
           const data = (await response.json()) as { messages: VisitorMessage[] };
-          if (!stopped) setMessages(data.messages);
+          // While a message is on its way, keep showing it instead of the older server copy.
+          if (!stopped && !sendingRef.current) setMessages(data.messages);
         }
       } catch { /* try again on the next tick */ }
       if (!stopped) timer = setTimeout(poll, POLL_MS);
@@ -86,7 +89,9 @@ export default function CustomerChat() {
     const text = draft.trim();
     if (!text || sending || !key) return;
     setSending(true);
+    sendingRef.current = true;
     setError(null);
+    setNotice(null);
     setMessages(previous => [...previous, { id: `pending-${Date.now()}`, from: 'me', text, time: '' }]);
     setDraft('');
     try {
@@ -95,12 +100,14 @@ export default function CustomerChat() {
         headers: { 'Content-Type': 'application/json', 'x-live-key': key },
         body: JSON.stringify({ session, name, text }),
       });
-      const data = (await response.json()) as { messages?: VisitorMessage[]; error?: string };
+      const data = (await response.json()) as { messages?: VisitorMessage[]; error?: string; aiFailed?: boolean };
       if (data.messages) setMessages(data.messages);
       if (!response.ok) setError(data.error ?? 'The message could not be sent.');
+      else if (data.aiFailed) setNotice('The assistant is busy right now. The salon has your message and will answer here.');
     } catch {
       setError('Could not reach the salon. Check your connection.');
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -180,6 +187,7 @@ export default function CustomerChat() {
               )}
               <div ref={bottomRef} />
             </div>
+            {notice && <p role="status" className="px-4 pb-2 text-xs text-slate-600">{notice}</p>}
             {error && <p role="alert" className="px-4 pb-2 text-xs text-red-700">{error}</p>}
             <form onSubmit={send} className="sticky bottom-0 flex items-center gap-2 px-3 py-3 bg-[#f0f2f5]">
               <input
