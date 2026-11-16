@@ -4,7 +4,18 @@ import { initialAiSettings } from '../src/conversationData.js';
 import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
 
-const model = () => process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
+/**
+ * Tried in order. When one model is overloaded or not offered to this key, the next one answers.
+ * GEMINI_MODEL, if set, is tried first.
+ */
+const models = () => [
+  ...(process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : []),
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+].filter((name, index, all) => all.indexOf(name) === index);
+/** Each try gets this long, so a visitor never waits more than about half a minute. */
+const ATTEMPT_MS = 12_000;
 let client: GoogleGenAI | null = null;
 const ai = () => {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -73,32 +84,42 @@ const analysisSchema = {
 const history = (messages: ChatMessage[]) =>
   messages.slice(-10).map(message => `${message.sender === 'customer' ? 'Customer' : 'Salon'}: ${message.original}`).join('\n') || '(no earlier messages)';
 
-/** Google answers 429/503 when the free model is busy. Those usually pass within seconds. */
-const isBusy = (error: unknown) => /"code":\s*(429|500|503)|UNAVAILABLE|RESOURCE_EXHAUSTED/.test(String((error as Error)?.message ?? error));
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Errors where another model may still work: busy, rate-limited, unknown model, unsupported option, or our timeout. */
+const tryNext = (error: unknown) =>
+  /"code":\s*(400|404|429|500|503)|UNAVAILABLE|RESOURCE_EXHAUSTED|NOT_FOUND|INVALID_ARGUMENT|timed out/.test(String((error as Error)?.message ?? error));
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`Gemini timed out after ${ms} ms`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 async function json<T>(prompt: string, schema: unknown): Promise<T> {
-  const delays = [1500, 4000];
-  for (let attempt = 0; ; attempt += 1) {
+  let lastError: unknown;
+  for (const name of models()) {
     try {
-      const response = await ai().models.generateContent({
-        model: model(),
+      const response = await withTimeout(ai().models.generateContent({
+        model: name,
         contents: prompt,
         config: {
           systemInstruction: salonContext(),
           responseMimeType: 'application/json',
           responseJsonSchema: schema,
           temperature: 0.3,
-          // Short chat replies need no long reasoning; this keeps answers to a few seconds.
+          // Short chat replies need little reasoning; this keeps answers fast.
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
-      });
+      }), ATTEMPT_MS);
       return JSON.parse(response.text ?? '{}') as T;
     } catch (error) {
-      if (attempt >= delays.length || !isBusy(error)) throw error;
-      await wait(delays[attempt]);
+      lastError = error;
+      console.warn(`Gemini model ${name} failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`);
+      if (!tryNext(error)) break;
     }
   }
+  throw lastError;
 }
 
 /** Reads a new customer message, translates it for the owner and drafts the AI reply. */
