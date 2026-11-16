@@ -55,3 +55,10 @@ export async function listConversations(): Promise<LiveConversation[]> {
 export async function claimMessage(id: string): Promise<boolean> {
   return (await redis(['SET', `${PREFIX}msg:${id}`, '1', 'NX', 'EX', 2 * 24 * 60 * 60])).result === 'OK';
 }
+
+/** Deletes one chat for good (owner action, or cleanup after the test). */
+export async function deleteConversation(waId: string) {
+  await redis(['DEL', chatKey(waId)]);
+  await redis(['SREM', INDEX, waId]);
+  await redis(['DEL', 'slotbee:live-whatsapp']); // old single-key storage from before per-chat keys
+}

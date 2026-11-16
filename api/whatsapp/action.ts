@@ -1,6 +1,6 @@
 import { translateOwnerReply } from '../../server/ai.js';
 import { hasLiveAccess } from '../../server/access.js';
-import { listConversations, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
+import { deleteConversation, listConversations, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
 import { sendTelegramText } from '../../server/telegramApi.js';
 import { addReply, publicConversations, telegramChatId } from '../../server/whatsappCore.js';
@@ -29,7 +29,8 @@ type Action =
   | { type: 'reply'; conversationId: string; text: string }
   | { type: 'take-over'; conversationId: string }
   | { type: 'let-ai-continue'; conversationId: string }
-  | { type: 'confirm-booking'; conversationId: string };
+  | { type: 'confirm-booking'; conversationId: string }
+  | { type: 'delete'; conversationId: string };
 
 /** The owner's actions on a live chat: reply, take over, or hand back to the AI. */
 export async function POST(request: Request) {
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
   const waId = typeof action.conversationId === 'string' && action.conversationId.startsWith('live-') ? action.conversationId.slice(5) : '';
   const conversation = waId ? await loadConversation(waId) : null;
   if (!conversation) return Response.json({ error: 'This chat no longer exists' }, { status: 404 });
+
+  if (action.type === 'delete') {
+    await deleteConversation(conversation.waId);
+    return Response.json({ conversations: publicConversations({ conversations: await listConversations() }) });
+  }
 
   if (action.type === 'take-over') {
     conversation.takenOver = true;
