@@ -25,9 +25,9 @@ const ai = () => {
 
 /** What the AI knows about the demo salon. Mirrors the website's demo data. */
 export function salonContext() {
+  // All services: ones without online booking are still offered, the owner just books them by hand.
   const services = initialServices
-    .filter(service => service.onlineBooking)
-    .map(service => `- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}`)
+    .map(service => `- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}${service.onlineBooking ? '' : ' (the owner books this one personally: hand the chat over)'}`)
     .join('\n');
   const hours = initialBookingHours
     .map(day => `- ${day.day}: ${day.isOpen ? `${day.from}–${day.to}` : 'closed'}`)
