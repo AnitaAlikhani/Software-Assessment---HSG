@@ -10,7 +10,7 @@ import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALO
  * model has the largest, so it goes first. When one is busy, out of quota or not offered to this
  * key, the next one answers. GEMINI_MODEL, if set, is tried first.
  */
-const models = () => [
+export const models = () => [
   ...(process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : []),
   'gemini-flash-lite-latest',
   'gemini-flash-latest',
@@ -215,4 +215,21 @@ export async function translateOwnerReply(text: string, customerLanguage: string
   if (language === 'english' && result.translationEn) result.customerText = result.translationEn;
   if (!result.customerText?.trim()) throw new Error('Empty translation');
   return result;
+}
+
+/** For the owner's AI check: which free models answer right now, and how fast. */
+export async function checkModels() {
+  const results: { model: string; ok: boolean; ms: number; error?: string }[] = [];
+  for (const name of models()) {
+    const started = Date.now();
+    try {
+      await withTimeout(ai().models.generateContent({ model: name, contents: 'Reply with the word OK.' }), ATTEMPT_MS);
+      results.push({ model: name, ok: true, ms: Date.now() - started });
+    } catch (error) {
+      const message = String((error as Error)?.message ?? error);
+      const short = message.match(/"message":"([^"]{0,120})/)?.[1] ?? message.slice(0, 120);
+      results.push({ model: name, ok: false, ms: Date.now() - started, error: short });
+    }
+  }
+  return results;
 }
