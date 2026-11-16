@@ -133,8 +133,8 @@ export interface OwnerReplyTranslation {
 }
 
 /** The owner types in their own language; the customer receives it in theirs. */
-export const translateOwnerReply = (text: string, customerLanguage: string) =>
-  json<OwnerReplyTranslation>(
+export async function translateOwnerReply(text: string, customerLanguage: string): Promise<OwnerReplyTranslation> {
+  const result = await json<OwnerReplyTranslation>(
     `Translate this message from a hair salon owner to a customer.\nTarget language for customerText: ${customerLanguage}.\nKeep the meaning, tone, times and prices exactly. Add nothing.\n\nMessage:\n${text}`,
     {
       type: 'object',
@@ -147,3 +147,11 @@ export const translateOwnerReply = (text: string, customerLanguage: string) =>
     },
     'You are a precise translator. You only translate; you never answer or change the message.',
   );
+  // The model sometimes fills customerText in English. For English and German we already have the
+  // right text in its own field, so use that; other languages keep customerText.
+  const language = customerLanguage.trim().toLowerCase();
+  if (language === 'german' && result.translationDe) result.customerText = result.translationDe;
+  if (language === 'english' && result.translationEn) result.customerText = result.translationEn;
+  if (!result.customerText?.trim()) throw new Error('Empty translation');
+  return result;
+}
