@@ -6,14 +6,15 @@ import type { ChatMessage } from '../src/types.js';
 import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES } from './salonRules.js';
 
 /**
- * Tried in order. When one model is overloaded or not offered to this key, the next one answers.
- * GEMINI_MODEL, if set, is tried first.
+ * Tried in order, all on Google's free tier. Each model has its own free daily quota; the Lite
+ * model has the largest, so it goes first. When one is busy, out of quota or not offered to this
+ * key, the next one answers. GEMINI_MODEL, if set, is tried first.
  */
 const models = () => [
   ...(process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : []),
-  'gemini-3.8-flash',
-  'gemini-flash-latest',
   'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+  'gemini-3.8-flash',
 ].filter((name, index, all) => all.indexOf(name) === index);
 /** Each try gets this long, so a visitor never waits more than about half a minute. */
 const ATTEMPT_MS = 12_000;
@@ -144,25 +145,31 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 async function json<T>(prompt: string, schema: unknown, systemInstruction = salonContext()): Promise<T> {
   let lastError: unknown;
   for (const name of models()) {
-    try {
-      const response = await withTimeout(ai().models.generateContent({
-        model: name,
-        contents: prompt,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseJsonSchema: schema,
-          temperature: 0.3,
-          // Short chat replies need little reasoning; this keeps answers fast.
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      }), ATTEMPT_MS);
-      return JSON.parse(response.text ?? '{}') as T;
-    } catch (error) {
-      lastError = error;
-      console.warn(`Gemini model ${name} failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`);
-      if (!tryNext(error)) break;
+    // Some models reject the thinking setting; then the same model is tried once without it.
+    for (const thinking of [true, false]) {
+      try {
+        const response = await withTimeout(ai().models.generateContent({
+          model: name,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseJsonSchema: schema,
+            temperature: 0.3,
+            // Short chat replies need little reasoning; this keeps answers fast.
+            ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+          },
+        }), ATTEMPT_MS);
+        return JSON.parse(response.text ?? '{}') as T;
+      } catch (error) {
+        lastError = error;
+        const message = String((error as Error)?.message ?? error);
+        console.warn(`Gemini model ${name}${thinking ? '' : ' (no thinking)'} failed: ${message.slice(0, 200)}`);
+        if (thinking && /thinking/i.test(message)) continue;
+        break;
+      }
     }
+    if (!tryNext(lastError)) break;
   }
   throw lastError;
 }
