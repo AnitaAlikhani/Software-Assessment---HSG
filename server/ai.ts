@@ -16,7 +16,6 @@ export const models = () => [
   'gemini-flash-lite-latest',
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
-  'gemini-2.5-flash-lite',
   // Bigger Flash models: smaller free quotas each, but every one counts separately.
   'gemini-flash-latest',
   'gemini-3.8-flash',
