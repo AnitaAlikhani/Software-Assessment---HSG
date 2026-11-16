@@ -14,8 +14,11 @@ import {
   needsOwner,
   parseWebhook,
   publicConversations,
+  isValidSessionId,
   toChatLanguage,
   verifySignature,
+  visitorMessages,
+  webChatId,
 } from '../server/whatsappCore';
 
 const webhook = (text: string, id = 'wamid.1', type = 'text') => ({
@@ -114,4 +117,28 @@ test('live chats are labelled as live, with the detected language and no demo pr
   assert.match(html, /Spanish/);
   assert.match(html, /AI translations: Spanish/);
   assert.doesNotMatch(html, /Preview WhatsApp/);
+});
+
+test('website chats show as live "Website" chats and the visitor sees only their own language', () => {
+  const state = emptyState();
+  const waId = webChatId('abc123def456ghi7');
+  const conversation = addCustomerMessage(
+    state,
+    { id: 'web-1', waId, name: 'Lena', text: 'Hallo, habt ihr Samstag frei?', timestamp: 1763200000000, channel: 'Website' },
+    { original: 'Hallo, habt ihr Samstag frei?', translation: 'Hi, are you free on Saturday?' },
+    'DE',
+    'German',
+  );
+  addReply(conversation, 'ai', { original: 'Samstag ist geschlossen.', translation: 'We are closed on Saturday.' });
+  const [shown] = publicConversations(state);
+  assert.equal(shown.channel, 'Website');
+  assert.equal(shown.phone, 'Test visitor');
+  assert.deepEqual(visitorMessages(conversation).map(m => [m.from, m.text]), [
+    ['me', 'Hallo, habt ihr Samstag frei?'],
+    ['salon', 'Samstag ist geschlossen.'],
+  ]);
+  assert.deepEqual(visitorMessages(undefined), []);
+  assert.equal(isValidSessionId('abc123def456ghi7'), true);
+  assert.equal(isValidSessionId('../etc'), false);
+  assert.equal(isValidSessionId('short'), false);
 });

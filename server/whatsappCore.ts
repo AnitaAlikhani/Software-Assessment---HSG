@@ -2,9 +2,13 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types.js';
 
 /** One WhatsApp chat as the server keeps it. The phone number never leaves the server. */
+export type LiveChannel = 'WhatsApp' | 'Website';
+
 export interface LiveConversation {
-  /** WhatsApp ID of the customer (their phone number in international format, no "+"). */
+  /** WhatsApp ID of the customer (phone number, no "+"), or "web-<session>" for the website chat. */
   waId: string;
+  /** Missing on chats saved before the website chat existed: those are WhatsApp. */
+  channel?: LiveChannel;
   customerName: string;
   language: ChatLanguage;
   /** Language as the AI detected it, e.g. "Spanish", when it is not one of the demo languages. */
@@ -28,6 +32,7 @@ export interface IncomingMessage {
   name: string;
   text: string;
   timestamp: number;
+  channel?: LiveChannel;
 }
 
 export const emptyState = (): LiveState => ({ conversations: [], processedIds: [] });
@@ -93,6 +98,7 @@ export function addCustomerMessage(
   if (!conversation) {
     conversation = {
       waId: incoming.waId,
+      channel: incoming.channel ?? 'WhatsApp',
       customerName: incoming.name,
       language,
       status: 'ai-handled',
@@ -133,6 +139,7 @@ export const liveId = (waId: string) => `live-${waId}`;
 
 /** What the website receives. The customer's number is shortened, so it is never shown in full. */
 export function toPublicConversation(conversation: LiveConversation): Conversation & { live: true; languageLabel?: string } {
+  const website = conversation.channel === 'Website';
   return {
     id: liveId(conversation.waId),
     live: true,
@@ -141,8 +148,8 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
     avatarColor: 'bg-green-100 text-green-700',
     language: conversation.language,
     languageLabel: conversation.languageLabel,
-    phone: `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}`,
-    channel: 'WhatsApp',
+    phone: website ? 'Test visitor' : `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}`,
+    channel: website ? 'Website' : 'WhatsApp',
     status: conversation.status,
     attentionReason: conversation.attentionReason,
     takenOver: conversation.takenOver,
@@ -153,3 +160,23 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
 
 export const publicConversations = (state: LiveState) =>
   [...state.conversations].sort((a, b) => b.updatedAt - a.updatedAt).map(toPublicConversation);
+
+/** What the visitor sees in the website chat: their own words and the replies in their language. */
+export interface VisitorMessage {
+  id: string;
+  from: 'me' | 'salon';
+  text: string;
+  time: string;
+}
+
+export const visitorMessages = (conversation: LiveConversation | undefined): VisitorMessage[] =>
+  (conversation?.messages ?? []).map(message => ({
+    id: message.id,
+    from: message.sender === 'customer' ? 'me' : 'salon',
+    text: message.original,
+    time: message.time,
+  }));
+
+export const webChatId = (sessionId: string) => `web-${sessionId}`;
+export const isValidSessionId = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-z0-9]{12,40}$/.test(value);

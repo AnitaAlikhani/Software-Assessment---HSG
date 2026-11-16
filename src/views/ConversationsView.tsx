@@ -53,7 +53,7 @@ const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }>
   'owner-handled': { label: 'You handled', classes: 'bg-slate-200 text-slate-700' },
 };
 
-/** Live WhatsApp chats can be in any language; show the language the AI detected. */
+/** Live chats can be in any language; show the language the AI detected. */
 const languageChip = (c: Conversation) => (c.live && c.languageLabel ? c.languageLabel : c.language);
 
 const LiveChip = () => (
@@ -404,7 +404,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
                   <Bot className="w-4 h-4 shrink-0" />
-                  {selected.live ? 'AI replies live on WhatsApp' : aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
+                  {selected.live ? `AI replies live in ${selected.channel === 'Website' ? 'the website chat' : 'WhatsApp'}` : aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
                 </button>
                 {!selected.live && <button
                   onClick={() => setShowWhatsApp(true)}
@@ -550,7 +550,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               </form>
               {!locked && selected.live && (
                 <p className="text-[10px] text-slate-400">
-                  Your reply is translated into the customer’s language and sent on WhatsApp.
+                  Your reply is translated into the customer’s language and sent {selected.channel === 'Website' ? 'to the website chat' : 'on WhatsApp'}.
                 </p>
               )}
               {!locked && !selected.live && selected.language !== 'EN' && (

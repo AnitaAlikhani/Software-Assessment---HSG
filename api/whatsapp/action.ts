@@ -39,11 +39,14 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error(error); // Send as written rather than not at all.
     }
-    try {
-      await sendWhatsAppText(conversation.waId, sent.original);
-    } catch (error) {
-      console.error(error);
-      return Response.json({ error: 'WhatsApp did not accept the message. Check the token and the allowed numbers.' }, { status: 502 });
+    // Website chats read the reply from storage; only WhatsApp chats need sending.
+    if (conversation.channel !== 'Website') {
+      try {
+        await sendWhatsAppText(conversation.waId, sent.original);
+      } catch (error) {
+        console.error(error);
+        return Response.json({ error: 'WhatsApp did not accept the message. Check the token and the allowed numbers.' }, { status: 502 });
+      }
     }
     addReply(conversation, 'owner', sent);
   } else {

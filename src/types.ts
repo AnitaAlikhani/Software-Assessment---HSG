@@ -72,7 +72,7 @@ export interface Conversation {
   avatarColor: string;
   language: ChatLanguage;
   phone: string;
-  channel: 'WhatsApp' | 'Instagram';
+  channel: 'WhatsApp' | 'Instagram' | 'Website';
   status: ConversationStatus;
   attentionReason?: string;
   takenOver?: boolean;
@@ -84,7 +84,7 @@ export interface Conversation {
     appointmentAction?: AppointmentAction;
   };
   quickReplies?: QuickReply[];
-  /** A real WhatsApp chat from the live test number, not scripted demo data. */
+  /** A real chat from a tester (WhatsApp test number or website chat), not scripted demo data. */
   live?: boolean;
   /** Language the AI detected in a live chat, e.g. "Spanish". */
   languageLabel?: string;
