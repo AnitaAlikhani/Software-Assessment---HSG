@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types.js';
 
 /** One WhatsApp chat as the server keeps it. The phone number never leaves the server. */
-export type LiveChannel = 'WhatsApp' | 'Website';
+export type LiveChannel = 'WhatsApp' | 'Website' | 'Telegram';
 
 export interface LiveConversation {
   /** WhatsApp ID of the customer (phone number, no "+"), or "web-<session>" for the website chat. */
@@ -139,7 +139,7 @@ export const liveId = (waId: string) => `live-${waId}`;
 
 /** What the website receives. The customer's number is shortened, so it is never shown in full. */
 export function toPublicConversation(conversation: LiveConversation): Conversation & { live: true; languageLabel?: string } {
-  const website = conversation.channel === 'Website';
+  const channel = conversation.channel ?? 'WhatsApp';
   return {
     id: liveId(conversation.waId),
     live: true,
@@ -148,8 +148,8 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
     avatarColor: 'bg-green-100 text-green-700',
     language: conversation.language,
     languageLabel: conversation.languageLabel,
-    phone: website ? 'Test visitor' : `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}`,
-    channel: website ? 'Website' : 'WhatsApp',
+    phone: channel === 'Website' ? 'Test visitor' : channel === 'Telegram' ? 'Telegram user' : `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}`,
+    channel,
     status: conversation.status,
     attentionReason: conversation.attentionReason,
     takenOver: conversation.takenOver,
@@ -184,3 +184,29 @@ export const visitorMessages = (conversation: LiveConversation | undefined): Vis
 export const webChatId = (sessionId: string) => `web-${sessionId}`;
 export const isValidSessionId = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-z0-9]{12,40}$/.test(value);
+
+/** Text messages from a Telegram webhook update. Commands like /start are returned with isCommand. */
+export function parseTelegramUpdate(body: unknown): (IncomingMessage & { isCommand: boolean; languageCode?: string }) | null {
+  const update = body as {
+    update_id?: number;
+    message?: { message_id?: number; date?: number; text?: string; chat?: { id?: number; type?: string }; from?: { first_name?: string; last_name?: string; language_code?: string; is_bot?: boolean } };
+  };
+  const message = update?.message;
+  if (typeof update?.update_id !== 'number' || !message?.text || message.chat?.id === undefined) return null;
+  if (message.chat.type && message.chat.type !== 'private') return null; // only one-to-one chats
+  if (message.from?.is_bot) return null;
+  const name = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ').trim() || 'Telegram customer';
+  return {
+    id: `tg-${update.update_id}`,
+    waId: `tg-${message.chat.id}`,
+    name,
+    text: message.text,
+    timestamp: Number(message.date ?? 0) * 1000 || Date.now(),
+    channel: 'Telegram',
+    isCommand: message.text.trim().startsWith('/'),
+    languageCode: message.from?.language_code,
+  };
+}
+
+/** The Telegram chat ID stored in a conversation key like "tg-12345". */
+export const telegramChatId = (waId: string) => waId.slice(3);

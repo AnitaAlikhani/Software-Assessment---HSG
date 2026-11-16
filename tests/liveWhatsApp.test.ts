@@ -15,6 +15,8 @@ import {
   parseWebhook,
   publicConversations,
   isValidSessionId,
+  parseTelegramUpdate,
+  telegramChatId,
   toChatLanguage,
   verifySignature,
   visitorMessages,
@@ -141,4 +143,27 @@ test('website chats show as live "Website" chats and the visitor sees only their
   assert.equal(isValidSessionId('abc123def456ghi7'), true);
   assert.equal(isValidSessionId('../etc'), false);
   assert.equal(isValidSessionId('short'), false);
+});
+
+test('reads private Telegram text messages and shows them as live Telegram chats', () => {
+  const update = (text: string, extra: Record<string, unknown> = {}) => ({
+    update_id: 501,
+    message: { message_id: 7, date: 1763200000, text, chat: { id: 987654, type: 'private' }, from: { first_name: 'Ana', last_name: 'Silva', language_code: 'pt' }, ...extra },
+  });
+  const message = parseTelegramUpdate(update('Olá, têm vaga sexta?'))!;
+  assert.equal(message.id, 'tg-501');
+  assert.equal(message.waId, 'tg-987654');
+  assert.equal(message.name, 'Ana Silva');
+  assert.equal(message.isCommand, false);
+  assert.equal(telegramChatId(message.waId), '987654');
+  assert.equal(parseTelegramUpdate(update('/start'))!.isCommand, true);
+  assert.equal(parseTelegramUpdate(update('hi', { chat: { id: 1, type: 'group' } })), null);
+  assert.equal(parseTelegramUpdate({ update_id: 1, edited_message: {} }), null);
+
+  const state = emptyState();
+  addCustomerMessage(state, message, { original: message.text, translation: 'Hello, any slot Friday?' }, 'EN', 'Portuguese');
+  const [shown] = publicConversations(state);
+  assert.equal(shown.channel, 'Telegram');
+  assert.equal(shown.phone, 'Telegram user');
+  assert.equal(shown.languageLabel, 'Portuguese');
 });

@@ -2,7 +2,8 @@ import { translateOwnerReply } from '../../server/ai.js';
 import { hasLiveAccess } from '../../server/access.js';
 import { listConversations, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
-import { addReply, publicConversations } from '../../server/whatsappCore.js';
+import { sendTelegramText } from '../../server/telegramApi.js';
+import { addReply, publicConversations, telegramChatId } from '../../server/whatsappCore.js';
 import { LANGUAGE_NAMES } from '../../src/conversationData.js';
 
 type Action =
@@ -39,14 +40,14 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error(error); // Send as written rather than not at all.
     }
-    // Website chats read the reply from storage; only WhatsApp chats need sending.
-    if (conversation.channel !== 'Website') {
-      try {
-        await sendWhatsAppText(conversation.waId, sent.original);
-      } catch (error) {
-        console.error(error);
-        return Response.json({ error: 'WhatsApp did not accept the message. Check the token and the allowed numbers.' }, { status: 502 });
-      }
+    // Website chats read the reply from storage; WhatsApp and Telegram chats need sending.
+    const channel = conversation.channel ?? 'WhatsApp';
+    try {
+      if (channel === 'Telegram') await sendTelegramText(telegramChatId(conversation.waId), sent.original);
+      else if (channel === 'WhatsApp') await sendWhatsAppText(conversation.waId, sent.original);
+    } catch (error) {
+      console.error(error);
+      return Response.json({ error: `${channel} did not accept the message. Check the bot or token settings in Vercel.` }, { status: 502 });
     }
     addReply(conversation, 'owner', sent);
   } else {

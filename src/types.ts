@@ -72,7 +72,7 @@ export interface Conversation {
   avatarColor: string;
   language: ChatLanguage;
   phone: string;
-  channel: 'WhatsApp' | 'Instagram' | 'Website';
+  channel: 'WhatsApp' | 'Instagram' | 'Website' | 'Telegram';
   status: ConversationStatus;
   attentionReason?: string;
   takenOver?: boolean;
