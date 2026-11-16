@@ -57,7 +57,9 @@ export async function POST(request: Request) {
   let aiFailed = false;
   const incoming = { id: `web-${randomUUID()}`, waId, name, text, timestamp: Date.now(), channel: 'Website' as const };
   try {
+    const started = Date.now();
     const analysis = await analyzeIncoming(existing?.messages ?? [], text);
+    console.log(`AI reply took ${Date.now() - started} ms`);
     const conversation = addCustomerMessage(
       state,
       incoming,

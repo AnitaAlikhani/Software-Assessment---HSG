@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { initialAiSettings } from '../src/conversationData.js';
 import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
@@ -89,6 +89,8 @@ async function json<T>(prompt: string, schema: unknown): Promise<T> {
           responseMimeType: 'application/json',
           responseJsonSchema: schema,
           temperature: 0.3,
+          // Short chat replies need no long reasoning; this keeps answers to a few seconds.
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         },
       });
       return JSON.parse(response.text ?? '{}') as T;
