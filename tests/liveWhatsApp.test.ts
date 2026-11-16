@@ -1,0 +1,117 @@
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import test from 'node:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { initialAiSettings } from '../src/conversationData';
+import { isLiveConversation } from '../src/liveWhatsApp';
+import { ConversationsView } from '../src/views/ConversationsView';
+import { salonContext } from '../server/ai';
+import {
+  addCustomerMessage,
+  addReply,
+  emptyState,
+  needsOwner,
+  parseWebhook,
+  publicConversations,
+  toChatLanguage,
+  verifySignature,
+} from '../server/whatsappCore';
+
+const webhook = (text: string, id = 'wamid.1', type = 'text') => ({
+  object: 'whatsapp_business_account',
+  entry: [{
+    changes: [{
+      field: 'messages',
+      value: {
+        contacts: [{ wa_id: '41791234567', profile: { name: 'Sofia Rossi' } }],
+        messages: [{ id, from: '41791234567', timestamp: '1763200000', type, text: { body: text } }],
+      },
+    }],
+  }],
+});
+
+test('reads text messages from a WhatsApp webhook and skips status updates', () => {
+  const [message] = parseWebhook(webhook('Ciao, avete posto sabato?'));
+  assert.equal(message.waId, '41791234567');
+  assert.equal(message.name, 'Sofia Rossi');
+  assert.equal(message.text, 'Ciao, avete posto sabato?');
+  assert.deepEqual(parseWebhook({ entry: [{ changes: [{ value: { statuses: [{ status: 'read' }] } }] }] }), []);
+  assert.deepEqual(parseWebhook(webhook('', 'wamid.2', 'image')), []);
+  assert.deepEqual(parseWebhook(null), []);
+});
+
+test('only accepts webhooks signed with the app secret', () => {
+  const body = JSON.stringify(webhook('Hello'));
+  const good = `sha256=${createHmac('sha256', 'secret').update(body).digest('hex')}`;
+  assert.equal(verifySignature(body, good, 'secret'), true);
+  assert.equal(verifySignature(body, good, 'other-secret'), false);
+  assert.equal(verifySignature(`${body} `, good, 'secret'), false);
+  assert.equal(verifySignature(body, null, 'secret'), false);
+});
+
+test('keeps one chat per customer, remembers handled messages and hides the phone number', () => {
+  const state = emptyState();
+  const [first] = parseWebhook(webhook('Ciao', 'wamid.a'));
+  const conversation = addCustomerMessage(state, first, { original: 'Ciao', translation: 'Hello', translationDe: 'Hallo' }, 'IT', 'Italian');
+  addReply(conversation, 'ai', { original: 'Ciao! Come posso aiutarti?', translation: 'Hi! How can I help?' });
+  const [second] = parseWebhook(webhook('Uno sconto?', 'wamid.b'));
+  addCustomerMessage(state, second, { original: 'Uno sconto?', translation: 'A discount?' }, 'IT', 'Italian');
+  needsOwner(conversation, 'The customer asked for a discount.');
+
+  assert.equal(state.conversations.length, 1);
+  assert.deepEqual(state.processedIds, ['wamid.a', 'wamid.b']);
+  const [shown] = publicConversations(state);
+  assert.equal(shown.id, 'live-41791234567');
+  assert.equal(shown.live, true);
+  assert.equal(shown.status, 'needs-attention');
+  assert.equal(shown.messages.length, 3);
+  assert.ok(!shown.phone.includes('912345'), 'the full number must not reach the website');
+});
+
+test('an owner reply pauses the AI for that chat', () => {
+  const state = emptyState();
+  const conversation = addCustomerMessage(state, parseWebhook(webhook('Hi'))[0], { original: 'Hi', translation: 'Hi' }, 'EN');
+  addReply(conversation, 'owner', { original: 'Hello!', translation: 'Hello!' });
+  assert.equal(conversation.takenOver, true);
+  assert.equal(conversation.status, 'owner-handled');
+});
+
+test('maps detected languages to the demo language chips', () => {
+  assert.equal(toChatLanguage('fr'), 'FR');
+  assert.equal(toChatLanguage('IT'), 'IT');
+  assert.equal(toChatLanguage('es'), 'EN');
+  assert.equal(toChatLanguage(undefined), 'EN');
+  assert.equal(isLiveConversation('live-4179'), true);
+  assert.equal(isLiveConversation('conv-camille'), false);
+});
+
+test('the AI is told the salon services, opening hours and handover rules', () => {
+  const context = salonContext();
+  assert.match(context, /Bella Hair Salon/);
+  assert.match(context, /Haircut/);
+  assert.match(context, /Saturday: closed/);
+  assert.match(context, /Discounts and price changes/);
+});
+
+test('live chats are labelled as live, with the detected language and no demo preview', () => {
+  const state = emptyState();
+  addCustomerMessage(state, parseWebhook(webhook('Hola, ¿tienen cita el lunes?'))[0], { original: 'Hola', translation: 'Hello' }, 'EN', 'Spanish');
+  const [conversation] = publicConversations(state);
+  const html = renderToStaticMarkup(React.createElement(ConversationsView, {
+    conversations: [conversation],
+    selectedId: conversation.id,
+    mobileDetailOpen: false,
+    onBackToList: () => {},
+    onSelect: () => {},
+    onTakeOver: () => {},
+    onLetAiContinue: () => null,
+    onOwnerReply: () => true,
+    aiSettings: initialAiSettings,
+    onOpenAiSettings: () => {},
+  }));
+  assert.match(html, />Live</);
+  assert.match(html, /Spanish/);
+  assert.match(html, /AI translations: Spanish/);
+  assert.doesNotMatch(html, /Preview WhatsApp/);
+});

@@ -52,6 +52,7 @@ import { appointmentFromRequest, appointmentFromConversationAction, upsertAppoin
 
 import { createDemoRequests } from './demoRequests';
 import { useDemoState } from './useDemoState';
+import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
 import { customerForAppointment, customerForRequest, upsertCustomer, validateContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
 
@@ -128,6 +129,9 @@ export default function App() {
   const [calendarDate, setCalendarDate] = useState(() => getSalonNow(companySettings.timeZone).date);
   const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
   const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', initialConversations);
+  // Real WhatsApp chats from the test number (only with a "?live=KEY" link); shown above the demo chats.
+  const live = useLiveWhatsApp();
+  const allConversations = [...live.conversations, ...conversations];
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
     initialConversations[0]?.id ?? null
   );
@@ -150,7 +154,7 @@ export default function App() {
   const [submittedRequest, setSubmittedRequest] = useDemoState<AppointmentRequest | null>('submittedRequest', null);
   const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests, closedDates, absences, timeZone: companySettings.timeZone };
 
-  const needsAttention = conversations.filter((c) => c.status === 'needs-attention');
+  const needsAttention = allConversations.filter((c) => c.status === 'needs-attention');
   const latestAiBookedEvent = mostRecentAiAppointment(calendarEvents);
   const nextAppointment = nextUpcomingAppointment(calendarEvents, now, companySettings.timeZone.split(' ')[0]);
   const openAppointment = (event: CalendarEvent) => {
@@ -617,8 +621,8 @@ export default function App() {
   // Conversations
   const openConversation = (id?: string) => {
     const target = id
-      ? conversations.find((c) => c.id === id)
-      : conversations.find((c) => c.status === 'needs-attention') ?? conversations[0];
+      ? allConversations.find((c) => c.id === id)
+      : allConversations.find((c) => c.status === 'needs-attention') ?? allConversations[0];
     if (target) setSelectedConversationId(target.id);
     navigate({ tab: 'conversations', conversationId: target?.id });
   };
@@ -633,6 +637,10 @@ export default function App() {
   };
 
   const handleTakeOver = (id: string) => {
+    if (isLiveConversation(id)) {
+      void live.takeOver(id).then(error => showToast(error ?? 'You took over this WhatsApp chat. The AI is paused.', error ? 'error' : 'success'));
+      return;
+    }
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, takenOver: true } : c))
     );
@@ -648,6 +656,10 @@ export default function App() {
   };
 
   const handleLetAiContinue = (id: string): string | null => {
+    if (isLiveConversation(id)) {
+      void live.letAiContinue(id).then(error => showToast(error ?? 'The AI answers new WhatsApp messages again.', error ? 'error' : 'success'));
+      return null;
+    }
     const conversation = conversations.find((item) => item.id === id);
     if (!conversation) return 'This conversation no longer exists.';
     const followUp = conversation.aiFollowUp;
@@ -680,6 +692,10 @@ export default function App() {
   };
 
   const handleOwnerReply = (id: string, english: string, local?: string, action?: AppointmentAction) => {
+    if (isLiveConversation(id)) {
+      void live.reply(id, english).then(error => error && showToast(error, 'error'));
+      return true;
+    }
     const conversation = conversations.find((item) => item.id === id);
     if (!conversation) return false;
     const error = action ? applyConversationAppointment(conversation, action, false) : null;
@@ -886,7 +902,7 @@ export default function App() {
 
           {currentTab === 'conversations' && (
             <ConversationsView
-              conversations={conversations}
+              conversations={allConversations}
               selectedId={route.conversationId ?? selectedConversationId}
               mobileDetailOpen={Boolean(route.conversationId)}
               onBackToList={() => navigate({ tab: 'conversations' })}

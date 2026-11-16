@@ -84,6 +84,10 @@ export interface Conversation {
     appointmentAction?: AppointmentAction;
   };
   quickReplies?: QuickReply[];
+  /** A real WhatsApp chat from the live test number, not scripted demo data. */
+  live?: boolean;
+  /** Language the AI detected in a live chat, e.g. "Spanish". */
+  languageLabel?: string;
 }
 
 export interface HandoverRule {

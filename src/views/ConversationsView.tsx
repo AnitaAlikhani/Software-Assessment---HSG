@@ -53,6 +53,13 @@ const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }>
   'owner-handled': { label: 'You handled', classes: 'bg-slate-200 text-slate-700' },
 };
 
+/** Live WhatsApp chats can be in any language; show the language the AI detected. */
+const languageChip = (c: Conversation) => (c.live && c.languageLabel ? c.languageLabel : c.language);
+
+const LiveChip = () => (
+  <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#25D366]/15 text-green-700">Live</span>
+);
+
 export const ConversationsView: React.FC<ConversationsViewProps> = ({
   conversations,
   selectedId,
@@ -173,7 +180,10 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   ];
 
   const isTranslated = (c: Conversation) =>
-    aiSettings.translateChats && c.language !== (ownerLanguage === 'German' ? 'DE' : 'EN');
+    aiSettings.translateChats &&
+    (c.live && c.languageLabel
+      ? c.languageLabel !== ownerLanguage
+      : c.language !== (ownerLanguage === 'German' ? 'DE' : 'EN'));
 
   const continueWithAi = () => {
     if (!selected) return;
@@ -331,8 +341,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                         <span
                           className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
                         >
-                          {c.language}
+                          {languageChip(c)}
                         </span>
+                        {c.live && <LiveChip />}
                       </div>
                       <span className="text-[11px] text-slate-400 shrink-0">{c.lastTime}</span>
                     </div>
@@ -376,8 +387,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     <span
                       className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[selected.language]}`}
                     >
-                      {selected.language}
+                      {languageChip(selected)}
                     </span>
+                    {selected.live && <LiveChip />}
                   </div>
                   <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                     {selected.phone} · {selected.channel}
@@ -392,15 +404,15 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
                   <Bot className="w-4 h-4 shrink-0" />
-                  {aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
+                  {selected.live ? 'AI replies live on WhatsApp' : aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
                 </button>
-                <button
+                {!selected.live && <button
                   onClick={() => setShowWhatsApp(true)}
                   className="flex min-h-11 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
                 >
                   <span className={`w-4 h-4 rounded-full inline-block ${selected.channel === 'Instagram' ? 'bg-fuchsia-500' : 'bg-[#25D366]'}`} />
                   Preview {selected.channel}
-                </button>
+                </button>}
               </div>
             </div>
 
@@ -409,7 +421,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               <div className="flex justify-center px-4 pt-3">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                   <Languages className="w-3.5 h-3.5 shrink-0" />
-                  Demo translations: {LANGUAGE_NAMES[selected.language]} → {ownerLanguage}
+                  {selected.live
+                    ? `AI translations: ${selected.languageLabel ?? LANGUAGE_NAMES[selected.language]} → ${ownerLanguage}`
+                    : `Demo translations: ${LANGUAGE_NAMES[selected.language]} → ${ownerLanguage}`}
                 </span>
               </div>
             )}
@@ -519,7 +533,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   placeholder={
                     locked
                       ? 'Take over to reply as the owner'
-                      : 'Reply as owner (sent as written)'
+                      : selected.live
+                        ? 'Reply as owner (the AI translates it)'
+                        : 'Reply as owner (sent as written)'
                   }
                   className="min-w-0 flex-1 min-h-11 px-4 py-2.5 text-base sm:text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
@@ -532,7 +548,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   <Send className="w-4 h-4" />
                 </button>
               </form>
-              {!locked && selected.language !== 'EN' && (
+              {!locked && selected.live && (
+                <p className="text-[10px] text-slate-400">
+                  Your reply is translated into the customer’s language and sent on WhatsApp.
+                </p>
+              )}
+              {!locked && !selected.live && selected.language !== 'EN' && (
                 <p className="text-[10px] text-slate-400">
                   Demo: suggested replies come with a ready translation. Free text is sent without
                   a translation in this prototype.
