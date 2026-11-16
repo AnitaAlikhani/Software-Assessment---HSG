@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { analyzeIncoming } from '../server/ai.js';
+import { recordAnalysis } from '../server/recordAnalysis.js';
 import { hasLiveAccess } from '../server/access.js';
 import { loadConversation, saveConversation, storeConfigured } from '../server/store.js';
 import {
@@ -8,7 +9,6 @@ import {
   isValidSessionId,
   needsOwner,
   stateFor,
-  toChatLanguage,
   visitorMessages,
   webChatId,
 } from '../server/whatsappCore.js';
@@ -60,17 +60,8 @@ export async function POST(request: Request) {
     const started = Date.now();
     const analysis = await analyzeIncoming(existing?.messages ?? [], text);
     console.log(`AI reply took ${Date.now() - started} ms`);
-    const conversation = addCustomerMessage(
-      state,
-      incoming,
-      { original: text, translation: analysis.translationEn, translationDe: analysis.translationDe },
-      toChatLanguage(analysis.languageCode),
-      analysis.languageName,
-    );
-    if (analysis.needsOwner) needsOwner(conversation, analysis.reason || 'The AI handed this chat to you.');
-    if (!conversation.takenOver && analysis.reply) {
-      addReply(conversation, 'ai', { original: analysis.reply, translation: analysis.replyEn, translationDe: analysis.replyDe });
-    }
+    const { conversation, reply } = recordAnalysis(state, incoming, analysis);
+    if (reply) addReply(conversation, 'ai', reply);
   } catch (error) {
     // Keep the message so the owner can still answer it.
     console.error(error);

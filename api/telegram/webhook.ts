@@ -1,4 +1,5 @@
 import { analyzeIncoming } from '../../server/ai.js';
+import { recordAnalysis } from '../../server/recordAnalysis.js';
 import { claimMessage, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendTelegramText, sendTelegramTyping, telegramConfigured, webhookSecret } from '../../server/telegramApi.js';
 import {
@@ -8,7 +9,6 @@ import {
   parseTelegramUpdate,
   stateFor,
   telegramChatId,
-  toChatLanguage,
 } from '../../server/whatsappCore.js';
 import { initialCompanySettings } from '../../src/mockData.js';
 
@@ -43,17 +43,10 @@ export async function POST(request: Request) {
   try {
     if (!existing?.takenOver) await sendTelegramTyping(chatId);
     const analysis = await analyzeIncoming(existing?.messages ?? [], message.text);
-    const conversation = addCustomerMessage(
-      state,
-      message,
-      { original: message.text, translation: analysis.translationEn, translationDe: analysis.translationDe },
-      toChatLanguage(analysis.languageCode),
-      analysis.languageName,
-    );
-    if (analysis.needsOwner) needsOwner(conversation, analysis.reason || 'The AI handed this chat to you.');
-    if (!conversation.takenOver && analysis.reply) {
-      await sendTelegramText(chatId, analysis.reply);
-      addReply(conversation, 'ai', { original: analysis.reply, translation: analysis.replyEn, translationDe: analysis.replyDe });
+    const { conversation, reply } = recordAnalysis(state, message, analysis);
+    if (reply) {
+      await sendTelegramText(chatId, reply.original);
+      addReply(conversation, 'ai', reply);
     }
   } catch (error) {
     // Keep the message visible even when the AI or Telegram fails, so the owner can still reply.

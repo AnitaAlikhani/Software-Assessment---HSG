@@ -638,7 +638,7 @@ export default function App() {
 
   const handleTakeOver = (id: string) => {
     if (isLiveConversation(id)) {
-      void live.takeOver(id).then(error => showToast(error ?? 'You took over this WhatsApp chat. The AI is paused.', error ? 'error' : 'success'));
+      void live.takeOver(id).then(error => showToast(error ?? 'You took over this chat. The AI is paused.', error ? 'error' : 'success'));
       return;
     }
     setConversations((prev) =>
@@ -655,9 +655,32 @@ export default function App() {
     return saveCalendarEvent({ ...appointment, customerPhone: conversation.phone }, appointment.id);
   };
 
+  /** A live chat's booking request: add it to the calendar (with the usual checks), then tell the customer. */
+  const handleConfirmLiveBooking = (id: string) => {
+    const conversation = allConversations.find((item) => item.id === id);
+    const request = conversation?.bookingRequest;
+    if (!conversation || !request || request.status !== 'requested') return;
+    const service = services.find((item) => item.name === request.service);
+    const staff = employees.find((item) => service?.assignedEmployeeIds?.includes(item.id)) ?? employees[0];
+    const action: AppointmentAction = {
+      type: 'book',
+      appointmentId: `live-appt-${id}-${request.date}-${request.time.replace(':', '')}`,
+      date: request.date,
+      startTime: request.time,
+      serviceName: request.service,
+      staffName: staff?.name ?? '',
+    };
+    const error = applyConversationAppointment({ ...conversation, customerName: request.customerName }, action, true);
+    if (error) { showToast(error, 'error'); return; }
+    void live.confirmBooking(id).then((sendError) => showToast(
+      sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${request.service}, ${request.time}. The customer got the confirmation.`,
+      sendError ? 'error' : 'success',
+    ));
+  };
+
   const handleLetAiContinue = (id: string): string | null => {
     if (isLiveConversation(id)) {
-      void live.letAiContinue(id).then(error => showToast(error ?? 'The AI answers new WhatsApp messages again.', error ? 'error' : 'success'));
+      void live.letAiContinue(id).then(error => showToast(error ?? 'The AI answers new messages in this chat again.', error ? 'error' : 'success'));
       return null;
     }
     const conversation = conversations.find((item) => item.id === id);
@@ -912,6 +935,8 @@ export default function App() {
               onOwnerReply={handleOwnerReply}
               aiSettings={aiSettings}
               onOpenAiSettings={() => setCurrentTab('ai-assistant')}
+              liveChannels={live.channels}
+              onConfirmBooking={handleConfirmLiveBooking}
             />
           )}
 

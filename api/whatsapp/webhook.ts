@@ -1,8 +1,9 @@
 import process from 'node:process';
 import { analyzeIncoming } from '../../server/ai.js';
+import { recordAnalysis } from '../../server/recordAnalysis.js';
 import { claimMessage, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
-import { addCustomerMessage, addReply, needsOwner, parseWebhook, stateFor, toChatLanguage, verifySignature } from '../../server/whatsappCore.js';
+import { addCustomerMessage, addReply, needsOwner, parseWebhook, stateFor, verifySignature } from '../../server/whatsappCore.js';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {
@@ -35,17 +36,10 @@ export async function POST(request: Request) {
     const earlier = existing?.messages ?? [];
     try {
       const analysis = await analyzeIncoming(earlier, message.text);
-      const conversation = addCustomerMessage(
-        state,
-        message,
-        { original: message.text, translation: analysis.translationEn, translationDe: analysis.translationDe },
-        toChatLanguage(analysis.languageCode),
-        analysis.languageName,
-      );
-      if (analysis.needsOwner) needsOwner(conversation, analysis.reason || 'The AI handed this chat to you.');
-      if (!conversation.takenOver && analysis.reply) {
-        await sendWhatsAppText(message.waId, analysis.reply);
-        addReply(conversation, 'ai', { original: analysis.reply, translation: analysis.replyEn, translationDe: analysis.replyDe });
+      const { conversation, reply } = recordAnalysis(state, message, analysis);
+      if (reply) {
+        await sendWhatsAppText(message.waId, reply.original);
+        addReply(conversation, 'ai', reply);
       }
     } catch (error) {
       // Keep the message visible even when the AI or WhatsApp fails, so the owner can still reply.

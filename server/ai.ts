@@ -3,6 +3,7 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { initialAiSettings } from '../src/conversationData.js';
 import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
+import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES } from './salonRules.js';
 
 /**
  * Tried in order. When one model is overloaded or not offered to this key, the next one answers.
@@ -23,34 +24,56 @@ const ai = () => {
   return (client ??= new GoogleGenAI({ apiKey }));
 };
 
-/** What the AI knows about the demo salon. Mirrors the website's demo data. */
-export function salonContext() {
-  // All services: ones without online booking are still offered, the owner just books them by hand.
-  const services = initialServices
-    .map(service => `- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}${service.onlineBooking ? '' : ' (the owner books this one personally: hand the chat over)'}`)
-    .join('\n');
-  const hours = initialBookingHours
-    .map(day => `- ${day.day}: ${day.isOpen ? `${day.from}–${day.to}` : 'closed'}`)
-    .join('\n');
-  const handover = initialAiSettings.handoverRules.filter(rule => rule.enabled).map(rule => `- ${rule.label}`).join('\n');
-  const { companyName, street, postalCode, city } = initialCompanySettings;
-  return `You are the booking assistant of ${companyName}, ${street}, ${postalCode} ${city}, a small salon.
+const toMinutes = (time: string) => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
+const toTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+const bullets = (items: string[]) => items.map(item => `- ${item}`).join('\n');
 
-Services:
+/** What the AI knows about the demo salon: website demo data plus the rulebook in salonRules.ts. */
+export function salonContext() {
+  const open = initialBookingHours.filter(day => day.isOpen);
+  // Latest start so the service ends by closing time, assuming the same hours on all open days.
+  const closing = open.length ? Math.min(...open.map(day => toMinutes(day.to))) : 18 * 60;
+  const services = initialServices
+    .map(service => {
+      const lastStart = toTime(Math.floor((closing - service.durationMinutes) / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES);
+      const extra = service.onlineBooking ? '' : ' The owner books this one personally: collect the request, then hand over.';
+      return `- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}. ${service.description ?? ''} Latest start ${lastStart}.${extra}`;
+    })
+    .join('\n');
+  const hours = initialBookingHours.map(day => `- ${day.day}: ${day.isOpen ? `${day.from}–${day.to}` : 'closed'}`).join('\n');
+  const handover = [
+    ...initialAiSettings.handoverRules.filter(rule => rule.enabled).map(rule => rule.label),
+    ...ALWAYS_HAND_OVER,
+  ];
+  const tone = initialAiSettings.tone === 'formal' ? 'polite and formal (use "Sie"/"vous" where the language has it)' : 'warm and friendly';
+  const { companyName, street, postalCode, city, businessPhone } = initialCompanySettings;
+
+  return `You are the booking assistant of ${companyName}, a small hair salon at ${street}, ${postalCode} ${city}. Salon phone: ${businessPhone}. Your tone is ${tone}.
+
+SERVICES (the only services; never invent others or other prices):
 ${services}
 
-Opening hours:
+OPENING HOURS:
 ${hours}
 
-Rules:
-- Only help with appointments: booking, moving and questions about services, prices and opening hours.
-- Always reply in the customer's language. Keep replies short and friendly, like a chat message.
-- Suggest times only inside the opening hours. You cannot see the live calendar, so say that the salon will confirm the exact time.
-- Never promise discounts, refunds or anything not listed above.
-- Hand these topics to the owner instead of answering them:
-${handover}
-  When you hand over, tell the customer politely that the owner will reply soon.
-- If the message is not about the salon, answer briefly that you can only help with appointments.`;
+TIME RULES:
+- Only suggest or accept start times on open days, inside opening hours, on ${SLOT_STEP_MINUTES}-minute steps, and early enough that the service ends by closing time.
+- At least ${MIN_NOTICE_HOURS} hours from now and at most ${MAX_WEEKS_AHEAD} weeks ahead.
+- If a wanted time breaks a rule, say why in a few words and offer the nearest two times that work.
+
+SALON FACTS (you may share these):
+${bullets(SALON_FACTS)}
+
+BOOKING FLOW:
+${bullets(BOOKING_FLOW)}
+
+STYLE:
+${bullets(STYLE_RULES)}
+
+HAND OVER TO THE OWNER (set needsOwner, give a short reason, and tell the customer politely that the owner will reply soon):
+${bullets(handover)}
+
+Only help with the salon and appointments. If a message is about something else, say briefly that you can only help with appointments.`;
 }
 
 export interface IncomingAnalysis {
@@ -63,6 +86,17 @@ export interface IncomingAnalysis {
   replyDe: string;
   needsOwner: boolean;
   reason: string;
+  /** Filled once service, day, time and first name are known. Empty strings otherwise. */
+  bookingRequest?: BookingRequest;
+}
+
+export interface BookingRequest {
+  service: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:MM */
+  time: string;
+  customerName: string;
 }
 
 const analysisSchema = {
@@ -77,8 +111,19 @@ const analysisSchema = {
     replyDe: { type: 'string', description: 'Your reply in German' },
     needsOwner: { type: 'boolean', description: 'True when the rules say the owner must handle this' },
     reason: { type: 'string', description: 'If needsOwner, one short English sentence for the owner. Otherwise empty.' },
+    bookingRequest: {
+      type: 'object',
+      description: 'Only when service, day, time and first name are all known and the time follows the rules. Otherwise all fields empty.',
+      properties: {
+        service: { type: 'string', description: 'Exact service name from the list, or empty' },
+        date: { type: 'string', description: 'YYYY-MM-DD, or empty' },
+        time: { type: 'string', description: 'HH:MM (24h), or empty' },
+        customerName: { type: 'string', description: 'Customer first name, or empty' },
+      },
+      required: ['service', 'date', 'time', 'customerName'],
+    },
   },
-  required: ['languageCode', 'languageName', 'translationEn', 'translationDe', 'reply', 'replyEn', 'replyDe', 'needsOwner', 'reason'],
+  required: ['languageCode', 'languageName', 'translationEn', 'translationDe', 'reply', 'replyEn', 'replyDe', 'needsOwner', 'reason', 'bookingRequest'],
 };
 
 const history = (messages: ChatMessage[]) =>

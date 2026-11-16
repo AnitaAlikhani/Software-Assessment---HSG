@@ -115,7 +115,7 @@ test('live chats are labelled as live, with the detected language and no demo pr
     aiSettings: initialAiSettings,
     onOpenAiSettings: () => {},
   }));
-  assert.match(html, />Live</);
+  assert.match(html, /Live · WhatsApp/);
   assert.match(html, /Spanish/);
   assert.match(html, /AI translations: Spanish/);
   assert.doesNotMatch(html, /Preview WhatsApp/);
@@ -170,4 +170,59 @@ test('reads private Telegram text messages and shows them as live Telegram chats
 
 test('the AI is told the current salon date and time', () => {
   assert.equal(salonNow(new Date('2026-11-16T18:19:00Z')), 'Monday, 16 November 2026 at 19:19');
+});
+
+test('AI booking requests are checked against the salon rules in code', async () => {
+  const { validBookingRequest } = await import('../server/bookingRules');
+  const now = new Date('2026-11-16T18:19:00Z'); // Monday 19:19 in Zurich
+  const ask = (date: string, time: string, service = 'Haircut') => validBookingRequest({ service, date, time, customerName: 'Ana' }, now);
+  assert.deepEqual(ask('2026-11-17', '15:00'), { service: 'Haircut', date: '2026-11-17', time: '15:00', customerName: 'Ana' });
+  assert.equal(ask('2026-11-17', '15:00', 'haircut')?.service, 'Haircut');
+  assert.equal(ask('2026-11-21', '10:00'), null, 'Saturday is closed');
+  assert.equal(ask('2026-11-17', '17:45'), null, 'not on a 30-minute step');
+  assert.equal(ask('2026-11-17', '17:00', 'Colouring'), null, 'Colouring would end after closing');
+  assert.equal(ask('2026-11-17', '08:30'), null, 'before opening');
+  assert.equal(ask('2026-11-16', '20:00'), null, 'today, outside hours and too soon');
+  assert.equal(ask('2026-11-13', '10:00'), null, 'in the past');
+  assert.equal(ask('2027-03-01', '10:00'), null, 'more than 8 weeks ahead');
+  assert.equal(ask('2026-11-17', '15:00', 'Massage'), null, 'unknown service');
+  assert.equal(validBookingRequest(undefined, now), null);
+});
+
+test('a valid AI booking request asks the owner to confirm; the reply is only stored after sending', async () => {
+  const { recordAnalysis } = await import('../server/recordAnalysis');
+  const state = emptyState();
+  const analysis = {
+    languageCode: 'pt', languageName: 'Portuguese', translationEn: 'Haircut tomorrow at 3 for Ana', translationDe: 'Haarschnitt morgen um 3 für Ana',
+    reply: 'Corte amanhã às 15:00 para Ana, o salão confirma em breve.', replyEn: 'Haircut tomorrow 15:00 for Ana.', replyDe: 'Haarschnitt morgen 15:00 für Ana.',
+    needsOwner: false, reason: '',
+    bookingRequest: { service: 'Haircut', date: '2026-11-17', time: '15:00', customerName: 'Ana' },
+  };
+  const incoming = { id: 'tg-1', waId: 'tg-42', name: 'Ana', text: 'Corte amanhã às 15h, sou a Ana', timestamp: 1, channel: 'Telegram' as const };
+  const { conversation, reply } = recordAnalysis(state, incoming, analysis, new Date('2026-11-16T18:19:00Z'));
+  assert.equal(conversation.status, 'needs-attention');
+  assert.equal(conversation.bookingRequest?.status, 'requested');
+  assert.match(conversation.attentionReason ?? '', /Haircut on Tuesday 17 November at 15:00 for Ana/);
+  assert.equal(reply?.original, analysis.reply);
+  assert.equal(conversation.messages.length, 1, 'the AI reply is added only after the channel sent it');
+
+  const html = renderToStaticMarkup(React.createElement(ConversationsView, {
+    conversations: publicConversations(state),
+    selectedId: 'live-tg-42',
+    mobileDetailOpen: false,
+    onBackToList: () => {},
+    onSelect: () => {},
+    onTakeOver: () => {},
+    onLetAiContinue: () => null,
+    onOwnerReply: () => true,
+    aiSettings: initialAiSettings,
+    onOpenAiSettings: () => {},
+    onConfirmBooking: () => {},
+    liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=1' },
+  }));
+  assert.match(html, /Booking request from the AI/);
+  assert.match(html, /Confirm booking/);
+  assert.match(html, /Live · Telegram/);
+  assert.match(html, /Live test is on/);
+  assert.match(html, /@slotbee_bella_bot/);
 });

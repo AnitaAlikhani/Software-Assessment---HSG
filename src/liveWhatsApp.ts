@@ -23,12 +23,20 @@ export function readLiveKey(search = typeof window === 'undefined' ? '' : window
 type LiveAction =
   | { type: 'reply'; conversationId: string; text: string }
   | { type: 'take-over'; conversationId: string }
-  | { type: 'let-ai-continue'; conversationId: string };
+  | { type: 'let-ai-continue'; conversationId: string }
+  | { type: 'confirm-booking'; conversationId: string };
+
+/** How testers can reach the live AI: the Telegram bot (if connected) and the website chat. */
+export interface LiveChannels {
+  telegram: string | null;
+  websiteChatUrl: string;
+}
 
 export function useLiveWhatsApp() {
   const [key] = useState(readLiveKey);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [enabled, setEnabled] = useState(false);
+  const [telegram, setTelegram] = useState<string | null>(null);
   const stopped = useRef(false);
 
   useEffect(() => {
@@ -40,9 +48,10 @@ export function useLiveWhatsApp() {
         const response = await fetch('/api/whatsapp/conversations', { headers: { 'x-live-key': key }, cache: 'no-store' });
         // 404 on GitHub Pages / local dev (no server), 401 with a wrong key: stay a demo.
         if (!response.ok) { setEnabled(false); return; }
-        const data = (await response.json()) as { enabled: boolean; conversations: Conversation[] };
+        const data = (await response.json()) as { enabled: boolean; conversations: Conversation[]; channels?: { telegram?: string | null } };
         setEnabled(data.enabled);
         setConversations(data.conversations ?? []);
+        setTelegram(data.channels?.telegram ?? null);
       } catch {
         // Network hiccup: try again on the next tick.
       }
@@ -74,5 +83,9 @@ export function useLiveWhatsApp() {
     reply: (conversationId: string, text: string) => act({ type: 'reply', conversationId, text }),
     takeOver: (conversationId: string) => act({ type: 'take-over', conversationId }),
     letAiContinue: (conversationId: string) => act({ type: 'let-ai-continue', conversationId }),
+    confirmBooking: (conversationId: string) => act({ type: 'confirm-booking', conversationId }),
+    channels: enabled && key
+      ? { telegram, websiteChatUrl: `${window.location.origin}/?chat=1&live=${encodeURIComponent(key)}` } as LiveChannels
+      : null,
   };
 }

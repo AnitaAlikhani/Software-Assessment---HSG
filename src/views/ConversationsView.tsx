@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Bot,
+  CalendarCheck,
   CheckCircle2,
   Languages,
   Send,
@@ -18,6 +19,8 @@ import {
 import { LANGUAGE_NAMES } from '../conversationData';
 import { conversationForSelection, messageForOwner, ownerLanguageName } from '../conversationPresentation';
 import { useDemoState } from '../useDemoState';
+import type { LiveChannels } from '../liveWhatsApp';
+import { LiveTestStrip } from './LiveTestStrip';
 
 interface ConversationsViewProps {
   conversations: Conversation[];
@@ -35,6 +38,10 @@ interface ConversationsViewProps {
   ) => boolean;
   aiSettings: AiAssistantSettings;
   onOpenAiSettings: () => void;
+  /** Set while the live test runs: shows how testers can write to the AI. */
+  liveChannels?: LiveChannels | null;
+  /** Confirms a booking request the AI collected in a live chat. */
+  onConfirmBooking?: (id: string) => void;
 }
 
 type Filter = 'all' | 'needs' | 'languages' | 'ai';
@@ -56,9 +63,22 @@ const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }>
 /** Live chats can be in any language; show the language the AI detected. */
 const languageChip = (c: Conversation) => (c.live && c.languageLabel ? c.languageLabel : c.language);
 
-const LiveChip = () => (
-  <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#25D366]/15 text-green-700">Live</span>
+const CHANNEL_CHIP: Record<string, string> = {
+  Telegram: 'bg-sky-100 text-sky-700',
+  Website: 'bg-slate-100 text-slate-700',
+  WhatsApp: 'bg-[#25D366]/15 text-green-700',
+};
+
+/** "● Telegram": a real chat from the live test, with the channel it came from. */
+const LiveChip = ({ channel }: { channel: string }) => (
+  <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${CHANNEL_CHIP[channel] ?? CHANNEL_CHIP.WhatsApp}`}>
+    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+    Live · {channel === 'Website' ? 'Web chat' : channel}
+  </span>
 );
+
+const bookingDate = (date: string) =>
+  new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
 
 export const ConversationsView: React.FC<ConversationsViewProps> = ({
   conversations,
@@ -71,6 +91,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOwnerReply,
   aiSettings,
   onOpenAiSettings,
+  liveChannels,
+  onConfirmBooking,
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
   const [drafts, setDrafts] = useDemoState<Record<string, string>>('conversationDrafts', {});
@@ -283,6 +305,14 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
         Conversations
       </h1>
 
+      {liveChannels && (
+        <LiveTestStrip
+          channels={liveChannels}
+          liveCount={conversations.filter(c => c.live).length}
+          waitingCount={conversations.filter(c => c.live && c.status === 'needs-attention').length}
+        />
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs md:overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px] md:h-[calc(100dvh-7rem)] md:min-h-[480px]">
         {/* Chat list */}
         <div className={`md:col-span-4 lg:col-span-5 xl:col-span-4 min-w-0 min-h-0 border-b md:border-b-0 md:border-r border-slate-200/70 flex-col ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
@@ -343,7 +373,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                         >
                           {languageChip(c)}
                         </span>
-                        {c.live && <LiveChip />}
+                        {c.live && <LiveChip channel={c.channel} />}
                       </div>
                       <span className="text-[11px] text-slate-400 shrink-0">{c.lastTime}</span>
                     </div>
@@ -389,7 +419,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     >
                       {languageChip(selected)}
                     </span>
-                    {selected.live && <LiveChip />}
+                    {selected.live && <LiveChip channel={selected.channel} />}
                   </div>
                   <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
                     {selected.phone} · {selected.channel}
@@ -438,8 +468,36 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               </div>
             )}
 
+            {/* Booking request the AI collected in a live chat */}
+            {selected.bookingRequest && (
+              <div className={`mx-4 sm:mx-6 mt-4 flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 ${selected.bookingRequest.status === 'confirmed' ? 'border-emerald-200 bg-emerald-50' : 'border-[#5551FF]/30 bg-indigo-50'}`}>
+                <div className={`w-8 h-8 rounded-full text-white flex items-center justify-center shrink-0 ${selected.bookingRequest.status === 'confirmed' ? 'bg-emerald-500' : 'bg-[#5551FF]'}`}>
+                  <CalendarCheck className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-[10rem]">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {selected.bookingRequest.status === 'confirmed' ? 'Booked and in your calendar' : 'Booking request from the AI'}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {selected.bookingRequest.service} · {bookingDate(selected.bookingRequest.date)} · {selected.bookingRequest.time} · {selected.bookingRequest.customerName}
+                  </p>
+                  {selected.bookingRequest.status === 'requested' && (
+                    <p className="text-[11px] text-slate-500 mt-0.5">Checked against opening hours. Confirming adds it to the calendar and tells the customer in their language.</p>
+                  )}
+                </div>
+                {selected.bookingRequest.status === 'requested' && onConfirmBooking && (
+                  <button
+                    onClick={() => onConfirmBooking(selected.id)}
+                    className="min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors"
+                  >
+                    Confirm booking
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Attention banner */}
-            {selected.status === 'needs-attention' && !selected.takenOver && (
+            {selected.status === 'needs-attention' && !selected.takenOver && selected.bookingRequest?.status !== 'requested' && (
               <div className="mx-4 sm:mx-6 mt-4 flex flex-wrap items-start gap-3 rounded-2xl border border-amber-300/70 bg-amber-50 px-4 py-3">
                 <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center shrink-0">
                   <AlertTriangle className="w-4 h-4" />
@@ -473,7 +531,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 <div className="flex-1 min-w-[8rem]">
                   <p className="text-sm font-semibold text-slate-900">You've taken over</p>
                   <p className="text-xs text-slate-500">
-                    The AI is paused for this chat. Suggested replies include a translation; typed replies are sent as written.
+                    {selected.live
+                      ? 'The AI is paused for this chat. Type in your language; the customer gets it in theirs.'
+                      : 'The AI is paused for this chat. Suggested replies include a translation; typed replies are sent as written.'}
                   </p>
                 </div>
                 <button

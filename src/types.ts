@@ -88,6 +88,8 @@ export interface Conversation {
   live?: boolean;
   /** Language the AI detected in a live chat, e.g. "Spanish". */
   languageLabel?: string;
+  /** A booking request the AI collected in a live chat, for the owner to confirm. */
+  bookingRequest?: { service: string; date: string; time: string; customerName: string; status: 'requested' | 'confirmed' };
 }
 
 export interface HandoverRule {

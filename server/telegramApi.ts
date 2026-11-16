@@ -39,3 +39,16 @@ export const setTelegramWebhook = (url: string) =>
   call('setWebhook', { url, secret_token: webhookSecret(), allowed_updates: ['message'], drop_pending_updates: true });
 
 export const getTelegramBot = () => call('getMe', {}) as Promise<{ username?: string; first_name?: string }>;
+
+let cachedUsername: string | null | undefined;
+/** The bot's @username for the owner's live-test strip. Cached, so polling does not call Telegram each time. */
+export async function telegramBotUsername(): Promise<string | null> {
+  if (!telegramConfigured()) return null;
+  if (cachedUsername !== undefined) return cachedUsername;
+  try {
+    cachedUsername = (await getTelegramBot()).username ?? null;
+  } catch {
+    return null; // try again on the next poll
+  }
+  return cachedUsername;
+}

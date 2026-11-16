@@ -18,6 +18,16 @@ export interface LiveConversation {
   attentionReason?: string;
   messages: ChatMessage[];
   updatedAt: number;
+  /** A complete booking request the AI collected, waiting for the owner, or already confirmed. */
+  bookingRequest?: LiveBookingRequest;
+}
+
+export interface LiveBookingRequest {
+  service: string;
+  date: string;
+  time: string;
+  customerName: string;
+  status: 'requested' | 'confirmed';
 }
 
 export interface LiveState {
@@ -155,6 +165,7 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
     takenOver: conversation.takenOver,
     lastTime: conversation.messages.at(-1)?.time ?? '',
     messages: conversation.messages,
+    bookingRequest: conversation.bookingRequest,
   };
 }
 
