@@ -4,7 +4,7 @@ import { initialAiSettings } from '../src/conversationData.js';
 import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
 
-const model = () => process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
+const model = () => process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
 let client: GoogleGenAI | null = null;
 const ai = () => {
   const apiKey = process.env.GEMINI_API_KEY;
