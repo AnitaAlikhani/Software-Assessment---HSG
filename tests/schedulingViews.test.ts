@@ -76,10 +76,14 @@ test('current shift week follows salon date across a local week boundary', () =>
   const now = new Date('2026-11-02T00:30:00Z');
   assert.equal(currentSalonWeek('Europe/London', now), '2026-11-02');
   assert.equal(currentSalonWeek('America/New_York', now), '2026-10-26');
+  // The view reads the clock itself. Read it before and after, so the test also holds
+  // when the week changes at this very moment.
+  const before = currentSalonWeek('Europe/London');
   const html = renderToStaticMarkup(React.createElement(ShiftPlanView, {
     employees, shiftOverview: [], timeZone: 'Europe/London', onUpdateShift: () => {},
   }));
-  assert.match(html, new RegExp(`value="${currentSalonWeek('Europe/London')}"`));
+  const after = currentSalonWeek('Europe/London');
+  assert.match(html, new RegExp(`value="(${before}|${after})"`));
 });
 
 test('booking profile links accept normal domains but reject executable protocols', () => {

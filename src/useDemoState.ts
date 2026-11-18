@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
 
+// Bump the version when demo data changes, so tabs opened before a deploy don't keep
+// stale chats (e.g. the old fixed 9/10 Oct dates that were rejected as past).
+export const DEMO_STORAGE_VERSION = 'booking-demo-v2';
+
+/** The sessionStorage key of one piece of demo state. Tests use it instead of repeating the version. */
+export const demoStorageKey = (
+  key: string,
+  pathname = typeof window === 'undefined' ? '/' : window.location.pathname,
+): string => `${DEMO_STORAGE_VERSION}:${pathname}:${key}`;
+
 /** A demo stays in this tab's session; another device never receives a booking. */
 export function useDemoState<T>(key: string, initial: T | (() => T)) {
-  // Bump the version when demo data changes, so tabs opened before a deploy don't keep
-  // stale chats (e.g. the old fixed 9/10 Oct dates that were rejected as past).
-  const storageKey = `booking-demo-v2:${typeof window === 'undefined' ? '/' : window.location.pathname}:${key}`;
+  const storageKey = demoStorageKey(key);
   const [value, setValue] = useState<T>(() => {
     try {
       const saved = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(storageKey);

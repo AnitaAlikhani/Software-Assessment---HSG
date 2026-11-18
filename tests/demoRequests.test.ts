@@ -6,7 +6,7 @@ import {
   createDemoShifts, initialAppointmentRequests, initialBookingHours,
   initialCalendarEvents, initialEmployees, initialServices,
 } from '../src/mockData.ts';
-import { initialConversations } from '../src/conversationData.ts';
+import { demoConversations } from './fixedClock.ts';
 
 test('fresh sample requests use valid upcoming slots while preserving staff and service', () => {
   for (const instant of ['2026-10-14T13:45:00Z', '2027-01-02T18:00:00Z', '2027-04-18T23:30:00Z']) {
@@ -33,7 +33,7 @@ test('fresh sample requests use valid upcoming slots while preserving staff and 
 });
 
 test('seeding requests does not alter historical appointments, requests or conversation dates', () => {
-  const before = JSON.stringify({ initialCalendarEvents, initialAppointmentRequests, initialConversations });
+  const before = JSON.stringify({ initialCalendarEvents, initialAppointmentRequests, demoConversations });
   createDemoRequests('Europe/Zurich', new Date('2027-01-01T12:00:00Z'));
-  assert.equal(JSON.stringify({ initialCalendarEvents, initialAppointmentRequests, initialConversations }), before);
+  assert.equal(JSON.stringify({ initialCalendarEvents, initialAppointmentRequests, demoConversations }), before);
 });

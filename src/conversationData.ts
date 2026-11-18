@@ -1,23 +1,19 @@
 import type { AiAssistantSettings, AppointmentAction, ChatLanguage, Conversation } from './types.js';
 import { addDays, getSalonNow } from './scheduling.js';
 
-// The chats say "Friday" / "Saturday", so point at the next one (1-7 days ahead).
-// Fixed dates went into the past and the booking was rejected with
-// "Choose today or a future appointment date."
-const upcomingWeekday = (weekday: number): string => {
-  const today = getSalonNow().date;
+/**
+ * The next given weekday (0 = Sunday ... 6 = Saturday), one to seven days after `today`
+ * (YYYY-MM-DD). The chats say "Friday" / "Saturday", so they point at the next one.
+ * Fixed dates went into the past and the booking was rejected with
+ * "Choose today or a future appointment date."
+ */
+export const upcomingWeekday = (weekday: number, today: string): string => {
   const current = new Date(`${today}T00:00:00Z`).getUTCDay();
   return addDays(today, ((weekday - current + 6) % 7) + 1);
 };
 
-const camilleBooking: AppointmentAction = {
-  type: 'book',
-  appointmentId: 'cal-camille',
-  date: upcomingWeekday(5), // Friday
-  startTime: '11:00',
-  serviceName: 'Colouring',
-  staffName: 'Nilufar Ismayilova',
-};
+/** The chat that is open when the Conversations page is first shown. */
+export const DEFAULT_DEMO_CONVERSATION_ID = 'conv-camille';
 
 export const LANGUAGE_NAMES: Record<ChatLanguage, string> = {
   EN: 'English',
@@ -26,7 +22,21 @@ export const LANGUAGE_NAMES: Record<ChatLanguage, string> = {
   IT: 'Italian',
 };
 
-export const initialConversations: Conversation[] = [
+/**
+ * The sample chats, with their appointment dates relative to `now`. Nothing here reads the
+ * clock when the file is loaded: callers (and tests) decide which moment "now" is.
+ */
+export const createDemoConversations = (timeZone?: string, now = new Date()): Conversation[] => {
+  const today = getSalonNow(timeZone, now).date;
+  const camilleBooking: AppointmentAction = {
+    type: 'book',
+    appointmentId: 'cal-camille',
+    date: upcomingWeekday(5, today), // Friday
+    startTime: '11:00',
+    serviceName: 'Colouring',
+    staffName: 'Nilufar Ismayilova',
+  };
+  return [
   {
     id: 'conv-camille',
     customerName: 'Camille Bernard',
@@ -146,7 +156,7 @@ export const initialConversations: Conversation[] = [
         appointmentAction: {
           type: 'reschedule',
           appointmentId: 'cal-giulia',
-          date: upcomingWeekday(6), // Saturday
+          date: upcomingWeekday(6, today), // Saturday
           startTime: '10:00',
           outsideHoursApproved: true,
         },
@@ -273,7 +283,8 @@ export const initialConversations: Conversation[] = [
       },
     ],
   },
-];
+  ];
+};
 
 export const initialAiSettings: AiAssistantSettings = {
   askBeforeSending: false,

@@ -7,9 +7,8 @@ import { addDays, getSalonNow } from '../src/scheduling';
 import { initialCalendarEvents } from '../src/mockData';
 
 test('merged Analytics renders supplied appointments in its current date range', () => {
-  const today = getSalonNow('Europe/Zurich').date;
   const template = initialCalendarEvents[0];
-  const html = renderToStaticMarkup(React.createElement(AnalyticsView, {
+  const render = (today: string) => renderToStaticMarkup(React.createElement(AnalyticsView, {
     companyName: 'Merge Test Salon', timeZone: 'Europe/Zurich', conversations: [],
     events: [
       { ...template, id: 'today-one', date: today },
@@ -17,6 +16,13 @@ test('merged Analytics renders supplied appointments in its current date range',
       { ...template, id: 'outside-range', date: addDays(today, -31) },
     ],
   }));
+  // The view reads the clock itself. If midnight passes between our reading and its reading, render again.
+  let today = getSalonNow('Europe/Zurich').date;
+  let html = render(today);
+  if (getSalonNow('Europe/Zurich').date !== today) {
+    today = getSalonNow('Europe/Zurich').date;
+    html = render(today);
+  }
   assert.match(html, /Merge Test Salon/);
   assert.match(html, /<h2[^>]*>2 Appointments<\/h2>/);
   assert.match(html, new RegExp(`<title>${today}: 2<\/title>`));

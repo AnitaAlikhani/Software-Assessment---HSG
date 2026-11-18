@@ -16,7 +16,7 @@ import {
   Conversation,
   AiAssistantSettings,
 } from './types';
-import { initialConversations, initialAiSettings } from './conversationData';
+import { createDemoConversations, DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
 import {
   initialCalendarEvents,
   initialCustomers,
@@ -129,13 +129,11 @@ export default function App() {
   const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
   const [calendarDate, setCalendarDate] = useState(() => getSalonNow(companySettings.timeZone).date);
   const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
-  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', initialConversations);
+  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', () => createDemoConversations());
   // Real WhatsApp chats from the test number (only with a "?live=KEY" link); shown above the demo chats.
   const live = useLiveWhatsApp();
   const allConversations = [...live.conversations, ...conversations];
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(
-    initialConversations[0]?.id ?? null
-  );
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(DEFAULT_DEMO_CONVERSATION_ID);
   const [aiSettings, setAiSettings] = useDemoState<AiAssistantSettings>('aiSettings', initialAiSettings);
 
   // Freeze legacy booking buffers before service edits can change their reservation.

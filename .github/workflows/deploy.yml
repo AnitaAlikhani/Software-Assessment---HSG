@@ -18,174 +18,37 @@ jobs:
     outputs:
       pages_artifact_name: github-pages-${{ github.run_attempt }}
     steps:
-      - name: Check out main app
+      # Always main, also when the workflow is started by hand from another branch.
+      - name: Check out main
         uses: actions/checkout@v7
         with:
           ref: main
-          path: main-app
-          persist-credentials: false
-
-      - name: Check out Figma sync preview
-        uses: actions/checkout@v7
-        with:
-          ref: nil-figma-sync
-          path: preview-app
-          persist-credentials: false
-
-      - name: Check out Anita banner preview
-        uses: actions/checkout@v7
-        with:
-          ref: anita-banner
-          path: anita-app
-          persist-credentials: false
-
-      - name: Check out Anita fixes preview
-        uses: actions/checkout@v7
-        with:
-          ref: anita-fixes
-          path: fixes-app
-          persist-credentials: false
-
-      - name: Check out Anita first visit navigation preview
-        uses: actions/checkout@v7
-        with:
-          ref: anita-fix-first-visit-navigation
-          path: first-visit-app
-          persist-credentials: false
-
-      - name: Check out Anita customer booking preview
-        uses: actions/checkout@v7
-        with:
-          ref: anita-fix-customer-booking
-          path: customer-booking-app
-          persist-credentials: false
-
-      - name: Check out Anita responsive preview
-        uses: actions/checkout@v7
-        with:
-          ref: anita-fix-responsive
-          path: responsive-app
           persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: npm
 
-      - name: Install main dependencies
-        working-directory: main-app
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
 
-      - name: Build main app
-        working-directory: main-app
+      # Nothing is published unless the type check and the tests pass.
+      - name: Check types
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
         run: npm run build -- --base=/Software-Assessment---HSG/
 
-      - name: Install preview dependencies
-        working-directory: preview-app
-        run: npm install --no-audit --no-fund
-
-      - name: Build Figma sync preview
-        working-directory: preview-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/nil-figma-sync/
-
-      - name: Install Anita preview dependencies
-        working-directory: anita-app
-        run: npm install --no-audit --no-fund
-
-      - name: Check Anita preview types
-        working-directory: anita-app
-        run: npm run lint
-
-      - name: Build Anita banner preview
-        working-directory: anita-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-banner/
-
-      - name: Install Anita fixes dependencies
-        working-directory: fixes-app
-        run: npm install --no-audit --no-fund
-
-      - name: Check Anita fixes types
-        working-directory: fixes-app
-        run: npm run lint
-
-      - name: Build Anita fixes preview
-        working-directory: fixes-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fixes/
-
-      - name: Install first visit navigation dependencies
-        working-directory: first-visit-app
-        run: npm install --no-audit --no-fund
-
-      - name: Check first visit navigation types
-        working-directory: first-visit-app
-        run: npm run lint
-
-      - name: Test first visit navigation
-        working-directory: first-visit-app
-        run: npm test
-
-      - name: Build first visit navigation preview
-        working-directory: first-visit-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-first-visit-navigation/
-
-      - name: Install customer booking dependencies
-        working-directory: customer-booking-app
-        run: npm install --no-audit --no-fund
-
-      - name: Check customer booking types
-        working-directory: customer-booking-app
-        run: npm run lint
-
-      - name: Test customer booking
-        working-directory: customer-booking-app
-        run: npm test
-
-      - name: Build customer booking preview
-        working-directory: customer-booking-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-customer-booking/
-
-      - name: Install responsive preview dependencies
-        working-directory: responsive-app
-        run: npm install --no-audit --no-fund
-
-      - name: Check responsive preview types
-        working-directory: responsive-app
-        run: npm run lint
-
-      - name: Test responsive preview
-        working-directory: responsive-app
-        run: npm test
-
-      - name: Build responsive preview
-        working-directory: responsive-app
-        run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-responsive/
-
-      - name: Assemble main site and branch previews
-        run: |
-          mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
-          cp -a main-app/dist/. site/
-          cp -a preview-app/dist/. site/previews/nil-figma-sync/
-          git -C preview-app rev-parse HEAD > site/previews/nil-figma-sync/revision.txt
-          cp -a anita-app/dist/. site/previews/anita-banner/
-          git -C anita-app rev-parse HEAD > site/previews/anita-banner/revision.txt
-          cp -a fixes-app/dist/. site/previews/anita-fixes/
-          git -C fixes-app rev-parse HEAD > site/previews/anita-fixes/revision.txt
-          cp -a first-visit-app/dist/. site/previews/anita-fix-first-visit-navigation/
-          git -C first-visit-app rev-parse HEAD > site/previews/anita-fix-first-visit-navigation/revision.txt
-
-          mkdir -p site/previews/anita-fix-customer-booking
-          cp -a customer-booking-app/dist/. site/previews/anita-fix-customer-booking/
-          git -C customer-booking-app rev-parse HEAD > site/previews/anita-fix-customer-booking/revision.txt
-
-          mkdir -p site/previews/anita-fix-responsive
-          cp -a responsive-app/dist/. site/previews/anita-fix-responsive/
-          git -C responsive-app rev-parse HEAD > site/previews/anita-fix-responsive/revision.txt
-
-      - name: Upload combined site
+      - name: Upload site
         uses: actions/upload-pages-artifact@v5
         with:
           name: github-pages-${{ github.run_attempt }}
-          path: site
+          path: dist
 
   deploy:
     needs: build
@@ -200,7 +63,7 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
-      - name: Deploy main site and branch previews
+      - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v5
         with:

@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { initialAiSettings, initialConversations } from '../src/conversationData';
+import { initialAiSettings } from '../src/conversationData';
+import { demoStorageKey } from '../src/useDemoState';
+import { demoConversations } from './fixedClock';
 import { conversationForSelection, messageForOwner } from '../src/conversationPresentation';
 import { ConversationsView } from '../src/views/ConversationsView';
 
 const germanSettings = { ...initialAiSettings, ownerLanguage: 'German', translateChats: true };
 
 test('every scripted message, follow-up and suggested reply has a German display', () => {
-  for (const conversation of initialConversations) {
+  for (const conversation of demoConversations) {
     const scripted = [
       ...conversation.messages,
       ...(conversation.aiFollowUp ? [conversation.aiFollowUp] : []),
@@ -38,19 +40,19 @@ test('typed replies are shown as written even when their text matches a scripted
 });
 
 test('turning translation off shows the original while English preserves existing scripted translations', () => {
-  const message = initialConversations[0].messages[0];
+  const message = demoConversations[0].messages[0];
   assert.equal(messageForOwner(message, 'FR', { ...germanSettings, translateChats: false }).text, message.original);
   assert.equal(messageForOwner(message, 'FR', initialAiSettings).text, message.translation);
 });
 
 test('invalid conversation IDs never fall back to another customer', () => {
-  assert.equal(conversationForSelection(initialConversations, 'missing'), null);
-  assert.equal(conversationForSelection(initialConversations, null)?.id, initialConversations[0].id);
+  assert.equal(conversationForSelection(demoConversations, 'missing'), null);
+  assert.equal(conversationForSelection(demoConversations, null)?.id, demoConversations[0].id);
   assert.equal(conversationForSelection([], null), null);
 });
 
 const props: React.ComponentProps<typeof ConversationsView> = {
-  conversations: initialConversations,
+  conversations: demoConversations,
   selectedId: 'conv-chloe',
   mobileDetailOpen: true,
   onBackToList: () => {},
@@ -88,7 +90,7 @@ test('approval setting replaces immediate AI sending with a review entry point',
 test('stored conversation drafts are restored when the conversation view mounts again', () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
-  const storageKey = 'booking-demo-v1:/audit/:conversationDrafts';
+  const storageKey = demoStorageKey('conversationDrafts', '/audit/');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { pathname: '/audit/' } } });
   Object.defineProperty(globalThis, 'sessionStorage', {
     configurable: true,

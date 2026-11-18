@@ -64,7 +64,13 @@ test('manual appointments respect closures, absences, opening hours and dated sh
   delete c.shiftOverview[0].shifts[DATE];
   assert.match(validateCalendarEvent(c, event())!, /no shift/);
   c.shiftOverview[0].shifts[DATE] = { start: '08:00', end: '20:00' };
-  assert.match(validateCalendarEvent(c, event({ startTime: '18:00', endTime: '18:30', outsideHoursApproved: true }))!, /not available/);
+  // After closing time (18:00) a slot is refused, unless the owner approved it on purpose ...
+  assert.match(validateCalendarEvent(c, event({ startTime: '18:00', endTime: '18:30' }))!, /not available/);
+  assert.equal(validateCalendarEvent(c, event({ startTime: '18:00', endTime: '18:30', outsideHoursApproved: true })), null);
+  // ... and even an approved slot has to stay inside the employee's shift.
+  assert.equal(validateCalendarEvent(c, event({ startTime: '19:30', endTime: '20:00', outsideHoursApproved: true })), null);
+  assert.match(validateCalendarEvent(c, event({ startTime: '20:00', endTime: '20:30', outsideHoursApproved: true }))!, /not available/);
+  assert.match(validateCalendarEvent(c, event({ startTime: '07:30', endTime: '08:00', outsideHoursApproved: true }))!, /not available/);
   c.bookingHours[0].isOpen = false;
   assert.match(validateCalendarEvent(c, event())!, /salon is closed/);
 });

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyticsRangeError, appointmentAnalytics, conversationAnalytics } from '../src/analytics';
 import { initialCalendarEvents } from '../src/mockData';
-import { initialConversations } from '../src/conversationData';
+import { demoConversations } from './fixedClock';
 
 test('analytics filters appointments by inclusive date boundaries and derives actual counts', () => {
   const template = initialCalendarEvents[0];
@@ -36,7 +36,7 @@ test('customer totals reconcile legacy names with unique IDs without merging dis
 });
 
 test('conversation analytics counts real messages and customer languages separately', () => {
-  const conversations = initialConversations.slice(0, 2);
+  const conversations = demoConversations.slice(0, 2);
   const result = conversationAnalytics(conversations);
   assert.equal(result.total, conversations.reduce((total, item) => total + item.messages.length, 0));
   assert.equal(result.customer + result.ai + result.owner, result.total);

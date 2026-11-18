@@ -4,12 +4,14 @@ import { recordAnalysis } from '../../server/recordAnalysis.js';
 import { claimMessage, loadConversation, saveConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
 import { addCustomerMessage, addReply, needsOwner, parseWebhook, stateFor, verifySignature } from '../../server/whatsappCore.js';
+import { usesLiveData } from '../../server/environment.js';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
-  if (verifyToken && params.get('hub.mode') === 'subscribe' && params.get('hub.verify_token') === verifyToken) {
+  // A preview with its own chats must not become the address Meta delivers the live number to.
+  if (usesLiveData() && verifyToken && params.get('hub.mode') === 'subscribe' && params.get('hub.verify_token') === verifyToken) {
     return new Response(params.get('hub.challenge') ?? '', { status: 200 });
   }
   return new Response('Forbidden', { status: 403 });

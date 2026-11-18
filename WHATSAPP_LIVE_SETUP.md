@@ -112,7 +112,25 @@ Handover topics mark the chat **Needs you** on the website. The rules are in `se
 
 Testers' messages and names are saved in Upstash. The website shows only a shortened phone number.
 Tell testers this before they write. Each chat is deleted automatically after 30 days. To delete earlier:
-Upstash console → Data Browser → delete all keys that start with `slotbee:live:`. Also remove the test phones in Meta and delete the system user token.
+Upstash console → Data Browser → delete all keys that start with `slotbee:live:` (and `slotbee:preview:live:` for chats written on previews). Also remove the test phones in Meta and delete the system user token.
+
+## Previews of work branches keep their own chats
+
+Vercel builds a preview address for every branch. A preview of a work branch keeps its own test chats:
+it cannot show, change or delete the chats of the live site, and it cannot take over the Telegram bot or
+the WhatsApp number. The live site, and previews of `nil-live-whatsapp`, use the live chats as before.
+
+This relies on Vercel telling each copy that it is a preview and which branch it was built from (the project
+setting "Automatically expose System Environment Variables", which is on by default). To see what a copy does,
+open `/api/space?key=YOUR_LIVE_ACCESS_KEY` on it. It answers `"dataSpace": "live"` or `"dataSpace": "preview"`
+and changes nothing. If Vercel tells a copy nothing, the copy keeps using the live chats, as before.
+
+One optional setting: `LIVE_DATA_SPACE=live`, set in Vercel **for one preview branch only**, makes that preview
+use the live chats. Use it when another branch takes over the live address. No setting can move the live site
+away from its chats. Chats of previews are stored under keys that start with `slotbee:preview:live:`.
+
+Before every Vercel build the type check and the tests run (`npm run build:checked`, set in `vercel.json`).
+If one fails, the build stops and the site that is already online stays as it is.
 
 ## If something does not work
 
@@ -123,3 +141,8 @@ Upstash console → Data Browser → delete all keys that start with `slotbee:li
 | The AI does not reply; Vercel logs show error 190 | Token expired: use the system user token from Step 2 |
 | Vercel logs show error 131030 | The phone is not in the allowed list from Step 1 |
 | Chat shows "The AI could not answer" | Check `GEMINI_API_KEY` and the Vercel function logs |
+| A preview address shows none of the live chats | Intended: previews of work branches keep their own chats (see above). Check with `/api/space` |
+| The live address suddenly shows none of the old chats after a branch change | Open `/api/space` there; if it says `preview`, set `LIVE_DATA_SPACE=live` for that branch |
+| `/api/telegram/setup` answers "only possible on the live site" | It was opened on a preview of a work branch; open it on the live address |
+| Meta cannot verify the callback URL on a preview address | Intended: only the live site accepts the WhatsApp webhook |
+| The Vercel build stops before "vite build" | The type check or a test failed: the build log names it |
