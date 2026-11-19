@@ -68,7 +68,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   startAdding = false,
   onStartedAdding,
 }) => {
-  const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
+  const [activeView, setActiveView] = useState<'List' | 'Day' | 'Week'>('Week');
   const [showFilters, setShowFilters] = useState(false);
   const [staffFilter, setStaffFilter] = useState('');
   const [serviceFilter, setServiceFilter] = useState('');
@@ -186,11 +186,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   });
   const weekStart = startOfWeek(date);
   const days = Array.from({ length: 7 }, (_, index) => makeDay(addDays(weekStart, index)));
-  const visibleDays = activeView === 'Day'
-    ? [makeDay(date)]
-    : activeView === '3-day'
-      ? Array.from({ length: 3 }, (_, index) => makeDay(addDays(date, index)))
-      : days;
+  const visibleDays = activeView === 'Day' ? [makeDay(date)] : days;
   const gridStyle = { gridTemplateColumns: `4rem repeat(${visibleDays.length}, minmax(0, 1fr))` };
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const gridScrolls = useHorizontalOverflow(gridScrollRef, [activeView, visibleDays.length]);
@@ -209,7 +205,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       container.scrollLeft = Math.max(0, columnLeft - timeColumnWidth);
     }
   }, [date, activeView]);
-  const navigationStep = activeView === 'Day' ? 1 : activeView === '3-day' ? 3 : 7;
+  const navigationStep = activeView === 'Day' ? 1 : 7;
   const visibleEvents = events
     .filter((event) => visibleDays.some((day) => day.key === event.date))
     .filter(event => !staffFilter || (event.employeeId !== undefined ? event.employeeId === staffFilter : event.staffName === employees.find(employee => employee.id === staffFilter)?.name))
@@ -291,10 +287,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
         </div>
 
-        {/* View switcher (List, Day, 3-day, Week, Filter) */}
+        {/* View switcher (List, Day, Week), filter and Add */}
         <div className="flex max-w-full flex-wrap items-center gap-2 self-stretch min-[1350px]:self-auto">
-          <div className="grid w-full grid-cols-4 items-center bg-slate-100/90 p-1 rounded-xl text-xs font-medium text-slate-600 sm:flex sm:w-auto">
-            {(['List', 'Day', '3-day', 'Week'] as const).map((view) => (
+          <div className="grid w-full grid-cols-3 items-center bg-slate-100/90 p-1 rounded-xl text-xs font-medium text-slate-600 sm:flex sm:w-auto">
+            {(['List', 'Day', 'Week'] as const).map((view) => (
               <button
                 key={view}
                 aria-pressed={activeView === view}

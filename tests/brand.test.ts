@@ -6,6 +6,7 @@ import { PRODUCT_NAME } from '../src/brand';
 import { Header } from '../src/components/Header';
 import { Logo, MARK_CELL, MARK_CHECK, PoweredBy } from '../src/components/Logo';
 import { Sidebar } from '../src/components/Sidebar';
+import { SCREEN_NAMES } from '../src/navigation';
 import {
   applyPageHead, bookingPageHead, chatPageHead, ownerPageHead, PRODUCT_COLOR, type HeadDocument,
 } from '../src/pageHead';
@@ -54,11 +55,10 @@ test('the line on customer pages names the product and is no link', () => {
 // ---------- owner app: product on top, salon as workspace ----------
 
 const sidebar = (companyName: string, companyLocation = 'Zürich, Switzerland') => render(React.createElement(Sidebar, {
-  companyName, companyLocation, currentTab: 'home', onSelectTab: nothing, isOpenMobile: false,
-  onCloseMobile: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
+  companyName, companyLocation, currentTab: 'home', onSelectTab: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
 }));
 
-test('the menu shows the product on top and the salon from Company Settings as the workspace under it', () => {
+test('the menu shows the product on top and the salon from Settings as the workspace under it', () => {
   const html = sidebar('Lumière Salon');
   const logo = html.indexOf(`aria-label="${PRODUCT_NAME}"`);
   const salon = html.indexOf('>Lumière Salon<');
@@ -74,22 +74,22 @@ test('the menu shows the product on top and the salon from Company Settings as t
 });
 
 const header: React.ComponentProps<typeof Header> = {
-  companyName: 'Lumière Salon', companyLocation: 'Zürich', ownerName: 'Anna Weber', ownerRole: 'Owner',
-  onOpenMobileMenu: nothing, isMobileMenuOpen: false, searchQuery: '', onSearchChange: nothing,
+  title: 'Calendar', ownerName: 'Anna Weber', ownerRole: 'Owner', searchQuery: '', onSearchChange: nothing,
   customers: [], appointmentRequests: [], calendarEvents: [], onSelectAppointment: nothing,
-  needsAttentionCount: 0, needsAttentionNames: [], latestAiBooking: null,
-  onOpenConversations: nothing, onOpenSettings: nothing,
 };
 
-test('phones and tablets, which show no menu, get the logo in the header', () => {
+test('phones and tablets, which show no menu, get the product\'s mark and the name of the screen in the top bar', () => {
   const html = withScreen(() => render(React.createElement(Header, header)));
-  const logo = new RegExp(`<span role="img" aria-label="${PRODUCT_NAME}" class="([^"]*)"`).exec(html);
-  assert.ok(logo, 'the header holds the logo');
+  // The mark is the logo without its written name: one image called by the product's name.
+  const bar = new RegExp(`<div class="([^"]*)"><span role="img" aria-label="${PRODUCT_NAME}"[^>]*>.*?</span><span class="[^"]*">Calendar</span>`).exec(html);
+  assert.ok(bar, 'mark, then the name of the screen');
+  assert.match(html, new RegExp(`aria-label="${PRODUCT_NAME}"[^>]*><svg[^>]*>.*?</svg><span class="[^"]*\\bhidden\\b[^"]*">${PRODUCT_NAME}</span>`));
   // From the width where the menu is on screen, the logo in the menu is the only one.
-  assert.match(logo[1], /\blg:hidden\b/);
-  // On a study link the notice stands in that place.
+  assert.match(bar[1], /\blg:hidden\b/);
+  assert.equal(html.split(`aria-label="${PRODUCT_NAME}"`).length - 1, 1);
+  // On a study link the mark stays, and the notice stands next to the name of the screen.
   const study = withScreen(() => render(React.createElement(Header, header), { research: true }));
-  assert.doesNotMatch(study, new RegExp(`aria-label="${PRODUCT_NAME}"`));
+  assert.match(study, new RegExp(`aria-label="${PRODUCT_NAME}"`));
 });
 
 // ---------- browser tab ----------
@@ -100,12 +100,16 @@ test('the owner\'s browser tab names the screen, the salon and the product', () 
   assert.equal(ownerPageHead('home', salon).title, 'Home · Bella Hair Salon – SlotBee');
   assert.equal(ownerPageHead('conversations', salon).title, 'Conversations · Bella Hair Salon – SlotBee');
   assert.equal(ownerPageHead('ai-assistant', salon).title, 'AI receptionist · Bella Hair Salon – SlotBee');
-  assert.equal(ownerPageHead('settings', salon).title, 'Company Settings · Bella Hair Salon – SlotBee');
-  // The salon's name is whatever Company Settings holds, also none at all.
+  assert.equal(ownerPageHead('settings', salon).title, 'Settings · Bella Hair Salon – SlotBee');
+  assert.equal(ownerPageHead('team', salon).title, 'Team · Bella Hair Salon – SlotBee');
+  // The salon's name is whatever Settings holds, also none at all.
   assert.equal(ownerPageHead('calendar', ' Coiffeur Keller ').title, 'Calendar · Coiffeur Keller – SlotBee');
   assert.equal(ownerPageHead('calendar', '').title, 'Calendar – SlotBee');
 
-  const tabs: NavigationTab[] = ['home', 'calendar', 'booking-page', 'shift-plan', 'customers', 'resources', 'employees', 'services', 'analytics', 'conversations', 'ai-assistant', 'settings'];
+  // Every screen of the menu, under the name the menu gives it.
+  const tabs = Object.keys(SCREEN_NAMES) as NavigationTab[];
+  assert.equal(tabs.length, 9);
+  for (const tab of tabs) assert.equal(ownerPageHead(tab, salon).title, `${SCREEN_NAMES[tab]} · Bella Hair Salon – SlotBee`);
   const titles = tabs.map(tab => ownerPageHead(tab, salon).title);
   assert.equal(new Set(titles).size, tabs.length, 'every screen has a title of its own');
   for (const title of titles) assert.match(title, /^\S.* · Bella Hair Salon – SlotBee$/);

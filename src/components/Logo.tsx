@@ -25,9 +25,9 @@ export const LogoMark: React.FC<LogoMarkProps> = ({ className = 'h-7 w-7' }) => 
 
 // Two sizes, so a place that is short of room never has to fight the default classes.
 const LOGO_SIZES = {
-  /** Sidebar and drawer. */
+  /** The menu on laptops. */
   regular: { gap: 'gap-2', name: 'text-lg' },
-  /** The header row on phones and tablets, where every pixel counts. */
+  /** The top bar on phones and tablets. There the mark stands alone: the name of the screen takes the place of the written name. */
   compact: { gap: 'gap-1.5', name: 'text-base' },
 };
 

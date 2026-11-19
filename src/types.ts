@@ -1,22 +1,27 @@
+/** The owner's screens, one per entry of the menu. Their names and order are in src/navigation.ts. */
 export type NavigationTab =
   | 'home'
   | 'calendar'
-  | 'booking-page'
-  | 'shift-plan'
+  | 'conversations'
   | 'customers'
-  | 'resources'
-  | 'employees'
+  | 'team'
   | 'services'
   | 'analytics'
-  | 'conversations'
   | 'ai-assistant'
   | 'settings';
 
+/** The tabs of Team: the people, the shifts of a week, and time off. */
+export type TeamSubTab =
+  | 'people'
+  | 'week'
+  | 'absences';
+
+/** The tabs of Settings. */
 export type SettingsSubTab =
-  | 'basic'
+  | 'salon'
   | 'hours'
   | 'closed-dates'
-  | 'profile';
+  | 'online-booking';
 
 export type ChatLanguage = 'EN' | 'FR' | 'DE' | 'IT';
 
@@ -219,18 +224,6 @@ export interface Customer {
   channel?: Conversation['channel'];
   /** Their chat, so "Open conversation" finds it without comparing names. */
   conversationId?: string;
-}
-
-export interface Resource {
-  id: string;
-  name: string;
-  type: 'Room' | 'Table' | 'Chair' | 'Rental' | 'Equipment';
-  capacity: number;
-  color: string;
-  reserveEntireRoom: boolean;
-  visibleOnline: boolean;
-  allServices: boolean;
-  generalHours: boolean;
 }
 
 export interface Employee {

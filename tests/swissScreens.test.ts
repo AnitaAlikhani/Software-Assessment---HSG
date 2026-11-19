@@ -3,8 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { SalonTimeNote } from '../src/components/SalonTimeNote';
 import { initialAiSettings } from '../src/conversationData';
-import { nextUpcomingAppointment } from '../src/dashboard';
-import { getHeaderNotifications, getHeaderSearchResults } from '../src/headerModels';
+import { getHeaderSearchResults } from '../src/headerModels';
 import { initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData';
 import { CANTONS, COUNTRIES, SALON_TIME_ZONE, regionToSave, salonAddress, townWithCanton } from '../src/region';
 import type { BookingHoursDay, CompanySettingsData, Conversation } from '../src/types';
@@ -19,10 +18,11 @@ import { HomeView } from '../src/views/HomeView';
 import { ServicesView } from '../src/views/ServicesView';
 import { SettingsView } from '../src/views/SettingsView';
 import { ShiftPlanView } from '../src/views/ShiftPlanView';
+import { TeamView } from '../src/views/TeamView';
 import { demoConversations, demoCustomers, demoEvents, demoRequests, demoShifts, FIXED_NOW } from './fixedClock';
 import { readableText, render } from './renderHelpers';
 
-// What the Swiss formats look like on the screens: the region in Company Settings, the opening
+// What the Swiss formats look like on the screens: the region in Settings, the opening
 // hours as 24-hour lists, the one note about time zones, and a sweep over every screen for a
 // format that does not belong. The formats themselves are pinned in tests/format.test.ts.
 
@@ -34,7 +34,11 @@ const count = (html: string, part: string) => html.split(part).length - 1;
 
 const settings = (partial: Partial<React.ComponentProps<typeof SettingsView>> = {}) => render(React.createElement(SettingsView, {
   settings: initialCompanySettings, bookingHours: initialBookingHours, onSaveSettings: nothing,
-  closedDates: [], absences: [], employees: initialEmployees, onSaveClosedDates: nothing, onSaveAbsences: nothing, now: FIXED_NOW, ...partial,
+  closedDates: [], onSaveClosedDates: nothing, now: FIXED_NOW, bookingLink: 'https://slotbee.example/?booking=1', ...partial,
+}));
+const team = (partial: Partial<React.ComponentProps<typeof TeamView>> = {}) => render(React.createElement(TeamView, {
+  employees: initialEmployees, onAddEmployee: nothing, onUpdateEmployee: nothing, onDeleteEmployee: nothing,
+  shiftOverview: demoShifts, onUpdateShift: nothing, absences: [], onSaveAbsences: nothing, timeZone: ZONE, now: FIXED_NOW, ...partial,
 }));
 const optionsOf = (html: string, id: string): { value: string; label: string; selected: boolean }[] => {
   const select = new RegExp(`<select[^>]*id="${id}"[^>]*>(.*?)</select>`).exec(html)?.[1] ?? '';
@@ -55,7 +59,7 @@ test('the salon starts in Switzerland, in the canton of St. Gallen, on Swiss tim
   for (const canton of CANTONS) assert.match(canton.code, /^[A-Z]{2}$/, canton.name);
 });
 
-test('Company Settings offers the launch market only: two countries, a canton, no choice of time zone', () => {
+test('Settings offers the launch market only: two countries, a canton, no choice of time zone', () => {
   const html = settings();
   assert.deepEqual(optionsOf(html, 'company-country').map((option) => option.label), ['Switzerland', 'Liechtenstein']);
   assert.equal(optionsOf(html, 'company-country').find((option) => option.selected)?.value, 'Switzerland');
@@ -89,18 +93,18 @@ test('Liechtenstein has no canton, and what is saved is the country, its canton 
 test('settings saved in the old form still open; only a real difference counts as unsaved', () => {
   // The old time zone text is the same zone: nothing to save.
   const sameZone = settings({ settings: { ...initialCompanySettings, timeZone: 'Europe/Zurich (GMT+01:00)' } });
-  assert.doesNotMatch(sameZone, /You have unsaved company details/);
+  assert.doesNotMatch(sameZone, /You have unsaved salon details/);
   assert.doesNotMatch(shown(sameZone), /GMT/);
   // A stored number is shown written out, and that alone is not a change either.
   const withPhone = settings({ settings: { ...initialCompanySettings, businessPhone: '+41712223344' } });
   assert.match(withPhone, /id="company-businessPhone"[^>]*value="\+41 71 222 33 44"/);
-  assert.doesNotMatch(withPhone, /You have unsaved company details/);
+  assert.doesNotMatch(withPhone, /You have unsaved salon details/);
   // A country or a time zone that is no longer offered shows as the market's, and waits to be saved.
   for (const old of [{ country: 'Germany' }, { timeZone: 'Europe/London (GMT+00:00)' }]) {
     const html = settings({ settings: { ...initialCompanySettings, ...old } });
     assert.equal(optionsOf(html, 'company-country').find((option) => option.selected)?.value, 'Switzerland');
     assert.match(html, /Central European Time \(Zurich\)/);
-    assert.match(html, /You have unsaved company details/);
+    assert.match(html, /You have unsaved salon details/);
     assert.doesNotMatch(shown(html), /Germany|London|GMT/);
   }
 });
@@ -136,7 +140,7 @@ test('the canton follows a town in the address only where the town does not say 
 
 // ---------- opening hours ----------
 
-const hoursTab = (bookingHours: BookingHoursDay[] = initialBookingHours) => settings({ bookingHours, initialTab: 'hours' });
+const hoursTab = (bookingHours: BookingHoursDay[] = initialBookingHours) => settings({ bookingHours, tab: 'hours' });
 const timeSelect = (html: string, label: string) => {
   const select = new RegExp(`<select[^>]*aria-label="${label}"[^>]*>(.*?)</select>`).exec(html)?.[1] ?? '';
   return Array.from(select.matchAll(/<option([^>]*)>([^<]*)<\/option>/g), ([, attributes, time]) => ({ time, selected: attributes.includes('selected') }));
@@ -178,12 +182,12 @@ test('a time saved off the half hour is still shown, is kept, and the page says 
   assert.match(shown(html), /09:07 is not on the half hour\. It stays as saved until you choose another time\. Appointments start on the half hour\./);
   assert.match(shown(html), /08:45 and 18:15 are not on the half hour\. They stay as saved until you choose another time\./);
   // Nothing was changed by opening the page: no unsaved changes are reported.
-  assert.doesNotMatch(html, /You have unsaved company details/);
+  assert.doesNotMatch(html, /You have unsaved salon details/);
 });
 
 test('closures and absences are listed with their dates in the Swiss form', () => {
   const html = settings({
-    initialTab: 'closed-dates',
+    tab: 'closed-dates',
     closedDates: [
       { id: 'c-1', name: 'Team day', start: '2026-10-08', end: '2026-10-08' },
       { id: 'c-2', name: 'Christmas', start: '2026-12-24', end: '2027-01-02' },
@@ -191,6 +195,10 @@ test('closures and absences are listed with their dates in the Swiss form', () =
   });
   assert.match(html, />Thu, 08\.10\.2026</);
   assert.match(html, />24\.12\.2026–02\.01\.2027</);
+  // Absences are listed in Team, in the same form.
+  const absences = team({ tab: 'absences', absences: [{ id: 'a-1', employeeId: 'emp-2', start: '2026-12-28', end: '2027-01-02', reason: 'Holiday' }] });
+  assert.match(absences, />Selina Keller: Holiday</);
+  assert.match(absences, />28\.12\.2026–02\.01\.2027</);
 });
 
 // ---------- the note about time zones ----------
@@ -241,14 +249,20 @@ const screens = (): Record<string, string> => {
   const draft = createBookingDraft(initialServices, ZONE, FIXED_NOW);
   const closures: Partial<React.ComponentProps<typeof SettingsView>> = {
     closedDates: [{ id: 'c-1', name: 'Team day', start: '2026-10-08', end: '2026-10-09' }],
-    absences: [{ id: 'a-1', employeeId: 'emp-2', start: '2026-10-13', end: '2026-10-13', reason: 'Course' }],
   };
+  const absences = [{ id: 'a-1', employeeId: 'emp-2', start: '2026-10-13', end: '2026-10-13', reason: 'Course' }];
   return {
     home: render(React.createElement(HomeView, {
-      requests: demoRequests, selectedRequestId: null, onSelectRequest: nothing, now: FIXED_NOW, availabilityContext: context,
+      requests: demoRequests, selectedRequestId: null, now: FIXED_NOW, availabilityContext: context,
       onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null, onSimulateNewRequest: nothing,
-      nextAppointment: nextUpcomingAppointment(demoEvents, FIXED_NOW, ZONE), onOpenAppointment: nothing, onExportReport: nothing,
-      conversations: demoConversations, onOpenConversations: nothing,
+      onOpenAppointment: nothing, conversations: [liveBooking, ...demoConversations], onOpenConversations: nothing,
+      customers: demoCustomers, salonName: initialCompanySettings.companyName,
+      // The second request was moved a minute ago (it had been for Friday at 11:00), so the note
+      // that tells the owner what to pass on is swept as well.
+      answers: [{
+        kind: 'request', id: demoRequests[1].id, outcome: 'moved', at: FIXED_NOW.getTime() - 60_000, index: 1,
+        request: { ...demoRequests[1], date: '2026-10-09', dateStr: 'Fri, 09.10.2026', timeStr: '11:00 - 11:30' },
+      }],
     })),
     calendar: render(React.createElement(CalendarView, { ...calendarProps, date: '2026-10-05', selectedEventId: null })),
     'calendar, an appointment open': render(React.createElement(CalendarView, { ...calendarProps, date: appointment.date, selectedEventId: appointment.id })),
@@ -263,9 +277,13 @@ const screens = (): Record<string, string> => {
     analytics: render(React.createElement(AnalyticsView, { events: demoEvents, conversations: demoConversations, companyName: initialCompanySettings.companyName, timeZone: ZONE, now: FIXED_NOW })),
     'shift plan': render(React.createElement(ShiftPlanView, { employees: initialEmployees, shiftOverview: demoShifts, timeZone: ZONE, onUpdateShift: nothing, now: FIXED_NOW })),
     'AI receptionist': render(React.createElement(AiAssistantView, { settings: initialAiSettings, onSave: nothing, channels: { live: 'off', businessPhone: '0712223344' } })),
-    'settings, basic': settings(),
-    'settings, hours': settings({ initialTab: 'hours' }),
-    'settings, closed dates': settings({ initialTab: 'closed-dates', ...closures }),
+    'team, people': team(),
+    'team, this week': team({ tab: 'week' }),
+    'team, absences': team({ tab: 'absences', absences }),
+    'settings, salon': settings(),
+    'settings, hours': settings({ tab: 'hours' }),
+    'settings, closed dates': settings({ tab: 'closed-dates', ...closures }),
+    'settings, online booking': settings({ tab: 'online-booking' }),
     'booking page': render(React.createElement(BookingPageView, { ...bookingProps, draft, submittedRequest: null, publicMode: true })),
     'booking page, a specialist chosen': render(React.createElement(BookingPageView, {
       ...bookingProps, draft: { ...draft, serviceId: 'srv-2', employeeId: 'emp-1', date: '2026-10-06', dateChosen: true }, submittedRequest: null, publicMode: true,
@@ -301,12 +319,18 @@ test('no screen shows a technical date, an offset, a zone id, a 12-hour time or 
 
 test('the screens show the Swiss forms where the old ones stood', () => {
   const all = screens();
-  // Home: the request card with its date tile, and the next appointment (Tuesday 6 October, the day after the fixed moment).
+  // Home: the day it is about, the next appointment (Tuesday 6 October, the day after the fixed moment,
+  // a Monday on which the salon is closed), the requests with their date tiles, and what the AI booked.
   const home = shown(all.home);
-  assert.match(home, /WED 07\.10\. Appointment request/);
-  assert.match(home, /Wed, 07\.10\.2026, 10:00–10:30/);
-  assert.match(home, /Next appointment (Mon|Tue), 0[56]\.10\.2026 \d\d:\d\d–\d\d:\d\d/);
-  assert.match(home, /Wed 07\.10\. · 10:00–10:30/);
+  assert.match(home, /Today Monday, 05\.10\.2026 The salon is closed today\. No appointments\./);
+  assert.match(home, /Next appointment Tue, 06\.10\.2026, \d\d:\d\d–\d\d:\d\d/);
+  assert.match(home, /WED 07\.10\. Booking request · 12 minutes ago/);
+  assert.match(home, /· 10:00–10:30 with Selina Keller \+41 7\d 555 \d\d \d\d · Booking page/);
+  // A request that waits in a chat, with the time it would take; and one the owner has just moved, with its ready text.
+  assert.match(home, /THU 08\.10\. Booking request from a chat · 11:58 Tom Haircut · 15:00–15:30/);
+  assert.match(home, /Moved from Fri, 09\.10\.2026, 11:00–11:30/);
+  assert.match(home, /(am|on|le|,) \S+,? 08\.10\.2026 (um|at|à|alle) 14:30/);
+  assert.match(home, /Booked by the AI .*Haircut · Thu, 08\.10\.2026, 13:30–14:00/);
   assert.match(home, /This month October 2026 · past and upcoming appointments/);
   // Calendar: month, calendar week and the week's span as its title; an appointment with date, range and number.
   const calendar = shown(all.calendar);
@@ -333,11 +357,13 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   assert.match(all.analytics, /<th scope="row"[^>]*>Thu 01\.10\.<\/th>/);
   // The salon's own number, typed by the owner as 0712223344.
   assert.match(shown(all['AI receptionist']), /your salon number \(\+41 71 222 33 44\)/);
-  // Settings: a closure of two days and an absence of one.
+  // Settings: a closure of two days. Team: an absence of one, and the week as the shift plan writes it.
   assert.match(shown(all['settings, closed dates']), /Team day 08\.–09\.10\.2026/);
+  assert.match(shown(all['team, absences']), /Selina Keller: Course Tue, 13\.10\.2026/);
+  assert.match(shown(all['team, this week']), /05\.–11\.10\.2026 .*Employee Mon 05\.10\. Tue 06\.10\./);
 });
 
-test('the header finds and announces appointments by the date as the screens write it', () => {
+test('the header finds appointments by the date as the screens write it', () => {
   // Marie's haircut on Thursday 8 October 2026, 13:30 (cal-2), in the forms of the calendar and of the lists.
   const found = (query: string) => getHeaderSearchResults([], demoRequests, demoEvents, query);
   for (const query of ['Thu, 08.10.2026', 'Thu 08.10.', '08.10.2026', '08.10.']) {
@@ -351,9 +377,4 @@ test('the header finds and announces appointments by the date as the screens wri
   // The old forms find nothing any more: no record still shows them.
   assert.deepEqual(found('08/10'), []);
   assert.deepEqual(found('8 October'), []);
-
-  const booked = demoEvents.find((event) => event.id === 'cal-2')!;
-  const notifications = getHeaderNotifications(demoRequests, 0, [], booked);
-  assert.equal(notifications.find((item) => item.kind === 'appointment')?.detail, 'Thu, 08.10.2026 · 13:30 · Haircut');
-  assert.equal(notifications.find((item) => item.kind === 'request')?.detail, `${demoRequests[0].customerName} · Wed, 07.10.2026 · 10:00–10:30`);
 });

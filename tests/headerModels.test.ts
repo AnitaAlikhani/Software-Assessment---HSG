@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getHeaderNotifications, getHeaderSearchResults, headerAccount, headerSearchDetail, isHeaderNotificationUnread } from '../src/headerModels';
+import { getHeaderSearchResults, headerAccount, headerSearchDetail } from '../src/headerModels';
 import { initialEmployees } from '../src/mockData';
 import { demoCustomers, demoEvents, demoRequests } from './fixedClock';
 
@@ -56,55 +56,13 @@ test('a search result shows only the details that exist, without a separator lef
 
 test('the account in the header is the owner from the team data', () => {
   assert.deepEqual(headerAccount(initialEmployees), { ownerName: 'Anna Weber', ownerRole: 'Owner' });
-  // Renaming the owner in Employees changes the header, wherever she stands in the list.
+  // Renaming the owner in Team changes the header, wherever she stands in the list.
   const renamed = initialEmployees.map((employee) => employee.id === 'emp-1'
     ? { ...employee, firstName: 'Annette', lastName: 'Weber-Graf', name: 'Annette Weber-Graf' } : employee);
   assert.deepEqual(headerAccount(renamed), { ownerName: 'Annette Weber-Graf', ownerRole: 'Owner' });
   assert.deepEqual(headerAccount([...renamed].reverse()), { ownerName: 'Annette Weber-Graf', ownerRole: 'Owner' });
   // Without an owner in the team the first employee stands there, and no role is made up for them.
   assert.deepEqual(headerAccount(initialEmployees.slice(1)), { ownerName: 'Selina Keller', ownerRole: '' });
-  // An empty team: the header then shows a neutral account button.
+  // An empty team: the header then shows a neutral account block.
   assert.deepEqual(headerAccount([]), { ownerName: '', ownerRole: '' });
-});
-
-test('notifications preserve exact request and calendar records and include every displayed card', () => {
-  const appointment = demoEvents.find((event) => event.isAiBooked)!;
-  const notifications = getHeaderNotifications(demoRequests, 3,
-    ['Camille', 'Chloé', 'Giulia'], appointment, 'message-revision');
-  assert.equal(notifications.length, demoRequests.length + 2);
-  const secondRequest = notifications.find((item) => item.kind === 'request' && item.record.id === demoRequests[1].id);
-  assert.ok(secondRequest?.kind === 'request');
-  assert.equal(secondRequest.record, demoRequests[1]);
-  const booking = notifications.find((item) => item.kind === 'appointment');
-  assert.ok(booking?.kind === 'appointment');
-  assert.equal(booking.record, appointment);
-});
-
-test('read revisions remain stable through renders and relative-time changes, but change for new booking details', () => {
-  const first = getHeaderNotifications(demoRequests, 0, [], null);
-  const rerender = getHeaderNotifications(demoRequests.map((request) => ({
-    ...request, timeAgo: '20 minutes ago',
-  })), 0, [], null);
-  assert.deepEqual(first.map((item) => item.revision), rerender.map((item) => item.revision));
-  const rescheduled = getHeaderNotifications(demoRequests.map((request, index) => index === 0
-    ? { ...request, timeStr: '14:00 - 14:30' } : request), 0, [], null);
-  assert.notEqual(first[0].revision, rescheduled[0].revision);
-  assert.equal(first[1].revision, rescheduled[1].revision);
-});
-
-test('attention notification changes for a new message, not an equivalent name ordering', () => {
-  const first = getHeaderNotifications([], 2, ['Camille', 'Giulia'], null);
-  const same = getHeaderNotifications([], 2, ['Giulia', 'Camille'], null);
-  assert.equal(first[0].revision, same[0].revision);
-  const before = getHeaderNotifications([], 1, ['Camille'], null, 'camille:m3');
-  const after = getHeaderNotifications([], 1, ['Camille'], null, 'camille:m4');
-  assert.notEqual(before[0].revision, after[0].revision);
-});
-
-test('resolving an already-read chat does not make the remaining group unread', () => {
-  const read = { attention: ['camille:m3', 'giulia:m1'] };
-  const remaining = getHeaderNotifications([], 1, ['Giulia'], null, undefined, ['giulia:m1'])[0];
-  assert.equal(isHeaderNotificationUnread(remaining, read), false);
-  const newMessage = getHeaderNotifications([], 1, ['Giulia'], null, undefined, ['giulia:m2'])[0];
-  assert.equal(isHeaderNotificationUnread(newMessage, read), true);
 });

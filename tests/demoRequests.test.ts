@@ -33,6 +33,8 @@ test('pending requests are valid, never for today, on two days and with two styl
     assert.notEqual(requests[0].date, requests[1].date, instant);
     for (const request of requests) {
       assert.equal(request.status, 'pending');
+      // From the booking page, waiting for the owner: accepting one is the owner's booking, not the AI's.
+      assert.deepEqual([request.channel, request.isAiBooked], ['Web', false]);
       assert.ok(request.date > today, `${instant}: ${request.id} is for ${request.date}`);
       assert.equal(validateBookingRequest(context, request, request.id), null, `${instant}: ${request.id}`);
       // The request itself holds its time: nobody else can take it.

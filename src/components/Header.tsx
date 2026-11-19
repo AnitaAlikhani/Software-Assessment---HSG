@@ -1,27 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  Search, Menu, Bell, ChevronDown, CheckCircle2, MessageSquare,
-  Settings as SettingsIcon,
-} from 'lucide-react';
-import { Sparkles } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Sparkles, User } from 'lucide-react';
 import type { Customer, AppointmentRequest, CalendarEvent } from '../types';
-import {
-  getHeaderNotifications, getHeaderSearchResults, headerSearchDetail, isHeaderNotificationUnread, notificationReadTokens,
-  type HeaderNotification, type HeaderSearchResult,
-} from '../headerModels';
-import { RotateCcw, User } from 'lucide-react';
+import { getHeaderSearchResults, headerSearchDetail, type HeaderSearchResult } from '../headerModels';
 import { researchMode } from '../flags';
-import { browserStorages, clearDemoWorkspace } from '../researchTools';
+import { useCloseOnBack } from '../backGesture';
 import { Logo } from './Logo';
+import { initialsOf } from './MoreSheet';
 
 interface HeaderProps {
-  companyName?: string;
-  companyLocation?: string;
-  /** The signed-in person, as shown on the account button and in its menu. */
+  /** The screen that is open, by the name the menu gives it. Phones and tablets show it in the top bar. */
+  title: string;
+  /** The signed-in person, as shown in the account block on laptops. */
   ownerName?: string;
   ownerRole?: string;
-  onOpenMobileMenu: () => void;
-  isMobileMenuOpen: boolean;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   customers: Customer[];
@@ -30,140 +21,68 @@ interface HeaderProps {
   onSelectCustomer?: (customer: Customer) => void;
   onSelectRequest?: (request: AppointmentRequest) => void;
   onSelectAppointment: (appointment: CalendarEvent) => void;
-  needsAttentionCount: number;
-  needsAttentionNames: string[];
-  needsAttentionRevision?: string;
-  needsAttentionUpdates?: string[];
-  latestAiBooking: CalendarEvent | null;
-  onOpenConversations: () => void;
-  onOpenSettings: () => void;
+  /** Opens the form for a new appointment. Laptops only: phones have "+" in the tab bar. */
+  onNewAppointment?: () => void;
   /** Opens the owner assistant (src/components/AssistantPanel.tsx). */
   onOpenAssistant?: () => void;
 }
 
-type Dropdown = 'search' | 'notifications' | 'profile' | null;
-
-interface AccountMenuProps {
-  ownerName: string;
-  ownerRole: string;
-  companyName: string;
-  companyLocation: string;
-  onOpenSettings: () => void;
-}
-
 /**
- * Opens under the account button: who is signed in and the way to the salon's settings.
- * Entries are added only when their pages exist. With the research switch on it also holds
- * the study tools: the notice that this is a sample workspace and the way back to its start.
+ * The bar on top of every owner screen.
+ *
+ * Laptops: the search field, "New appointment", the Assistant and who is signed in.
+ * Phones and tablets: one slim bar with the product's mark, the name of the screen, a search
+ * button and the Assistant. Search takes over the bar while it is open and gives it back when
+ * it is closed. Everything else a phone needs is in the tab bar at the bottom.
  */
-export const AccountMenu: React.FC<AccountMenuProps> = ({ ownerName, ownerRole, companyName, companyLocation, onOpenSettings }) => {
-  const research = researchMode();
-  const resetDemoData = () => {
-    if (!window.confirm('Reset the demo data in this browser? Bookings, customers and chats go back to their starting state.')) return;
-    clearDemoWorkspace(browserStorages());
-    // Reload at once, before any state is written back to storage.
-    window.location.reload();
-  };
-  return (
-    <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute left-4 right-4 top-full mt-2 max-h-[calc(100dvh-8rem)] overflow-y-auto sm:left-auto sm:right-0 sm:w-64 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
-      <div className="px-3 py-2 border-b border-slate-100">
-        <h2 id="header-account-title" className="font-semibold text-slate-800">{ownerName || 'Account'}</h2>
-        <p className="text-[11px] text-slate-400 mt-0.5">{[ownerRole, companyName, companyLocation].filter(Boolean).join(' · ')}</p>
-      </div>
-      <button type="button" onClick={onOpenSettings}
-        className="w-full flex min-h-11 items-center gap-2 px-3 py-2.5 mt-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
-        <SettingsIcon className="w-3.5 h-3.5" aria-hidden="true" />Company Settings
-      </button>
-      {research && (
-        <div className="mt-1 border-t border-slate-100 pt-1">
-          <p className="px-3 py-2 text-[11px] leading-relaxed text-slate-500">Demo workspace with sample data. Changes stay in this browser tab.</p>
-          <button type="button" onClick={resetDemoData}
-            className="w-full flex min-h-11 items-center gap-2 px-3 py-2.5 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
-            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />Reset demo data
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const useMediaQuery = (query: string) => {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const list = window.matchMedia(query);
-    const update = () => setMatches(list.matches);
-    update();
-    list.addEventListener('change', update);
-    return () => list.removeEventListener('change', update);
-  }, [query]);
-  return matches;
-};
-
 export const Header: React.FC<HeaderProps> = ({
-  companyName = '', companyLocation = '', ownerName = '', ownerRole = '',
-  onOpenMobileMenu, isMobileMenuOpen, searchQuery, onSearchChange, customers, appointmentRequests,
+  title, ownerName = '', ownerRole = '',
+  searchQuery, onSearchChange, customers, appointmentRequests,
   calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment,
-  needsAttentionCount, needsAttentionNames, needsAttentionRevision, needsAttentionUpdates, latestAiBooking,
-  onOpenConversations, onOpenSettings,
-  onOpenAssistant,
+  onNewAppointment, onOpenAssistant,
 }) => {
-  const [openDropdown, setOpenDropdown] = useState<Dropdown>(null);
-  // Below 480px the search gets its own row under the icons, so it is rendered after them in the DOM
-  // (keyboard order = visual order); from 480px it sits between the menu button and the icons.
-  const narrowHeader = useMediaQuery('(max-width: 479px)');
-  // Up to 736px the field shares its row with the product mark and is too short for the long hint.
-  const compactSearch = useMediaQuery('(min-width: 480px) and (max-width: 736px)');
+  const [resultsOpen, setResultsOpen] = useState(false);
+  // Phones and tablets: whether search has taken over the bar. Laptops always show the field.
+  const [searchOpen, setSearchOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
-  const [readRevisions, setReadRevisions] = useState<Record<string, string[]>>({});
   const searchRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const notificationsRef = useRef<HTMLDivElement>(null);
-  const notificationsButtonRef = useRef<HTMLButtonElement>(null);
-  const profileRef = useRef<HTMLDivElement>(null);
-  const profileButtonRef = useRef<HTMLButtonElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
 
   const searchResults = getHeaderSearchResults(customers, appointmentRequests, calendarEvents, searchQuery);
-  const searchIsOpen = openDropdown === 'search' && searchQuery.trim().length > 0;
+  const searchIsOpen = resultsOpen && searchQuery.trim().length > 0;
   const activeIndex = Math.min(activeResultIndex, searchResults.length - 1);
-  const notifications = getHeaderNotifications(appointmentRequests, needsAttentionCount,
-    needsAttentionNames, latestAiBooking, needsAttentionRevision, needsAttentionUpdates);
-  const unreadCount = notifications.filter((item) => isHeaderNotificationUnread(item, readRevisions)).length;
-  const ownerInitials = ownerName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('');
   // Study tool: with the research switch on, one notice says that this is a sample workspace.
   const research = researchMode();
 
+  /** Phones: leave search, empty the field and hand the bar back. */
+  const closeSearch = (returnFocus = true) => {
+    setSearchOpen(false);
+    setResultsOpen(false);
+    setActiveResultIndex(-1);
+    onSearchChange('');
+    // After the bar is back: the button is not on screen while search is open.
+    if (returnFocus) requestAnimationFrame(() => searchButtonRef.current?.focus({ preventScroll: true }));
+  };
+
+  // The field appears with the tap on the search button: put the cursor in it.
+  useEffect(() => { if (searchOpen) searchInputRef.current?.focus({ preventScroll: true }); }, [searchOpen]);
+  // While search has the bar, the phone's Back gesture closes it instead of leaving the screen.
+  useCloseOnBack(searchRef, searchOpen, () => closeSearch());
+
   useEffect(() => {
-    if (!openDropdown) return;
-    const container = openDropdown === 'search' ? searchRef.current
-      : openDropdown === 'notifications' ? notificationsRef.current : profileRef.current;
+    if (!resultsOpen && !searchOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (container?.contains(event.target as Node)) return;
-      const target = event.target instanceof Element ? event.target : null;
-      // Keep focus on an intentional outside control; restore the trigger after a blank-area click.
-      if (openDropdown !== 'search' && container?.contains(document.activeElement) &&
-          !target?.closest('button, a[href], input, select, textarea, [tabindex], [contenteditable="true"]')) {
-        if (openDropdown === 'notifications') notificationsButtonRef.current?.focus();
-        else profileButtonRef.current?.focus();
-      }
-      setOpenDropdown(null);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      // Focus first: the search field's onFocus must not reopen the popup afterward.
-      if (openDropdown === 'search') searchInputRef.current?.focus();
-      else if (openDropdown === 'notifications') notificationsButtonRef.current?.focus();
-      else profileButtonRef.current?.focus();
-      setOpenDropdown(null);
-      setActiveResultIndex(-1);
+      if (searchRef.current?.contains(event.target as Node)) return;
+      // The tap goes to something else on the page: do not pull focus back to the bar.
+      if (searchOpen) closeSearch(false);
+      else setResultsOpen(false);
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [openDropdown]);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  // closeSearch only uses setters and the latest onSearchChange.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultsOpen, searchOpen]);
 
   useEffect(() => {
     if (searchIsOpen && activeIndex >= 0) {
@@ -171,14 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [searchIsOpen, activeIndex, searchQuery]);
 
-  const closeWhenFocusLeaves = (event: React.FocusEvent<HTMLDivElement>, dropdown: Dropdown) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setOpenDropdown((current) => current === dropdown ? null : current);
-    }
-  };
-
   const selectSearchResult = (result: HeaderSearchResult) => {
-    setOpenDropdown(null);
+    setResultsOpen(false);
+    setSearchOpen(false);
     setActiveResultIndex(-1);
     onSearchChange('');
     // Release the field so the phone keyboard closes, also when the result is the page already shown.
@@ -189,10 +103,16 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      // Phones: Escape closes search altogether.
+      // Laptops: it closes the results and leaves the cursor in the field.
+      if (searchOpen) closeSearch();
+      else { setResultsOpen(false); setActiveResultIndex(-1); }
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       searchInputRef.current?.focus();
-      setOpenDropdown('search');
+      setResultsOpen(true);
       if (!searchResults.length) return;
       setActiveResultIndex((current) => {
         if (!searchIsOpen || current < 0) return event.key === 'ArrowDown' ? 0 : searchResults.length - 1;
@@ -204,49 +124,55 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const markRead = (notification: HeaderNotification) => {
-    setReadRevisions((previous) => ({ ...previous, [notification.id]: notification.kind === 'attention'
-      ? Array.from(new Set([...(previous[notification.id] ?? []), ...notificationReadTokens(notification)]))
-      : notificationReadTokens(notification) }));
-  };
-  const selectNotification = (notification: HeaderNotification) => {
-    markRead(notification);
-    setOpenDropdown(null);
-    if (notification.kind === 'attention') onOpenConversations();
-    else if (notification.kind === 'request') onSelectRequest?.(notification.record);
-    else onSelectAppointment(notification.record);
-  };
-  const markAllRead = () => {
-    // The action becomes disabled after reading; move focus before that happens.
-    notificationsButtonRef.current?.focus();
-    setReadRevisions((previous) => Object.fromEntries([
-      ...Object.entries(previous), ...notifications.map((item) => [item.id, item.kind === 'attention'
-        ? Array.from(new Set([...(previous[item.id] ?? []), ...notificationReadTokens(item)]))
-        : notificationReadTokens(item)]),
-    ]));
-  };
+  const iconButton = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]';
 
-  const searchField = (
-      <div ref={searchRef} className="w-full min-w-0 min-[480px]:relative min-[480px]:mx-3 min-[480px]:w-auto min-[480px]:flex-1 min-[480px]:max-w-md sm:mx-6"
-        onBlur={(event) => closeWhenFocusLeaves(event, 'search')} onKeyDown={handleSearchKeyDown}>
-        <label htmlFor="header-search" className="sr-only">Find customers, requests or appointments</label>
-        <div className="relative">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" aria-hidden="true" />
+  return (
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-slate-200/60 bg-white/95 px-3 backdrop-blur-md sm:px-4 lg:h-auto lg:gap-4 lg:px-8 lg:py-3.5">
+      {/* Phones and tablets show no menu, so the product's mark and the name of the screen stand here. */}
+      <div className={`min-w-0 flex-1 items-center gap-2.5 pl-1 lg:hidden ${searchOpen ? 'hidden' : 'flex'}`}>
+        <Logo size="compact" nameClassName="hidden" />
+        <span className="min-w-0 truncate text-base font-bold tracking-tight text-slate-900">{title}</span>
+        {research && (
+          <span title="Changes stay in this browser tab"
+            className="hidden shrink-0 items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 min-[360px]:inline-flex">
+            Demo
+          </span>
+        )}
+      </div>
+      {research && (
+        <span title="Changes stay in this browser tab"
+          className="hidden shrink-0 items-center whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 lg:inline-flex">
+          Demo&nbsp;workspace<span className="hidden xl:inline">&nbsp;· sample data</span>
+        </span>
+      )}
+
+      {/* Search. Laptops: always in the bar. Phones and tablets: only after a tap on the search button. */}
+      <div ref={searchRef}
+        className={`min-w-0 flex-1 items-center gap-1 lg:relative lg:flex lg:max-w-md ${searchOpen ? 'flex' : 'hidden'}`}
+        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setResultsOpen(false); }}
+        onKeyDown={handleSearchKeyDown}>
+        <button type="button" onClick={() => closeSearch()} aria-label="Close search"
+          className={`${iconButton} text-slate-500 hover:bg-slate-100 hover:text-slate-800 lg:hidden`}>
+          <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+        </button>
+        <div className="relative min-w-0 flex-1">
+          <label htmlFor="header-search" className="sr-only">Find customers, requests or appointments</label>
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
           <input ref={searchInputRef} id="header-search" type="search" role="combobox"
             aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={searchIsOpen}
             aria-controls="header-search-results"
             aria-activedescendant={searchIsOpen && activeIndex >= 0 ? `header-search-option-${activeIndex}` : undefined}
             autoComplete="off" value={searchQuery}
-            onChange={(event) => { onSearchChange(event.target.value); setActiveResultIndex(-1); setOpenDropdown('search'); }}
-            onFocus={() => setOpenDropdown('search')}
-            placeholder={compactSearch ? 'Search' : 'Find customer or booking'}
-            className="w-full min-h-11 pl-10 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-base sm:text-sm text-slate-700 placeholder-slate-400 rounded-full border border-transparent focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 transition-all" />
+            onChange={(event) => { onSearchChange(event.target.value); setActiveResultIndex(-1); setResultsOpen(true); }}
+            onFocus={() => setResultsOpen(true)}
+            placeholder="Find customer or booking"
+            className="w-full min-h-11 rounded-full border border-transparent bg-slate-100/80 py-2 pl-10 pr-4 text-base text-slate-700 placeholder-slate-400 transition-all hover:bg-slate-100 focus:border-[#5551FF]/40 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 lg:text-sm" />
         </div>
         {searchIsOpen && (
-          <div className="absolute top-full left-4 right-4 mt-2 bg-white rounded-2xl min-[480px]:left-0 min-[480px]:right-0 shadow-xl border border-slate-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+          <div className="absolute left-3 right-3 top-full z-50 mt-2 rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xl sm:left-4 sm:right-4 lg:left-0 lg:right-0">
             <div id="header-search-results" role="listbox" aria-label="Search results" className="max-h-[min(20rem,calc(100dvh-9rem))] overflow-y-auto overscroll-contain">
               {searchResults.map((result, index) => {
-                const title = result.kind === 'customer' ? result.record.name : result.record.customerName;
+                const name = result.kind === 'customer' ? result.record.name : result.record.customerName;
                 const category = result.kind === 'customer' ? 'Customer' : result.kind === 'request' ? 'Pending request' : 'Confirmed appointment';
                 const detail = headerSearchDetail(result);
                 return (
@@ -255,123 +181,56 @@ export const Header: React.FC<HeaderProps> = ({
                     onMouseDown={(event) => event.preventDefault()}
                     onFocus={() => setActiveResultIndex(index)}
                     onClick={() => selectSearchResult(result)}
-                    className={`w-full px-3 py-2.5 text-left rounded-xl transition-colors text-xs ${activeIndex === index ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'}`}>
+                    className={`w-full rounded-xl px-3 py-2.5 text-left text-xs transition-colors ${activeIndex === index ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'}`}>
                     <span className="block break-words text-[10px] font-semibold text-slate-400">{category}</span>
-                    <span className="block mt-0.5 break-words font-semibold text-slate-800">{title}</span>
-                    {detail && <span className="block mt-0.5 text-[11px] text-slate-500 break-words">{detail}</span>}
+                    <span className="mt-0.5 block break-words font-semibold text-slate-800">{name}</span>
+                    {detail && <span className="mt-0.5 block break-words text-[11px] text-slate-500">{detail}</span>}
                   </button>
                 );
               })}
             </div>
-            {searchResults.length === 0 && <p role="status" className="text-xs text-slate-400 text-center py-3">No matching customers, requests or appointments</p>}
+            {searchResults.length === 0 && <p role="status" className="py-3 text-center text-xs text-slate-400">No matching customers, requests or appointments</p>}
             {searchResults.length > 0 && <p className="sr-only" role="status">{searchResults.length} results. Use the arrow keys to choose and Enter to open.</p>}
           </div>
         )}
       </div>
-  );
 
-  return (
-    <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-y-2 px-4 sm:px-6 lg:px-8 py-2 sm:py-3.5 bg-white/95 backdrop-blur-md border-b border-slate-200/60">
-      <div className="flex items-center gap-3">
-        <button id="mobile-menu-trigger" type="button" onClick={onOpenMobileMenu}
-          className="lg:hidden flex h-11 w-11 items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl"
-          aria-label="Open navigation menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-sidebar">
-          <Menu className="w-5 h-5" aria-hidden="true" />
+      <div className={`shrink-0 items-center gap-1 lg:ml-auto lg:flex lg:gap-3 ${searchOpen ? 'hidden' : 'flex'}`}>
+        <button ref={searchButtonRef} type="button" onClick={() => setSearchOpen(true)} aria-label="Search" aria-expanded={searchOpen} aria-controls="header-search"
+          className={`${iconButton} text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden`}>
+          <Search className="h-5 w-5" aria-hidden="true" />
         </button>
-        {/* Phones and tablets show no sidebar, so the product's mark stands here. Its written name
-            appears where the row has room for it: beside the icons on wider phones and beside the
-            search field on wider tablets. On a study link the notice below takes this place. */}
-        {!research && <Logo size="compact" className="-ml-2 lg:hidden" nameClassName="hidden min-[390px]:max-[480px]:inline min-[800px]:inline" />}
-        {research && (
-          <span title="Changes stay in this browser tab"
-            className="hidden min-[360px]:inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 whitespace-nowrap">
-            Demo<span className="hidden lg:inline">&nbsp;workspace</span><span className="hidden xl:inline">&nbsp;· sample data</span>
-          </span>
+        {onNewAppointment && (
+          <button type="button" onClick={onNewAppointment}
+            className="hidden min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl bg-[#5551FF] px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-[#433fd8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF] lg:inline-flex">
+            <Plus className="h-4 w-4" aria-hidden="true" />New appointment
+          </button>
         )}
-      </div>
-
-      {!narrowHeader && searchField}
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {onOpenAssistant && (
+          // One primary action per bar: "New appointment" on laptops, "+" in the tab bar on phones.
+          // The Assistant is the tinted button next to it, with its name where there is room.
           <button id="assistant-trigger" type="button" onClick={onOpenAssistant}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors"
+            className="flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#5551FF]/10 text-xs font-semibold text-[#5551FF] transition-colors hover:bg-[#5551FF]/18 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF] lg:px-3.5"
             title="Assistant" aria-label="Open assistant" aria-haspopup="dialog">
-            <Sparkles className="w-4 h-4" aria-hidden="true" />
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden lg:inline">Assistant</span>
           </button>
         )}
-        <button type="button" onClick={onOpenConversations}
-          className="relative flex h-11 w-11 items-center justify-center rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
-          title="Conversations" aria-label={`Conversations${needsAttentionCount > 0 ? `, ${needsAttentionCount} need attention` : ''}`}>
-          <MessageSquare className="w-4 h-4" aria-hidden="true" />
-          {needsAttentionCount > 0 && <span aria-hidden="true" className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white tabular-nums">{needsAttentionCount}</span>}
-        </button>
-
-        <div ref={notificationsRef} className="static sm:relative" onBlur={(event) => closeWhenFocusLeaves(event, 'notifications')}>
-          <button ref={notificationsButtonRef} type="button"
-            onClick={() => setOpenDropdown((current) => current === 'notifications' ? null : 'notifications')}
-            aria-expanded={openDropdown === 'notifications'} aria-controls="header-notifications"
-            className="relative flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-            title="Notifications" aria-label={`Notifications, ${unreadCount} unread`}>
-            <Bell className="w-4 h-4" aria-hidden="true" />
-            {unreadCount > 0 && <span aria-hidden="true" className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-white" />}
-          </button>
-          {openDropdown === 'notifications' && (
-            <div id="header-notifications" role="region" aria-labelledby="header-notifications-title"
-              className="absolute left-4 right-4 top-full mt-2 flex max-h-[calc(100dvh-8rem)] flex-col sm:left-auto sm:right-0 sm:w-80 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-4 z-50 animate-in fade-in zoom-in-95">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h2 id="header-notifications-title" className="font-semibold text-xs text-slate-800">Notifications</h2>
-                <span className="text-[11px] text-slate-400" aria-live="polite">{unreadCount} unread</span>
-              </div>
-              {notifications.length > 0 && <button type="button" onClick={markAllRead} disabled={unreadCount === 0} className="inline-flex min-h-11 items-center text-[11px] font-semibold text-[#5551FF] hover:underline disabled:text-slate-400 disabled:no-underline">Mark all as read</button>}
-              <div className="mt-2 min-h-0 space-y-2 max-h-72 overflow-y-auto overscroll-contain">
-                {notifications.map((notification) => {
-                  const unread = isHeaderNotificationUnread(notification, readRevisions);
-                  return (
-                    <button type="button" key={notification.id} onClick={() => selectNotification(notification)}
-                      className={`w-full text-left p-2.5 rounded-xl text-xs text-slate-700 transition-colors flex gap-2.5 ${unread ? 'bg-indigo-50/70 hover:bg-indigo-100/70' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                      <span aria-hidden="true" className={`mt-1 w-2 h-2 rounded-full shrink-0 ${unread ? 'bg-[#5551FF]' : 'bg-slate-300'}`} />
-                      <span className="min-w-0 flex-1">
-                        <span className="sr-only">{unread ? 'Unread. ' : 'Read. '}</span>
-                        <span className="block break-words font-semibold text-slate-900">{notification.title}</span>
-                        <span className="block break-words text-slate-500 mt-0.5">{notification.detail}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-                {notifications.length === 0 && <div className="text-center py-4 text-xs text-slate-400"><CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1.5 opacity-80" aria-hidden="true" />All caught up! No notifications.</div>}
-              </div>
-              <button type="button" onClick={() => {
-                const attention = notifications.find((item) => item.kind === 'attention');
-                if (attention) markRead(attention);
-                setOpenDropdown(null); onOpenConversations();
-              }} className="mt-3 flex min-h-11 w-full items-center justify-center border-t border-slate-100 pt-2 text-center text-xs font-semibold text-[#5551FF] hover:underline">View all conversations →</button>
-            </div>
-          )}
-        </div>
-
-        <div ref={profileRef} className="static sm:relative sm:pl-2" onBlur={(event) => closeWhenFocusLeaves(event, 'profile')}>
-          <button ref={profileButtonRef} type="button"
-            onClick={() => setOpenDropdown((current) => current === 'profile' ? null : 'profile')}
-            aria-label="Account and salon settings" aria-expanded={openDropdown === 'profile'} aria-controls="header-account"
-            className="flex min-h-11 min-w-11 items-center justify-center gap-2.5 p-1 rounded-xl hover:bg-slate-100 transition-colors">
-            <span aria-hidden="true" className="flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-[#5551FF]/10 text-[11px] font-bold text-[#5551FF] ring-1 ring-[#5551FF]/20">
-              {ownerInitials || <User className="w-4 h-4" />}
-            </span>
-            {ownerName && (
-              <div aria-hidden="true" className="hidden sm:flex flex-col text-left">
-                <span className="text-xs font-semibold text-slate-800 leading-tight">{ownerName.trim().split(/\s+/)[0]}</span>
-                {ownerRole && <span className="text-[11px] text-slate-400 font-medium leading-tight">{ownerRole}</span>}
-              </div>
-            )}
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:block" aria-hidden="true" />
-          </button>
-          {openDropdown === 'profile' && (
-            <AccountMenu ownerName={ownerName} ownerRole={ownerRole} companyName={companyName} companyLocation={companyLocation}
-              onOpenSettings={() => { setOpenDropdown(null); onOpenSettings(); }} />
+        {/* Who is signed in. A plain block, not a button: there is no account page to open, and the
+            way to the salon's settings is the menu. */}
+        <div className="hidden items-center gap-2.5 pl-1 lg:flex">
+          <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5551FF]/10 text-[11px] font-bold text-[#5551FF] ring-1 ring-[#5551FF]/20">
+            {initialsOf(ownerName) || <User className="h-4 w-4" />}
+          </span>
+          {ownerName && (
+            <p className="flex flex-col text-left">
+              <span className="sr-only">Signed in as </span>
+              <span className="whitespace-nowrap text-xs font-semibold leading-tight text-slate-800">{ownerName}</span>
+              {ownerRole && <span className="text-[11px] font-medium leading-tight text-slate-400">{ownerRole}</span>}
+            </p>
           )}
         </div>
       </div>
-      {narrowHeader && searchField}
     </header>
   );
 };

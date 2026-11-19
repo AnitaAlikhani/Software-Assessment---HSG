@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { PRODUCT_NAME } from './brand';
+import { SCREEN_NAMES } from './navigation';
 import type { NavigationTab } from './types';
 
 /**
@@ -24,23 +25,10 @@ export interface PageHead {
 /** The product colour. The same value as --color-brand in index.css and theme-color in index.html. */
 export const PRODUCT_COLOR = '#5551FF';
 
-/** The owner's screens as the browser tab calls them: each page's own heading. */
-const SCREEN_NAMES: Record<NavigationTab, string> = {
-  home: 'Home',
-  calendar: 'Calendar',
-  conversations: 'Conversations',
-  'booking-page': 'Your booking page',
-  'shift-plan': 'Shift Plan',
-  customers: 'Customers',
-  resources: 'Rooms & equipment',
-  employees: 'Employees',
-  services: 'Services',
-  analytics: 'Analytics',
-  'ai-assistant': 'AI receptionist',
-  settings: 'Company Settings',
-};
-
-/** An owner screen, for example "Calendar · Bella Hair Salon – SlotBee". The salon's name comes from Company Settings. */
+/**
+ * An owner screen, for example "Calendar · Bella Hair Salon – SlotBee". The screen is called what
+ * the menu calls it (src/navigation.ts); the salon's name comes from Settings.
+ */
 export function ownerPageHead(tab: NavigationTab, salon: string): PageHead {
   const screenAndSalon = [SCREEN_NAMES[tab], salon.trim()].filter(Boolean).join(' · ');
   return { title: `${screenAndSalon} – ${PRODUCT_NAME}`, homeScreenName: PRODUCT_NAME, themeColor: PRODUCT_COLOR, ownerApp: true };

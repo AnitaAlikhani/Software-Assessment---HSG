@@ -390,6 +390,13 @@ export const isPhoneNumber = (value: string | null | undefined): boolean =>
   /^\+?\d{7,15}$/.test(normalizePhone(value ?? ''));
 
 /**
+ * The sample salon's phone numbers are invented and all have the form +41 7x 555 xx xx.
+ * Switzerland keeps no range free for invented numbers, so one of them could belong to
+ * somebody. They are shown as text and never as a link that dials.
+ */
+export const isSamplePhone = (phone: string): boolean => /^\+417\d555\d{4}$/.test(normalizePhone(phone));
+
+/**
  * Why a number cannot be stored, or null when it can:
  *   'characters'  it holds something that is neither a digit nor a usual separator
  *   'prefix'      it starts with neither 0 nor a country code

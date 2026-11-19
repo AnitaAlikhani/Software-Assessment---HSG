@@ -5,7 +5,7 @@ import { formatDate, formatDateRange, formatMonth } from './format';
 import { addDays, startOfWeek } from './scheduling';
 
 /**
- * The figures on Home and in Analytics, and the report that both export.
+ * The figures on Home and in Analytics, and the report that Analytics exports.
  *
  * Every number is counted here, from the appointments in the calendar and from the chats, so
  * the two screens and the exported file cannot disagree. Nothing in this file reads the clock:
@@ -181,7 +181,7 @@ export function conversationAnalytics(conversations: Conversation[]) {
 export interface AnalyticsReport { fileName: string; rows: (string | number)[][] }
 
 /**
- * The report behind "Export CSV" on Home and in Analytics: the period's figures as the screen
+ * The report behind "Export CSV" in Analytics: the period's figures as the screen
  * shows them, then every appointment they are counted from. Null for a period that is not valid.
  *
  * Dates stay in the form YYYY-MM-DD, which spreadsheets read as dates in every language.

@@ -37,5 +37,10 @@ test('merged Analytics shows an empty live dataset instead of seeded chart total
   assert.match(html, /<h2><span[^>]*>0<\/span> <span[^>]*>appointments<\/span><\/h2>/);
   // No chart and no bar without appointments.
   assert.doesNotMatch(html, /aria-label="Appointment chart"|style="height:/);
-  assert.match(html, /aria-selected="true" aria-controls="analytics-panel"[^>]*>Appointments/);
+  // One page without tabs: the appointments, then the chats. Without a chat the page says so
+  // instead of listing figures of nothing.
+  assert.doesNotMatch(html, /role="tab|aria-selected|analytics-panel/);
+  assert.match(html, /<section aria-label="Appointments"/);
+  assert.match(html, /<h2 id="analytics-conversations"[^>]*>Conversations<\/h2><p[^>]*>No conversations yet\.<\/p>/);
+  assert.doesNotMatch(html, /analytics-messages|analytics-languages|waiting for you/);
 });

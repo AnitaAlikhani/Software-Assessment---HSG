@@ -30,6 +30,25 @@ const Metric = ({ label, value, note }: { label: string; value: number; note?: s
 
 const plural = (count: number, word: string) => `${count} ${count === 1 ? word : `${word}s`}`;
 
+/**
+ * A small block of figures about the chats: a title, a line of context and one row per figure.
+ * The numbers stand in a column, so they share a width per digit.
+ */
+const FigureList = ({ id, title, children, rows }: { id: string; title: string; children: React.ReactNode; rows: { label: string; value: number }[] }) => (
+  <section aria-labelledby={id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6">
+    <h3 id={id} className="text-sm font-semibold text-slate-600">{title}</h3>
+    {children}
+    <dl className="mt-3 divide-y divide-slate-100 text-sm">
+      {rows.map(row => (
+        <div key={row.label} className="flex items-baseline justify-between gap-4 py-2">
+          <dt className="min-w-0 text-slate-600 [overflow-wrap:anywhere]">{row.label}</dt>
+          <dd className="shrink-0 font-semibold tabular-nums text-slate-900">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </section>
+);
+
 type BucketUnit = 'day' | 'week' | 'month';
 /** Up to this many bars every one is labelled, and the labels have room to sit under the middle of their bar. */
 const SHORT_PERIOD = 8;
@@ -153,7 +172,6 @@ const AppointmentChart = ({ buckets, unit, period }: { buckets: AppointmentBucke
 };
 
 export const AnalyticsView: React.FC<AnalyticsProps> = ({ events, conversations, companyName, timeZone, now, onExportReport }) => {
-  const [activeTab, setActiveTab] = useState<'Appointments' | 'Messages' | 'Languages'>('Appointments');
   const clock = getSalonNow(timeZone, now);
   // The periods Home counts for too. The page opens on the current month, including the days
   // still to come: a booking made a minute ago for next week is part of what the owner wants to see.
@@ -180,97 +198,98 @@ export const AnalyticsView: React.FC<AnalyticsProps> = ({ events, conversations,
         <h1 className="w-fit text-2xl font-bold text-slate-900">Analytics</h1>
         <p className="mt-1 text-sm text-slate-500 [overflow-wrap:anywhere]">{companyName} · counted from your calendar and conversations</p>
       </div>
-      <div role="tablist" aria-label="Analytics category" className="flex gap-5 border-b border-slate-200 text-sm font-semibold">
-        {(['Appointments', 'Messages', 'Languages'] as const).map(tab => (
-          <button key={tab} role="tab" id={`analytics-tab-${tab}`} tabIndex={activeTab === tab ? 0 : -1} aria-selected={activeTab === tab} aria-controls="analytics-panel" onClick={() => setActiveTab(tab)} onKeyDown={event => {
-            const tabs = ['Appointments', 'Messages', 'Languages'] as const;
-            const index = tabs.indexOf(tab);
-            const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
-            if (next < 0) return;
-            event.preventDefault();
-            setActiveTab(tabs[next]);
-            document.getElementById(`analytics-tab-${tabs[next]}`)?.focus();
-          }} className={`min-h-11 pb-3 pt-2 ${activeTab === tab ? 'border-b-2 border-[#5551FF] text-[#5551FF]' : 'text-slate-500 hover:text-slate-900'}`}>{tab}</button>
-        ))}
-      </div>
-      <section role="tabpanel" id="analytics-panel" aria-labelledby={`analytics-tab-${activeTab}`} className="space-y-6">
-        {activeTab === 'Appointments' ? <>
-          {/* One row of filters above everything they apply to: the usual periods first, then any other dates. */}
-          <div className="flex flex-wrap items-end gap-3">
-            <div role="group" aria-label="Period" className="flex flex-wrap gap-2">
-              {presets.map(({ label, period }) => {
-                const chosen = from === period.from && to === period.to;
-                return (
-                  <button key={label} type="button" aria-pressed={chosen} onClick={() => { setFrom(period.from); setTo(period.to); }}
-                    className={`min-h-11 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold ${chosen ? 'border-[#5551FF] bg-indigo-50 text-[#5551FF]' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto">
-              <label className="min-w-0 text-xs font-semibold text-slate-600">From<input aria-label="From date" type="date" value={from} onChange={event => setFrom(event.target.value)} className="mt-1 block min-h-11 w-full max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:w-auto sm:text-sm" /></label>
-              <label className="min-w-0 text-xs font-semibold text-slate-600">To<input aria-label="To date" type="date" value={to} onChange={event => setTo(event.target.value)} className="mt-1 block min-h-11 w-full max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:w-auto sm:text-sm" /></label>
-            </div>
-            {onExportReport && (
-              <button type="button" disabled={Boolean(appointments.error)} onClick={() => onExportReport({ from, to })}
-                className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-auto">
-                <Download className="h-4 w-4 text-slate-500" />
-                <span>Export CSV</span>
-              </button>
-            )}
+      {/* One page: the appointments of a period first, then the chats, which have no period. */}
+      <section aria-label="Appointments" className="space-y-6">
+        {/* One row of filters above the figures they apply to: the usual periods first, then any other dates. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div role="group" aria-label="Period" className="flex flex-wrap gap-2">
+            {presets.map(({ label, period }) => {
+              const chosen = from === period.from && to === period.to;
+              return (
+                <button key={label} type="button" aria-pressed={chosen} onClick={() => { setFrom(period.from); setTo(period.to); }}
+                  className={`min-h-11 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold ${chosen ? 'border-[#5551FF] bg-indigo-50 text-[#5551FF]' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          {appointments.error ? <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{appointments.error}</p> : <>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs">
-              <h2><span className="block text-4xl font-bold text-slate-900">{appointments.total}</span> <span className="text-sm font-semibold text-slate-600">{appointments.total === 1 ? 'appointment' : 'appointments'}</span></h2>
-              <p className="mt-1 text-xs text-slate-500">{periodLabel({ from, to })}{progress}</p>
-              {appointments.total === 0
-                ? <p className="mt-6 text-sm text-slate-500">No appointments in this period.</p>
-                // One day is one number: a chart with a single bar would add nothing.
-                : buckets.length > 1 && <>
-                  <AppointmentChart key={`${from}:${to}`} buckets={buckets} unit={unit} period={{ from, to }} />
-                  <details className="mt-2 text-xs text-slate-600">
-                    <summary className="min-h-11 cursor-pointer py-3 font-semibold">Appointments per {unit}</summary>
-                    <table className="w-full max-w-md text-left tabular-nums">
-                      <thead>
-                        <tr className="text-slate-500">
-                          <th scope="col" className="py-1.5 pr-4 font-semibold">{unitName}</th>
-                          <th scope="col" className="py-1.5 pr-4 text-right font-semibold">Appointments</th>
-                          <th scope="col" className="py-1.5 text-right font-semibold">Booked by AI</th>
+          <div className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto">
+            <label className="min-w-0 text-xs font-semibold text-slate-600">From<input aria-label="From date" type="date" value={from} onChange={event => setFrom(event.target.value)} className="mt-1 block min-h-11 w-full max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:w-auto sm:text-sm" /></label>
+            <label className="min-w-0 text-xs font-semibold text-slate-600">To<input aria-label="To date" type="date" value={to} onChange={event => setTo(event.target.value)} className="mt-1 block min-h-11 w-full max-w-full rounded-lg border border-slate-200 bg-white p-2 text-base sm:w-auto sm:text-sm" /></label>
+          </div>
+          {onExportReport && (
+            <button type="button" disabled={Boolean(appointments.error)} onClick={() => onExportReport({ from, to })}
+              className="inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-auto">
+              <Download className="h-4 w-4 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
+        </div>
+        {appointments.error ? <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{appointments.error}</p> : <>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 shadow-xs">
+            <h2><span className="block text-4xl font-bold text-slate-900">{appointments.total}</span> <span className="text-sm font-semibold text-slate-600">{appointments.total === 1 ? 'appointment' : 'appointments'}</span></h2>
+            <p className="mt-1 text-xs text-slate-500">{periodLabel({ from, to })}{progress}</p>
+            {appointments.total === 0
+              ? <p className="mt-6 text-sm text-slate-500">No appointments in this period.</p>
+              // One day is one number: a chart with a single bar would add nothing.
+              : buckets.length > 1 && <>
+                <AppointmentChart key={`${from}:${to}`} buckets={buckets} unit={unit} period={{ from, to }} />
+                <details className="mt-2 text-xs text-slate-600">
+                  <summary className="min-h-11 cursor-pointer py-3 font-semibold">Appointments per {unit}</summary>
+                  <table className="w-full max-w-md text-left tabular-nums">
+                    <thead>
+                      <tr className="text-slate-500">
+                        <th scope="col" className="py-1.5 pr-4 font-semibold">{unitName}</th>
+                        <th scope="col" className="py-1.5 pr-4 text-right font-semibold">Appointments</th>
+                        <th scope="col" className="py-1.5 text-right font-semibold">Booked by AI</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Closed days and empty weeks are left out: a row of zeros tells the owner nothing. */}
+                      {buckets.filter(bucket => bucket.count > 0).map(bucket => (
+                        <tr key={bucket.from} className="border-t border-slate-100">
+                          <th scope="row" className="py-1.5 pr-4 font-normal">{bucketName(bucket, unit)}</th>
+                          <td className="py-1.5 pr-4 text-right">{bucket.count}</td>
+                          <td className="py-1.5 text-right">{bucket.aiBookings}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {/* Closed days and empty weeks are left out: a row of zeros tells the owner nothing. */}
-                        {buckets.filter(bucket => bucket.count > 0).map(bucket => (
-                          <tr key={bucket.from} className="border-t border-slate-100">
-                            <th scope="row" className="py-1.5 pr-4 font-normal">{bucketName(bucket, unit)}</th>
-                            <td className="py-1.5 pr-4 text-right">{bucket.count}</td>
-                            <td className="py-1.5 text-right">{bucket.aiBookings}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </details>
-                </>}
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Metric label="Customers with appointments" value={appointments.customers} />
-              <Metric label="Booked by AI" value={appointments.aiBookings} note={appointments.aiShare === null ? undefined : `${appointments.aiShare}% of appointments`} />
-              <Metric label="Other bookings" value={appointments.otherBookings} />
-            </div>
-          </>}
-        </> : activeTab === 'Messages' ? <>
-          <h2 className="text-lg font-bold">{plural(messages.total, 'message')}</h2>
-          <p className="text-sm text-slate-500">
-            All messages in your {plural(messages.conversations, 'conversation')}.
-            {messages.waiting > 0 && ` ${messages.waiting === 1 ? '1 conversation is' : `${messages.waiting} conversations are`} waiting for you.`}
-          </p>
-          <div className="grid gap-4 md:grid-cols-3"><Metric label="Customer messages" value={messages.customer} /><Metric label="AI replies" value={messages.ai} /><Metric label="Owner replies" value={messages.owner} /></div>
-        </> : <>
-          <h2 className="text-lg font-bold">Conversation languages</h2>
-          <p className="text-sm text-slate-500">Customer languages across your {plural(messages.conversations, 'conversation')}.</p>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{messages.languages.map(item => <Metric key={item.name} label={item.name} value={item.count} />)}</div>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              </>}
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Metric label="Customers with appointments" value={appointments.customers} />
+            <Metric label="Booked by AI" value={appointments.aiBookings} note={appointments.aiShare === null ? undefined : `${appointments.aiShare}% of appointments`} />
+            <Metric label="Other bookings" value={appointments.otherBookings} />
+          </div>
         </>}
+      </section>
+
+      {/* Messages carry no date yet, so these figures cannot follow the period. The heading and its
+          line say what is counted instead, so nobody reads them as figures of the period above. */}
+      <section aria-labelledby="analytics-conversations" className="space-y-4">
+        <div>
+          <h2 id="analytics-conversations" className="text-lg font-bold text-slate-900">Conversations</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {messages.conversations === 0 ? 'No conversations yet.' : 'Counted over all your conversations. The period above applies to appointments only.'}
+          </p>
+        </div>
+        {messages.conversations > 0 && (
+          <div className="grid gap-4 md:grid-cols-2">
+            <FigureList id="analytics-messages" title="Messages" rows={[
+              { label: 'Customer messages', value: messages.customer },
+              { label: 'AI replies', value: messages.ai },
+              { label: 'Owner replies', value: messages.owner },
+            ]}>
+              <p className="mt-3 text-sm text-slate-600"><span className="text-3xl font-bold text-slate-900">{messages.total}</span> {messages.total === 1 ? 'message' : 'messages'} in {plural(messages.conversations, 'conversation')}</p>
+              {messages.waiting > 0 && <p className="mt-1 text-xs text-slate-500">{messages.waiting === 1 ? '1 conversation is' : `${messages.waiting} conversations are`} waiting for you.</p>}
+            </FigureList>
+            <FigureList id="analytics-languages" title="Languages" rows={messages.languages.map(item => ({ label: item.name, value: item.count }))}>
+              <p className="mt-3 text-sm text-slate-600">Conversations by the language the customer writes in.</p>
+            </FigureList>
+          </div>
+        )}
       </section>
     </div>
   );

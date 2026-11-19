@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus, ArrowLeft, X, Info, Clock } from 'luci
 import { Employee, ShiftEntry } from '../types';
 import { addDays, currentSalonWeek, formatCalendarDate, formatDate, startOfWeek } from '../scheduling';
 import { formatDateRange, formatTimeRange, weekdayName } from '../format';
+import { useCloseOnBack } from '../backGesture';
 
 interface ShiftPlanViewProps {
   employees: Employee[];
@@ -20,6 +21,10 @@ const minutesAt = (time: string) => {
 };
 const fieldStyle = 'min-h-11 w-full min-w-0 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-base sm:text-sm text-slate-700';
 
+/**
+ * The tab "This week" of Team: who works when. It opens on the current week and can be turned
+ * to any other one. A tap on a person shows that person's week day by day.
+ */
 export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, timeZone, onUpdateShift, now }) => {
   const [weekStart, setWeekStart] = useState(() => currentSalonWeek(timeZone, now));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
@@ -45,15 +50,29 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
   const scheduledHours = selectedShifts.reduce((total, shift) =>
     total + (minutesAt(shift.end) - minutesAt(shift.start)) / 60, 0);
 
+  // What the editor showed when it was filled for a person and a day. Anything else in it now would be lost on closing.
+  const [loaded, setLoaded] = useState('');
   const loadShift = (employeeId: string, date: string, create = false) => {
     const shift = shiftFor(employeeId, date);
+    const shown = [create || shift !== null, shift?.start ?? '09:00', shift?.end ?? '18:00'] as const;
     setEditorEmployeeId(employeeId);
     setEditorDate(date);
-    setAvailable(create || shift !== null);
-    setStart(shift?.start ?? '09:00');
-    setEnd(shift?.end ?? '18:00');
+    setAvailable(shown[0]);
+    setStart(shown[1]);
+    setEnd(shown[2]);
+    setLoaded(JSON.stringify(shown));
     setError('');
   };
+  /** A tap beside the editor, Escape or the Back gesture: quickly done, so changed times ask first. Cancel and X close at once. */
+  const dismissEditor = () => {
+    if (JSON.stringify([available, start, end]) !== loaded && !window.confirm('Discard the changes to this shift?')) return;
+    setShowEditor(false);
+  };
+  const dismissRef = useRef(dismissEditor);
+  dismissRef.current = dismissEditor;
+  // One person's week is a page inside "This week": the phone's Back gesture leads back to the whole team.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useCloseOnBack(panelRef, selectedEmployeeId !== null, () => setSelectedEmployeeId(null));
   const openEditor = (employeeId: string, date: string, create = false) => {
     loadShift(employeeId, date, create);
     setShowEditor(true);
@@ -68,7 +87,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        setShowEditor(false);
+        dismissRef.current();
       }
       if (event.key !== 'Tab') return;
       const elements = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
@@ -109,17 +128,17 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
   };
 
   return (
-    <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div ref={panelRef} className="min-w-0 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           {selectedEmployee && (
-            <button onClick={() => setSelectedEmployeeId(null)} aria-label="Back to Shift Plan overview" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600">
+            <button onClick={() => setSelectedEmployeeId(null)} aria-label="Back to the whole team" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600">
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}
           <div className="min-w-0 [overflow-wrap:anywhere]">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{selectedEmployee?.name ?? 'Shift Plan'}</h1>
-            {selectedEmployee && <p className="text-xs text-slate-500 mt-1">Staff availability</p>}
+            <h2 className="text-base font-bold text-slate-900">{selectedEmployee?.name ?? 'Shifts'}</h2>
+            {selectedEmployee && <p className="text-xs text-slate-500 mt-0.5">Shifts of the week</p>}
           </div>
         </div>
         <button
@@ -127,7 +146,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
           disabled={employees.length === 0}
           className="flex min-h-11 shrink-0 items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Plus className="w-3.5 h-3.5" />New Shift
+          <Plus className="w-3.5 h-3.5" />New shift
         </button>
       </div>
 
@@ -142,7 +161,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
             <span className="min-w-0 px-1 text-center text-xs font-semibold text-slate-600 tabular-nums">{formatDateRange(weekStart, days[6])}</span>
             <button aria-label="Next week" onClick={() => setWeekStart(addDays(weekStart, 7))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronRight className="w-4 h-4" /></button>
           </div>
-          <input type="date" aria-label="Choose shift plan week" value={weekStart} onChange={(event) => { if (event.target.value) setWeekStart(startOfWeek(event.target.value)); }} className="min-h-11 max-w-full px-3 py-2 text-base sm:text-xs bg-white border border-slate-200 rounded-xl text-slate-600" />
+          <input type="date" aria-label="Choose a week" value={weekStart} onChange={(event) => { if (event.target.value) setWeekStart(startOfWeek(event.target.value)); }} className="min-h-11 max-w-full px-3 py-2 text-base sm:text-xs bg-white border border-slate-200 rounded-xl text-slate-600" />
         </div>
         {selectedEmployee && (
           <div className="flex items-center gap-3 px-3 py-2 text-xs text-slate-600 bg-slate-100/80 rounded-xl">
@@ -212,11 +231,11 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
       )}
 
       {showEditor && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end" onClick={(event) => { if (event.target === event.currentTarget) setShowEditor(false); }}>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end" onClick={(event) => { if (event.target === event.currentTarget) dismissEditor(); }}>
           <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="shift-editor-title" className="w-full max-w-md bg-white h-full shadow-2xl p-4 sm:p-6 overflow-y-auto overscroll-contain">
             <form onSubmit={saveShift} className="flex flex-col min-h-full gap-5 text-xs">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <h2 id="shift-editor-title" className="text-base font-bold text-slate-900">{shiftFor(editorEmployeeId, editorDate) ? 'Edit Shift' : 'New Shift'}</h2>
+                <h2 id="shift-editor-title" className="text-base font-bold text-slate-900">{shiftFor(editorEmployeeId, editorDate) ? 'Edit shift' : 'New shift'}</h2>
                 <button type="button" aria-label="Close shift editor" onClick={() => setShowEditor(false)} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
               </div>
               <div>

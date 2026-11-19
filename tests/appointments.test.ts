@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from '../src/appointmentActions';
+import { appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, requestTimes, upsertAppointment } from '../src/appointmentActions';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, formatDate, startOfWeek } from '../src/scheduling';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { isOutsideOpeningHours } from '../src/availability';
@@ -20,9 +20,19 @@ test('accepting an October 1 request preserves the full date and requested time'
   assert.notEqual(event.date, demoEvents.find((item) => item.id === 'cal-2')!.date); // another Thursday
 });
 
-test('appointments use the selected service duration, including 90-minute services', () => {
-  const event = appointmentFromRequest({ ...octoberRequest, serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 16:30' }, initialServices);
-  assert.equal(event.endTime, '17:30');
+test('an appointment lasts as long as its request asked for, also after the service got another length', () => {
+  // A colouring was asked for from 16:00 to 17:30, the 90 minutes the service had.
+  const colouring = { ...octoberRequest, serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 17:30' };
+  assert.equal(appointmentFromRequest(colouring, initialServices).endTime, '17:30');
+  // The owner has made the service two hours since: the customer still gets the time asked for.
+  const longer = initialServices.map((service) => service.id === 'srv-3' ? { ...service, durationMinutes: 120 } : service);
+  assert.equal(appointmentFromRequest(colouring, longer).endTime, '17:30');
+  assert.deepEqual(requestTimes(colouring), { start: '16:00', end: '17:30', minutes: 90 });
+  // A request without a readable span (never written by the app) falls back to the service's length.
+  assert.equal(requestTimes({ timeStr: '16:00' }), null);
+  assert.equal(requestTimes({ timeStr: '17:00 - 16:00' }), null);
+  assert.equal(appointmentFromRequest({ ...colouring, timeStr: '16:00' }, initialServices).endTime, '17:30');
+  assert.equal(appointmentIdForRequest('req-1'), 'cal-req-1');
   for (const hour of ['09:00', '10:00', '11:00', '13:30', '14:00', '16:00']) {
     const [h, m] = hour.split(':').map(Number);
     const expected = h * 60 + m + 30;

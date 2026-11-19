@@ -6,7 +6,9 @@ import { initialAiSettings } from '../src/conversationData';
 import { appointmentForConversation } from '../src/appointmentActions';
 import { demoStorageKey } from '../src/useDemoState';
 import { demoConversations, demoEvents } from './fixedClock';
-import { conversationForSelection, messageForOwner } from '../src/conversationPresentation';
+import { conversationForSelection, conversationsInFilter, messageForOwner } from '../src/conversationPresentation';
+import { conversationsWaiting } from '../src/analytics';
+import type { Conversation } from '../src/types';
 import { ConversationsView } from '../src/views/ConversationsView';
 import { channelLabel } from '../src/components/ChannelBadge';
 
@@ -74,15 +76,50 @@ test('a stale conversation link displays recovery and no reply or takeover actio
   assert.doesNotMatch(html, />Take over</);
 });
 
-test('a chat shows its own channel and offers the customer view', () => {
+/** A text as a pattern that matches exactly this text. */
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('a chat shows its own channel, and every message as the customer wrote it above its translation', () => {
   const html = renderToStaticMarkup(React.createElement(ConversationsView, props));
   // The channel comes from the chat itself, whichever one the sample data gives it.
   const chloe = demoConversations.find(conversation => conversation.id === 'conv-chloe')!;
   assert.match(html, new RegExp(`via ${channelLabel(chloe.channel)}<`));
-  assert.match(html, />Customer view</);
-  assert.match(html, /Customer view of the chat with Chloé Favre/);
-  assert.match(html, /How Chloé sees this chat/);
-  assert.doesNotMatch(html, /Open in WhatsApp/);
+  // One bubble holds the customer's own words and, under a line, what the owner reads. That is
+  // why there is no second view of the chat "as the customer sees it".
+  const [message] = chloe.messages;
+  assert.notEqual(message.original, message.translation);
+  assert.match(html, new RegExp(`<p[^>]*>${literal(message.original)}</p><div[^>]*></div><p[^>]*>${literal(message.translation)}</p>`));
+  assert.doesNotMatch(html, /Customer view|sees this chat|Open in WhatsApp/);
+  // With no AI reply to approve, the page holds no dialog at all.
+  assert.doesNotMatch(html, /<dialog/);
+});
+
+test('the list is filtered by All, Needs you and Booked', () => {
+  const html = renderToStaticMarkup(React.createElement(ConversationsView, { ...props, mobileDetailOpen: false }));
+  // Three filters, named like the status tags in the list; the first is the one in use.
+  assert.match(html, /role="group" aria-label="Filter conversations"/);
+  const filters = Array.from(html.matchAll(/<button aria-pressed="(true|false)"[^>]*>([^<]+)/g), match => [match[2], match[1]]);
+  assert.deepEqual(filters, [['All', 'true'], ['Needs you', 'false'], ['Booked', 'false']]);
+  // "Needs you" carries the number of chats that wait, the one the header and Home show.
+  const waiting = conversationsWaiting(demoConversations);
+  assert.ok(waiting.length > 0);
+  assert.match(html, new RegExp(`>Needs you<span[^>]*>${waiting.length}</span></button>`));
+
+  // What each filter keeps. A live chat whose booking the owner confirmed has the status "booked" too.
+  const confirmed: Conversation = {
+    ...demoConversations[0], id: 'live-web-1', live: true, status: 'booked',
+    bookingRequest: { service: 'Haircut', date: '2026-10-08', time: '15:00', customerName: 'Tom', status: 'confirmed' },
+  };
+  const all = [confirmed, ...demoConversations];
+  assert.equal(conversationsInFilter(all, 'all'), all);
+  assert.deepEqual(conversationsInFilter(all, 'needs'), waiting);
+  // "Booked" keeps every chat with an appointment: the confirmed live chat, and the sample chats whose
+  // appointment is in the calendar (Giulia asks to move hers; Léa's and John's were booked by the AI).
+  assert.deepEqual(conversationsInFilter(all, 'booked').map(conversation => conversation.id), ['live-web-1', 'conv-giulia', 'conv-marie', 'conv-lea', 'conv-john']);
+  for (const conversation of conversationsInFilter(all, 'booked')) assert.ok(conversation.status === 'booked' || conversation.appointmentId, conversation.id);
+  // A chat without an appointment is not listed, whatever its status.
+  assert.deepEqual(conversationsInFilter(demoConversations.filter(conversation => !conversation.appointmentId), 'booked'), []);
+  assert.deepEqual(conversationsInFilter([], 'booked'), []);
 });
 
 test('a chat whose booking is in the calendar offers the way to that appointment', () => {
@@ -102,6 +139,29 @@ test('a chat whose booking is in the calendar offers the way to that appointment
   // Without a calendar to look in, or a way to open it, the link is left out.
   assert.doesNotMatch(view('conv-marie', { appointmentFor: undefined }), /View appointment/);
   assert.doesNotMatch(view('conv-marie', { onOpenAppointment: undefined }), /View appointment/);
+});
+
+test('the header of a chat holds two controls at most, laid out to share one row on a phone', () => {
+  const header = (selectedId: string) => {
+    const html = renderToStaticMarkup(React.createElement(ConversationsView, {
+      ...props, selectedId, onOpenAppointment: () => {}, appointmentFor: conversation => appointmentForConversation(conversation, demoEvents),
+    }));
+    // The row of controls: what follows the customer's name and number, up to the end of the header.
+    const row = /<div class="(flex flex-wrap items-center gap-2[^"]*)">(<button.*?<\/button>)<\/div><\/div>/.exec(html);
+    assert.ok(row, 'the chat header has its row of controls');
+    return { classes: row[1], buttons: Array.from(row[2].matchAll(/<button[^>]*class="([^"]*)"[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g), match => ({ classes: match[1], label: match[2] })) };
+  };
+  // A chat with an appointment: how the AI works in it, and the way to the appointment. Nothing else.
+  const booked = header('conv-marie');
+  assert.deepEqual(booked.buttons.map(button => button.label), ['AI replies automatically', 'View appointment']);
+  // From 360 px on the two never wrap: the note about the AI may narrow (and take two lines),
+  // "View appointment" keeps its width and stays on one line. Measured in a browser at 375 px.
+  assert.match(booked.classes, /min-\[360px\]:flex-nowrap/);
+  assert.match(booked.buttons[0].classes, /\bmin-w-0\b/);
+  assert.match(booked.buttons[1].classes, /\bshrink-0\b.*\bwhitespace-nowrap\b/);
+  for (const button of booked.buttons) assert.match(button.classes, /\bmin-h-11\b/);
+  // A chat without one: the note alone.
+  assert.deepEqual(header('conv-chloe').buttons.map(button => button.label), ['AI replies automatically']);
 });
 
 test('approval setting replaces immediate AI sending with a review entry point', () => {

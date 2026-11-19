@@ -4,6 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { appointmentFromRequest, upsertAppointment } from '../src/appointmentActions';
 import { customerForAppointment, upsertCustomer } from '../src/bookingData';
+import { CUSTOMER_SORT_OPTIONS } from '../src/customerSort';
 import { customerStatsFromCalendar } from '../src/customerStats';
 import { initialEmployees, initialServices } from '../src/mockData';
 import type { CalendarEvent, Customer } from '../src/types';
@@ -95,10 +96,10 @@ test('the customer list shows the calendar\'s figures, 25 customers at a time', 
   const html = renderToStaticMarkup(React.createElement(CustomersView, viewProps));
   assert.match(html, />Last visit</);
   assert.match(html, />Next appointment</);
-  assert.match(html, />Visits \/ Actions</);
-  assert.doesNotMatch(html, /Last booking|Bookings/);
-  // The phone cards and the table each show the first 25.
-  assert.equal(count(html, 'aria-label="Delete '), 50);
+  assert.match(html, />Visits</);
+  assert.doesNotMatch(html, /Last booking|Bookings|Actions/);
+  // The phone cards and the table each show the first 25; the name of each opens its edit form.
+  assert.equal(count(html, 'aria-label="Edit '), 50);
   assert.equal(count(html, `Showing 25 of ${demoCustomers.length} customers`), 2);
   assert.equal(count(html, '>Show 25 more<'), 2);
   // Marie: last visit and next appointment as in the calendar.
@@ -126,5 +127,53 @@ test('a short list has no "Show more", and a customer known only from a chat sho
   // A link from the search opens one customer.
   const one = renderToStaticMarkup(React.createElement(CustomersView, { ...viewProps, selectedCustomerId: 'cust-marie' }));
   assert.match(one, /Showing Marie Dupont/);
-  assert.equal(count(one, 'aria-label="Delete '), 2);
+  assert.equal(count(one, 'aria-label="Edit '), 2);
+  assert.equal(count(one, 'aria-label="Edit Marie Dupont"'), 2);
+  // One customer needs no order: the phones' "Sort by" is left out.
+  assert.doesNotMatch(one, /customer-sort/);
+});
+
+test('no row of the list deletes: the bin is gone, and so is the Options panel', () => {
+  const html = renderToStaticMarkup(React.createElement(CustomersView, viewProps));
+  // Deleting is in the customer's edit form, behind a question (tests/deleteQuestion.test.ts).
+  assert.doesNotMatch(html, /Delete|lucide-trash/i);
+  assert.doesNotMatch(html, /Options|customer-options|All languages|Reset filters/);
+  // What stays above the list: the filter field, the export and "Add Customer".
+  assert.match(html, /aria-label="Filter customers"/);
+  assert.match(html, /aria-label="Export customers CSV"/);
+  assert.match(html, />Add Customer</);
+  // A list without customers says so, in the cards and in the table.
+  const empty = renderToStaticMarkup(React.createElement(CustomersView, { ...viewProps, customers: [] }));
+  assert.equal(count(empty, '>No customers yet.<'), 2);
+});
+
+test('the headers of name, last visit, next appointment and visits sort the table; phones get one "Sort by" list', () => {
+  const html = renderToStaticMarkup(React.createElement(CustomersView, viewProps));
+  // A table for screen readers: one header row of eight, and a row of eight cells per customer.
+  assert.match(html, /<div role="table" aria-label="Customers"/);
+  assert.equal(count(html, 'role="columnheader"'), 8);
+  assert.equal(count(html, 'role="row"'), 26);
+  assert.equal(count(html, 'role="cell"'), 25 * 8);
+  // Four headers are buttons with an arrow; the others are plain text.
+  const sortable = Array.from(html.matchAll(/<div role="columnheader"[^>]*><button type="button"[^>]*>([^<]+)<svg[^>]*aria-hidden="true"/g), match => match[1]);
+  assert.deepEqual(sortable, ['Name', 'Last visit', 'Next appointment', 'Visits']);
+  for (const plain of ['Email', 'Phone', 'Language']) assert.match(html, new RegExp(`<div role="columnheader"[^>]*>${plain}</div>`));
+  // The list opens as it is kept (most recent contact first): no header claims an order yet.
+  assert.doesNotMatch(html, /aria-sort/);
+  assert.match(html, /lucide-arrow-up-down/);
+  assert.ok(html.indexOf('>Camille Bernard<') < html.indexOf('>Marie Dupont<'));
+
+  // Phones show cards without headers: one labelled list holds every column in both directions.
+  const select = /<label for="customer-sort"[^>]*>Sort by<\/label><select id="customer-sort"[^>]*>(.*?)<\/select>/.exec(html)?.[1] ?? '';
+  const options = Array.from(select.matchAll(/<option value="([^"]*)"( selected="")?>([^<]*)<\/option>/g), match => [match[1], match[3], Boolean(match[2])]);
+  assert.deepEqual(options, CUSTOMER_SORT_OPTIONS.map((option) => [option.value, option.label, option.value === '']));
+  assert.deepEqual(options.map((option) => option[1]), [
+    'Default order', 'Name A–Z', 'Name Z–A', 'Last visit, newest first', 'Last visit, oldest first',
+    'Next appointment, soonest first', 'Next appointment, latest first', 'Most visits', 'Fewest visits',
+  ]);
+  assert.equal(count(html, '<select'), 1);
+  // A list on a phone must not zoom the page: 16 px text, and a tap target of 44 px.
+  const classes = /<select id="customer-sort"[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '';
+  assert.match(classes, /\btext-base\b/);
+  assert.match(classes, /\bmin-h-11\b/);
 });

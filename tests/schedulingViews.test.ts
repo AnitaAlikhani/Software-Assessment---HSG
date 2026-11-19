@@ -45,6 +45,17 @@ test('week grid renders actual early and evening appointments even on closed day
   assert.match(html, />18:00</);
 });
 
+test('the calendar is shown as a list, a day or a week; there is no 3-day view', () => {
+  const html = renderToStaticMarkup(React.createElement(CalendarView, calendarProps));
+  const views = Array.from(html.matchAll(/<button aria-pressed="(true|false)"[^>]*>([^<]+)<\/button>/g), (match) => [match[2], match[1]]);
+  assert.deepEqual(views, [['List', 'false'], ['Day', 'false'], ['Week', 'true']]);
+  assert.doesNotMatch(html, /3-day/);
+  // The page opens with the week: seven columns, Monday first.
+  assert.equal(html.split('data-date="').length - 1, 7);
+  // Three views share the switcher's width on a phone.
+  assert.match(html, /<div class="grid w-full grid-cols-3 [^"]*"><button aria-pressed/);
+});
+
 test('missing services or active staff explain why appointment creation is disabled', () => {
   const noServices = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, services: [] }));
   assert.match(noServices, /aria-label="Add appointment" disabled=""/);

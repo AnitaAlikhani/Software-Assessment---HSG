@@ -1,13 +1,12 @@
 import type {
   Employee,
-  Resource,
   ServiceItem,
   CompanySettingsData,
   BookingHoursDay,
 } from './types.js';
 
 /**
- * The salon a new workspace starts with: team, services, rooms, profile and opening hours.
+ * The salon a new workspace starts with: team, services, profile and opening hours.
  * Everything here is fixed. Whatever depends on today's date (appointments, customers, chats,
  * requests, shifts) is built in src/demoSeed.ts, src/conversationData.ts and src/demoRequests.ts.
  *
@@ -90,20 +89,6 @@ export const initialServices: ServiceItem[] = [
   service('srv-8', 'Highlights', 120, 160, false, seniors, 'Colour', 'Foil highlights with toner.'),
   service('srv-9', 'Balayage', 180, 240, false, ['emp-1'], 'Colour', 'Hand-painted highlights with toner and blow-dry.'),
   service('srv-10', 'Updo', 60, 110, true, seniors, 'Styling', 'Pinned-up styling for weddings and events.'),
-];
-
-const resource = (id: string, name: string, type: Resource['type'], capacity: number, color: string): Resource => ({
-  id, name, type, capacity, color,
-  reserveEntireRoom: false, visibleOnline: false, allServices: false, generalHours: false,
-});
-
-export const initialResources: Resource[] = [
-  resource('res-styling-chair-1', 'Styling Chair 1', 'Chair', 1, '#FDE047'),
-  resource('res-styling-chair-2', 'Styling Chair 2', 'Chair', 1, '#C4B5FD'),
-  resource('res-styling-chair-3', 'Styling Chair 3', 'Chair', 1, '#FDBA74'),
-  resource('res-hair-wash-station', 'Hair Wash Station', 'Equipment', 1, '#93C5FD'),
-  resource('res-colour-studio', 'Colour Studio', 'Room', 2, '#F87171'),
-  resource('res-hair-steamer', 'Hair Steamer', 'Equipment', 1, '#86EFAC'),
 ];
 
 /**

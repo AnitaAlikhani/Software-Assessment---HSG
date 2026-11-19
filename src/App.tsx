@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   NavigationTab,
   AppointmentRequest,
@@ -6,7 +6,6 @@ import {
   CalendarEvent,
   Customer,
   Employee,
-  Resource,
   ServiceItem,
   CompanySettingsData,
   BookingHoursDay,
@@ -15,24 +14,24 @@ import {
   ShiftEntry,
   Conversation,
   AiAssistantSettings,
+  SettingsSubTab,
+  TeamSubTab,
 } from './types';
 import { DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
 import {
   initialEmployees,
   initialServices,
-  initialResources,
   initialCompanySettings,
   initialBookingHours,
 } from './mockData';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
+import { MoreSheet } from './components/MoreSheet';
 import { HomeView } from './views/HomeView';
 import { CalendarView } from './views/CalendarView';
-import { ShiftPlanView } from './views/ShiftPlanView';
+import { TeamView } from './views/TeamView';
 import { CustomersView } from './views/CustomersView';
-import { ResourcesView } from './views/ResourcesView';
-import { EmployeesView } from './views/EmployeesView';
 import { ServicesView } from './views/ServicesView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { SettingsView } from './views/SettingsView';
@@ -44,18 +43,22 @@ import { AssistantPanel } from './components/AssistantPanel';
 import { SalonTimeNote } from './components/SalonTimeNote';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { bookingPageHead, ownerPageHead, usePageHead } from './pageHead';
-import { AppRoute, parseRoute, routeHash } from './navigation';
-import { analyticsPeriods, analyticsReport, type Period } from './analytics';
+import { AppRoute, isOldAddress, parseRoute, routeForTab, routeHash, SCREEN_NAMES, type RetiredTab } from './navigation';
+import { changeAddress, useBackClosesOverlays } from './backGesture';
+import { analyticsReport, type Period } from './analytics';
 import { downloadCsv } from './csv';
 import { PRODUCT_NAME } from './brand';
-import { mostRecentAiAppointment, nextUpcomingAppointment } from './dashboard';
-import { addMinutes, formatDate } from './scheduling';
-import { firstFreeEmployee, getSalonNow, isEmployeeAssignedToService, isOutsideOpeningHours, validateBookingRequest, validateCalendarEvent } from './availability';
-import { appointmentForConversation, appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
+import { formatDate } from './scheduling';
+import { getSalonNow, isOutsideOpeningHours, validateBookingRequest, validateCalendarEvent } from './availability';
+import { appointmentForConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
+import { answerIsShown, openRequestCount, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
+import { acceptedAppointmentState, checkRequest, movedRequest, planChatBooking } from './requestAnswers';
+import { announceRequest, applyBridgedRequest, listenForRequests } from './requestBridge';
+import { BookingLinkCompact } from './components/BookingLinkCard';
 
 import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
-import { useDemoState } from './useDemoState';
+import { forgetRetiredDemoState, useDemoState } from './useDemoState';
 import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
 import { chatBookingName, chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, upsertCustomer, validateContact, type ChatContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
@@ -77,24 +80,59 @@ export default function App() {
     if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
     else mainRef.current?.focus({ preventScroll: true });
   };
-  const navigate = (next: AppRoute, options: { replace?: boolean } = {}) => {
+  // A form with changes that are not saved (a person in Team, the salon's settings) leaves its
+  // question here. Opening another screen through the app asks it first; `navigate` answers
+  // whether the screen was opened.
+  const unsavedQuestion = useRef<string | null>(null);
+  const noteUnsaved = (question: string | null) => { unsavedQuestion.current = question; };
+  // The screen that is open now, also for a `navigate` that an older message still holds (a toast's action).
+  const openTab = useRef(currentTab);
+  openTab.current = currentTab;
+  const openRoute = useRef(route);
+  openRoute.current = route;
+  /** Asks the question of a form with unsaved changes before another screen opens. True when the screen may open. */
+  const mayLeave = (next: AppRoute): boolean => {
+    if (next.tab === openTab.current || !unsavedQuestion.current) return true;
+    if (!window.confirm(unsavedQuestion.current)) return false;
+    // Answered: the change of address that follows must not ask a second time.
+    unsavedQuestion.current = null;
+    return true;
+  };
+  const navigate = (next: AppRoute, options: { replace?: boolean } = {}): boolean => {
+    if (!mayLeave(next)) return false;
     const hash = routeHash(next);
     if (window.location.hash !== hash) {
-      // Closing an overlay replaces the entry so the phone's Back gesture does not re-open it.
-      if (options.replace) window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
-      else window.location.hash = hash;
+      // `replace` (closing an overlay, moving between the tabs of a page) adds no history entry, so the
+      // phone's Back gesture neither re-opens the overlay nor walks through the tabs (see changeAddress).
+      changeAddress(hash, options.replace);
     } else {
-      // The target is the page already shown (search result, notification, account menu): still give focus feedback.
+      // The target is the page already shown (a search result, a menu entry): still give focus feedback.
       requestAnimationFrame(focusMainHeading);
     }
     setRoute(next);
+    return true;
   };
-  const setCurrentTab = (tab: NavigationTab) => navigate({ tab });
+  // A screen may still be asked for by a name it had before it moved; it opens in its new place.
+  const setCurrentTab = (tab: NavigationTab | RetiredTab) => navigate(routeForTab(tab));
   useEffect(() => {
-    const onHashChange = () => setRoute(parseRoute(window.location.hash));
+    const onHashChange = () => {
+      const next = parseRoute(window.location.hash);
+      // Back, Forward and a typed address leave a form with unsaved changes just as the menu
+      // would, so they ask the same question. "Stay" brings back the address of the screen that
+      // is still shown; the form was never closed and keeps what was typed.
+      if (!mayLeave(next)) { changeAddress(routeHash(openRoute.current)); return; }
+      // The address of a screen that has moved (a bookmark, a link in a message) is exchanged for
+      // the address of its new place, so the address bar shows where the owner really is.
+      if (isOldAddress(window.location.hash)) changeAddress(routeHash(next), true);
+      setRoute(next);
+    };
+    if (isOldAddress(window.location.hash)) onHashChange();
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+  // The phone's Back gesture closes an open dialog, sheet or the assistant and leaves the page.
+  // An appointment's details have their own address, so Back closes them by itself.
+  useBackClosesOverlays(Boolean(route.appointmentId));
   // Only a change of page resets the scroll position and moves focus to its heading.
   // Selecting a record inside a page (request, customer, appointment, conversation) keeps the
   // user's scroll position; on phones that selection is often several screens down.
@@ -105,19 +143,51 @@ export default function App() {
     const frame = requestAnimationFrame(focusMainHeading);
     return () => cancelAnimationFrame(frame);
   }, [route.tab]);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isPilotInterestOpen, setIsPilotInterestOpen] = useState(false);
   useEffect(() => {
-    // A Back/Forward gesture changes the page behind an open drawer or dialog; close them.
-    setIsMobileMenuOpen(false);
+    // A Back/Forward gesture changes the page behind an open sheet or dialog; close them.
+    setIsMoreOpen(false);
     setIsPilotInterestOpen(false);
   }, [route.tab, route.requestId, route.customerId, route.appointmentId, route.conversationId]);
   const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
-  const [rejectedRequests, setRejectedRequests] = useState<{ request: AppointmentRequest; index: number }[]>([]);
+  // What the owner has just answered on Home. Home shows each answer in its request's place for a
+  // while, with "Undo". Kept with the tab's data: a phone that reloads the page after the owner
+  // has been in her messenger must not lose the card that says what to tell the customer.
+  const [requestAnswers, setRequestAnswers] = useDemoState<RequestAnswer[]>('requestAnswers', []);
+  // A confirmation that was on its way to a chat when the page was reloaded: its outcome is not
+  // known here any more. The chat itself says whether its request still waits.
+  useEffect(() => {
+    setRequestAnswers((previous) => previous.some(unsettledAnswer) ? previous.filter((item) => !unsettledAnswer(item)) : previous);
+  }, [setRequestAnswers]);
+  // Phones and tablets: a message rests just above the tab bar. Inside an open chat the reply box
+  // can lie there instead (on a phone the bar is hidden and the box takes the bottom of the
+  // screen): a message that would cover the reply box is lifted to just above it, wherever the
+  // box is at the moment.
+  const chatOpenOnPhone = currentTab === 'conversations' && Boolean(route.conversationId);
+  const toastRef = useRef<HTMLDivElement>(null);
+  const [toastLift, setToastLift] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!toast || !chatOpenOnPhone || window.matchMedia('(min-width: 1024px)').matches) { setToastLift(null); return; }
+    const place = () => {
+      const replyBox = document.querySelector('#conversation-thread input[aria-label="Reply as owner"]')?.closest('form')?.parentElement?.getBoundingClientRect();
+      const message = toastRef.current;
+      if (!replyBox || !message) { setToastLift(null); return; }
+      // Where the message rests by itself: 0.75rem above the tab bar, which is 4rem high.
+      const restBottom = window.innerHeight - 76;
+      const covers = restBottom > replyBox.top && restBottom - message.offsetHeight < replyBox.bottom;
+      // Never off the top of the screen, also when the reply box has scrolled far up.
+      setToastLift(covers ? Math.min(Math.max(window.innerHeight - replyBox.top + 8, 12), window.innerHeight - 160) : null);
+    };
+    place();
+    window.addEventListener('scroll', place, { passive: true });
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place); window.removeEventListener('resize', place); };
+  }, [toast, chatOpenOnPhone]);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
@@ -132,7 +202,8 @@ export default function App() {
   const [customers, setCustomers] = useDemoState<Customer[]>('customers', () => startingData().customers);
   const [employees, setEmployees] = useDemoState<Employee[]>('employees', initialEmployees);
   const [services, setServices] = useDemoState<ServiceItem[]>('services', initialServices);
-  const [resources, setResources] = useDemoState<Resource[]>('resources', initialResources);
+  // "Rooms & equipment" is gone: a tab that was open before still holds its list, which is taken out.
+  useEffect(() => forgetRetiredDemoState(), []);
   const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', () => startingData().shifts);
   const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
   const [calendarDate, setCalendarDate] = useState(() => getSalonNow(companySettings.timeZone).date);
@@ -163,8 +234,8 @@ export default function App() {
   const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests, closedDates, absences, timeZone: companySettings.timeZone };
 
   const needsAttention = allConversations.filter((c) => c.status === 'needs-attention');
-  const latestAiBookedEvent = mostRecentAiAppointment(calendarEvents);
-  const nextAppointment = nextUpcomingAppointment(calendarEvents, now, companySettings.timeZone.split(' ')[0]);
+  // The badge on Home counts what Home lists as requests: those from the booking page and those waiting in a chat.
+  const openRequests = openRequestCount(requests, allConversations);
   const openAppointment = (event: CalendarEvent) => {
     setCalendarDate(event.date);
     setSearchQuery('');
@@ -201,67 +272,108 @@ export default function App() {
     return saved;
   };
 
-  // Home request actions
-  const handleAcceptRequest = (id: string) => {
-    const accepted = requests.find((r) => r.id === id);
-    if (!accepted) return;
-    const availabilityError = validateBookingRequest(availabilityContext, accepted, accepted.id);
-    if (availabilityError) {
-      showToast(availabilityError, 'error');
-      return;
-    }
+  // Home request actions. Each returns null when it is done, or why it could not be done: Home
+  // shows that on the request itself. The owner's rules decide (a service that is not offered
+  // online can be accepted), and a request keeps the length it was made with.
+  const handleAcceptRequest = (id: string): string | null => {
+    const index = requests.findIndex((r) => r.id === id);
+    if (index < 0) return 'This request is no longer waiting.';
+    const accepted = requests[index];
+    const { refusal } = checkRequest(availabilityContext, accepted);
+    if (refusal) return refusal;
 
     const newCalEvent = appointmentFromRequest(accepted, services, employees);
     setRequests((prev) => prev.filter((r) => r.id !== id));
     setSubmittedRequest((previous) => previous?.id === id ? { ...accepted, status: 'accepted' } : previous);
     commitCalendarEvent(newCalEvent);
     if (route.requestId === id) navigate({ tab: 'home' });
-
-    showToast(`Accepted appointment for ${accepted.customerName}`, 'success', { label: 'View appointment', onClick: () => { openAppointment(newCalEvent); setToast(null); } });
+    setRequestAnswers((previous) => withAnswer(previous, { kind: 'request', id, outcome: 'accepted', at: Date.now(), request: accepted, index }));
+    return null;
   };
 
   const handleRejectRequest = (id: string) => {
     const index = requests.findIndex(request => request.id === id);
     if (index < 0) return;
     const request = requests[index];
-    setRejectedRequests(previous => [...previous, { request, index }]);
     setRequests(previous => previous.filter(item => item.id !== id));
     setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'rejected' } : previous);
     if (route.requestId === id) navigate({ tab: 'home' });
-    showToast(`Declined request from ${request.customerName}`, 'info');
+    setRequestAnswers((previous) => withAnswer(previous, { kind: 'request', id, outcome: 'rejected', at: Date.now(), request, index }));
   };
 
-  const undoReject = () => {
-    const rejected = rejectedRequests.at(-1);
-    if (!rejected) return;
-    const error = validateBookingRequest(availabilityContext, rejected.request);
-    if (error) { showToast(`Cannot restore this request: ${error}`, 'error'); return; }
-    setRequests(previous => {
-      const restored = [...previous];
-      restored.splice(Math.min(rejected.index, restored.length), 0, rejected.request);
-      return restored;
-    });
-    setRejectedRequests(previous => previous.slice(0, -1));
-    setSubmittedRequest(previous => previous?.id === rejected.request.id ? { ...rejected.request, status: 'pending' } : previous);
-    navigate({ tab: 'home', requestId: rejected.request.id });
-    showToast(`Restored request from ${rejected.request.customerName}`);
-  };
-
-  const handleMoveRequest = (id: string, date: string, startTime: string): string | null => {
-    const request = requests.find(item => item.id === id);
-    if (!request) return 'This request is no longer available.';
-    const service = request.serviceId
-      ? services.find(item => item.id === request.serviceId)
-      : services.find(item => item.name === request.serviceName);
-    if (!service) return 'This service is no longer available.';
-    const updatedRequest = { ...request, date, dateStr: formatDate(date), timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}` };
-    const error = validateBookingRequest(availabilityContext, updatedRequest, id);
-    if (error) return error;
-    setRequests(previous => previous.map(item => item.id === id ? updatedRequest : item));
-    setSubmittedRequest((previous) => previous?.id === id ? updatedRequest : previous);
-    showToast('Appointment request rescheduled');
+  /** Takes back the answer to a request: the request waits again as it did before. */
+  const handleUndoAnswer = (id: string): string | null => {
+    const answer = requestAnswers.find((item) => item.kind === 'request' && item.id === id);
+    if (!answer || answer.kind !== 'request') return null;
+    const before = answer.request;
+    if (answer.outcome === 'accepted') {
+      const appointment = calendarEvents.find((event) => event.id === appointmentIdForRequest(id));
+      const standing = acceptedAppointmentState(before, appointment);
+      // Moved or edited in the calendar since: taking the acceptance back would throw that away.
+      if (standing === 'changed') return 'The appointment was changed in the calendar after you accepted. Change or cancel it there.';
+      // Cancelled in the calendar since (Home no longer shows the answer then): that decision stands.
+      if (standing === 'gone') return 'The appointment was cancelled in the calendar after you accepted. If the customer still wants it, add it by hand in the calendar.';
+      // The appointment that the acceptance created goes, and with it what held the time.
+      setCalendarEvents((previous) => previous.filter((event) => event.id !== appointmentIdForRequest(id)));
+      setRequests((previous) => restoreAt(previous, before, answer.index));
+    } else {
+      // Somebody else may have got the time meanwhile: the request only comes back to a time that is free.
+      const { why } = checkRequest(availabilityContext, before);
+      if (why) return answer.outcome === 'moved'
+        ? `The request cannot go back to the time it had: ${why}`
+        : `The request cannot come back: ${why} If the customer still wants an appointment, add it by hand in the calendar.`;
+      setRequests((previous) => answer.outcome === 'moved' ? previous.map((item) => item.id === id ? before : item) : restoreAt(previous, before, answer.index));
+    }
+    setSubmittedRequest((previous) => previous?.id === id ? { ...before, status: 'pending' } : previous);
+    setRequestAnswers((previous) => previous.filter((item) => item !== answer));
     return null;
   };
+
+  const handleDismissAnswer = (kind: RequestAnswer['kind'], id: string) =>
+    setRequestAnswers((previous) => previous.filter((item) => !(item.kind === kind && item.id === id)));
+
+  const handleMoveRequest = (id: string, date: string, startTime: string): string | null => {
+    const index = requests.findIndex(item => item.id === id);
+    if (index < 0) return 'This request is no longer available.';
+    const request = requests[index];
+    const updatedRequest = movedRequest(request, date, startTime);
+    const { why } = checkRequest(availabilityContext, updatedRequest);
+    if (why) return `${why} Choose another date or time.`;
+    setRequests(previous => previous.map(item => item.id === id ? updatedRequest : item));
+    setSubmittedRequest((previous) => previous?.id === id ? updatedRequest : previous);
+    // Moved twice in a row: "Undo" and the text for the customer still start from the time the
+    // customer asked for. Moved back to that time: nothing is left to undo or to tell.
+    const earlier = requestAnswers.find((item) => item.kind === 'request' && item.id === id && item.outcome === 'moved' && answerIsShown(item, new Date()));
+    const asked = earlier?.kind === 'request' ? earlier.request : request;
+    setRequestAnswers((previous) => asked.date === updatedRequest.date && asked.timeStr === updatedRequest.timeStr
+      ? previous.filter((item) => !(item.kind === 'request' && item.id === id))
+      : withAnswer(previous, { kind: 'request', id, outcome: 'moved', at: Date.now(), request: asked, index }));
+    return null;
+  };
+
+  // The customers' page in another tab of this browser hands its requests over (requestBridge.ts):
+  // a request sent after "Open as customer" appears on Home here. The listener is set up once, so
+  // it reads the latest lists from a ref, and it writes its result back to the ref at once: two
+  // messages can arrive before the screen is drawn again, and the second must see the first.
+  const ownerLists = useRef({ requests, customers });
+  ownerLists.current = { requests, customers };
+  const calendarNow = useRef(calendarEvents);
+  calendarNow.current = calendarEvents;
+  const handedOver = useRef(new Set<string>());
+  useEffect(() => {
+    if (publicMode) return;
+    return listenForRequests((message) => {
+      // Already handed over in this tab, or already an appointment: a second "new" adds nothing.
+      const answered = (id: string) => handedOver.current.has(id) || calendarNow.current.some((event) => event.id === appointmentIdForRequest(id));
+      const next = applyBridgedRequest(ownerLists.current, message, answered);
+      if (!next) return;
+      ownerLists.current = next;
+      if (message.kind === 'new') handedOver.current.add(message.request.id);
+      setRequests(next.requests);
+      setCustomers(next.customers);
+      if (message.kind === 'new') showToast(`New booking request from ${message.request.customerName}`, 'info');
+    });
+  }, [publicMode]);
 
   const handleNewBookingRequest = (request: AppointmentRequest): string | null => {
     const error = validateContact(request.customerName, request.customerPhone ?? '') ?? validateBookingRequest(availabilityContext, request);
@@ -271,6 +383,8 @@ export default function App() {
     const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? new Date().toISOString() };
     setRequests((previous) => [saved, ...previous]);
     setCustomers((previous) => upsertCustomer(previous, customer));
+    // On the customers' page: hand the request to the owner's tab in this browser (requestBridge.ts).
+    if (publicMode) announceRequest({ kind: 'new', request: saved });
     showToast(`Booking request saved for ${request.customerName}`);
     return null;
   };
@@ -285,6 +399,7 @@ export default function App() {
     setRequests((previous) => previous.map((item) => item.id === saved.id ? saved : item));
     setCustomers((previous) => upsertCustomer(previous, customer));
     setSubmittedRequest(saved);
+    if (publicMode) announceRequest({ kind: 'updated', request: saved });
     showToast('Booking request updated');
     return null;
   };
@@ -293,6 +408,7 @@ export default function App() {
     if (!requests.some((item) => item.id === id && item.status === 'pending')) return 'This request is no longer pending.';
     setRequests((previous) => previous.filter((item) => item.id !== id));
     setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'cancelled' } : previous);
+    if (publicMode) announceRequest({ kind: 'cancelled', id });
     showToast('Booking request cancelled. The slot is available again.');
     return null;
   };
@@ -314,6 +430,8 @@ export default function App() {
   // the page is opened with the wish to start adding, and takes it once (see CalendarView).
   // Where no appointment can be added yet, the owner lands on the Calendar, which says why.
   const [startNewAppointment, setStartNewAppointment] = useState(false);
+  // "New appointment" in the header and "+" in the tab bar on phones take the same way, from every screen.
+  const newAppointment = () => { if (setCurrentTab('calendar')) setStartNewAppointment(true); };
 
   // Study tool (shown with the research switch only): a made-up request from the booking page,
   // so a study session has a fresh request to accept or decline.
@@ -331,14 +449,14 @@ export default function App() {
     if (error) showToast(error, 'error');
   };
 
-  // "Export CSV" on Home (the current month) and in Analytics (the period chosen there) write
-  // the same report: the figures on screen and the appointments they are counted from.
-  const handleExportReport = (period?: Period) => {
+  // "Export CSV" in Analytics writes the report for the period chosen there: the figures on
+  // screen and the appointments they are counted from.
+  const handleExportReport = (period: Period) => {
     const clock = getSalonNow(companySettings.timeZone, now);
     const report = analyticsReport({
       companyName: companySettings.companyName,
       events: calendarEvents,
-      period: period ?? analyticsPeriods(clock.date).month,
+      period,
       clock,
       fallbackName: PRODUCT_NAME.toLowerCase(),
     });
@@ -384,7 +502,7 @@ export default function App() {
     showToast('Appointment removed from calendar');
   };
 
-  // Shift Plan
+  // Shifts (Team › This week)
   const handleUpdateShift = (employeeId: string, date: string, shift: { start: string; end: string } | null) => {
     const employee = employees.find((item) => item.id === employeeId);
     if (!employee || (shift && shift.end <= shift.start)) return;
@@ -425,7 +543,8 @@ export default function App() {
     showToast(`Customer ${cust.name} added`);
   };
 
-  // Deleting is a single tap on touch screens, so every delete offers an Undo instead of a confirm dialog.
+  // A delete asks first, in the form it is started from. It still offers Undo afterwards: a quick
+  // second tap on a touch screen should never cost a record.
   const restoreAt = <T extends { id: string }>(list: T[], item: T, index: number) =>
     list.some((entry) => entry.id === item.id) ? list : [...list.slice(0, index), item, ...list.slice(index)];
 
@@ -456,29 +575,6 @@ export default function App() {
     showToast('Customer updated');
   };
 
-  // Resources
-  const handleAddResource = (res: Omit<Resource, 'id'>) => {
-    const newRes: Resource = {
-      ...res,
-      id: `res-${Date.now()}`,
-    };
-    setResources([...resources, newRes]);
-    showToast(`Resource ${res.name} created`);
-  };
-
-  const handleDeleteResource = (id: string) => {
-    const index = resources.findIndex((r) => r.id === id);
-    if (index < 0) return;
-    const removed = resources[index];
-    setResources((previous) => previous.filter((r) => r.id !== id));
-    showToast(`Resource ${removed.name} removed`, 'info', { label: 'Undo', onClick: () => { setResources((previous) => restoreAt(previous, removed, index)); setToast(null); } });
-  };
-
-  const handleUpdateResource = (id: string, partial: Partial<Resource>) => {
-    setResources(previous => previous.map(item => item.id === id ? { ...item, ...partial, id } : item));
-    showToast('Resource updated');
-  };
-
   // Employees
   const handleAddEmployee = (
     emp: Omit<Employee, 'id' | 'initials' | 'name'>
@@ -495,12 +591,16 @@ export default function App() {
     showToast(`Employee ${fullName} added`);
   };
 
-  const handleDeleteEmployee = (id: string) => {
+  /** Why a person cannot be deleted right now: appointments or pending requests still use them. */
+  const employeeDeletionBlocker = (employee: Employee) => deletionDependency('employee', employee.id, employee.name, calendarEvents, requests);
+
+  // Called from the person's form in Team, after its question. The reason for a refusal goes back to the form.
+  const handleDeleteEmployee = (id: string): string | null => {
     const index = employees.findIndex((e) => e.id === id);
-    if (index < 0) return;
+    if (index < 0) return null;
     const removed = employees[index];
-    const error = deletionDependency('employee', id, removed.name, calendarEvents, requests);
-    if (error) { showToast(error, 'error'); return; }
+    const error = employeeDeletionBlocker(removed);
+    if (error) return error;
     const removedShifts = shiftOverview.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.employeeId === id);
     const removedAbsences = absences.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.employeeId === id);
     const serviceAssignments = new Map(services.filter(service => service.assignedEmployeeIds?.includes(id))
@@ -526,6 +626,7 @@ export default function App() {
       }));
       setToast(null);
     } });
+    return null;
   };
 
   const handleUpdateEmployee = (id: string, partial: Partial<Employee>) => {
@@ -589,7 +690,7 @@ export default function App() {
   ) => {
     setCompanySettings(settings);
     setBookingHours(hours);
-    showToast('Company settings successfully saved');
+    showToast('Settings saved');
   };
 
   // Conversations
@@ -620,15 +721,17 @@ export default function App() {
     openConversation(conv.id);
   };
 
+  // Taking over happens inside the open chat, and the chat says it at once ("You've taken over.
+  // The AI is paused for this chat."). A message on top would only repeat that, and on a small
+  // phone it lay over the button that hands the chat back. So only a failure gets a message.
   const handleTakeOver = (id: string) => {
     if (isLiveConversation(id)) {
-      void live.takeOver(id).then(error => showToast(error ?? 'You took over this chat. The AI is paused.', error ? 'error' : 'success'));
+      void live.takeOver(id).then(error => { if (error) showToast(error, 'error'); });
       return;
     }
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, takenOver: true } : c))
     );
-    showToast('You took over this conversation. The AI is paused.');
   };
 
   const applyConversationAppointment = (conversation: Conversation, action: AppointmentAction, fromAi: boolean): { error: string } | { saved: CalendarEvent } => {
@@ -647,36 +750,40 @@ export default function App() {
     }, appointment.id, { language: conversation.language, channel: conversation.channel, conversationId: conversation.id });
   };
 
-  /** A live chat's booking request: add it to the calendar (with the usual checks), then tell the customer. */
-  const handleConfirmLiveBooking = (id: string) => {
+  /**
+   * A live chat's booking request: add it to the calendar (with the usual checks), then tell the
+   * customer in the chat. From Home (`fromHome`) the outcome is shown on the request itself and
+   * the function returns why it could not be done; from the chat page it is shown as a message.
+   */
+  const handleConfirmLiveBooking = (id: string, fromHome = false): string | null => {
     const conversation = allConversations.find((item) => item.id === id);
-    const request = conversation?.bookingRequest;
-    if (!conversation || !request || request.status !== 'requested') return;
-    // The server sends the service's id. A chat stored before it did names the service only.
-    const service = request.serviceId !== undefined
-      ? services.find((item) => item.id === request.serviceId)
-      : services.find((item) => item.name.toLowerCase() === request.service.trim().toLowerCase());
-    if (!service) { showToast(`"${request.service}" is no longer one of your services. Reply to the customer or add the appointment in the calendar.`, 'error'); return; }
-    const appointmentId = `live-appt-${id}-${request.date}-${request.time.replace(':', '')}`;
-    // The customer asked for no particular stylist: take the first one who offers the service and is
-    // free at that time. If nobody is, the booking is checked for the first who offers it, which gives the reason.
-    const stylist = firstFreeEmployee(availabilityContext, service.id, request.date, request.time, appointmentId)
-      ?? employees.find((item) => item.status === 'Active' && isEmployeeAssignedToService(service, item));
-    if (!stylist) { showToast(`No active employee offers ${service.name}. Assign someone in Services first.`, 'error'); return; }
-    const action: AppointmentAction = {
-      type: 'book',
-      appointmentId,
-      date: request.date,
-      startTime: request.time,
-      serviceId: service.id,
-      employeeId: stylist.id,
-    };
-    const result = applyConversationAppointment({ ...conversation, customerName: chatBookingName(conversation.customerName, request.customerName) }, action, true);
-    if ('error' in result) { showToast(result.error, 'error'); return; }
-    void live.confirmBooking(id).then((sendError) => showToast(
-      sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${service.name}, ${request.time} with ${stylist.name}. The customer got the confirmation.`,
-      sendError ? 'error' : 'success',
-    ));
+    // Which service, which stylist (the first who offers it and is free) and whether it can be booked at all.
+    const plan = conversation ? planChatBooking(availabilityContext, conversation) : null;
+    if (!conversation || !plan) return fromHome ? 'This booking request is no longer waiting.' : null;
+    const refuse = (message: string) => { if (!fromHome) showToast(message, 'error'); return message; };
+    if (!plan.action || !plan.employee || !plan.endTime) return refuse(plan.refusal ?? 'This booking request cannot be accepted.');
+    const { action, booking: request, employee: stylist } = plan;
+    const customerName = chatBookingName(conversation.customerName, request.customerName);
+    const result = applyConversationAppointment({ ...conversation, customerName }, action, true);
+    if ('error' in result) return refuse(result.error);
+    if (fromHome) {
+      setRequestAnswers((previous) => withAnswer(previous, {
+        kind: 'chat', id, at: Date.now(), appointmentId: action.appointmentId, customerName, serviceName: plan.serviceName,
+        staffName: stylist.name, date: request.date, startTime: request.time, endTime: plan.endTime!, delivery: 'pending',
+      }));
+    }
+    void live.confirmBooking(id).then((sendError) => {
+      if (fromHome) {
+        setRequestAnswers((previous) => previous.map((item) => item.kind === 'chat' && item.id === id
+          ? { ...item, delivery: sendError ? 'failed' : 'done', problem: sendError ?? undefined } : item));
+        return;
+      }
+      showToast(
+        sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${plan.serviceName}, ${request.time} with ${stylist.name}. The customer got the confirmation.`,
+        sendError ? 'error' : 'success',
+      );
+    });
+    return null;
   };
 
   const handleLetAiContinue = (id: string): string | null => {
@@ -778,15 +885,14 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-[#F8F9FD] text-slate-800">
-      {/* Sidebar Navigation */}
+      {/* The menu on laptops. Phones and tablets have the tab bar and "More" below. */}
       <Sidebar
         companyName={companySettings.companyName}
         companyLocation={[companySettings.city, companySettings.country].filter(Boolean).join(', ')}
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
-        isOpenMobile={isMobileMenuOpen}
-        onCloseMobile={() => setIsMobileMenuOpen(false)}
-        pendingRequestsCount={requests.length}
+        pendingRequestsCount={openRequests}
+        needsAttentionCount={needsAttention.length}
         onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
       />
 
@@ -794,18 +900,14 @@ export default function App() {
       <div id="app-content" className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <Header
-          companyName={companySettings.companyName}
-          companyLocation={companySettings.city}
+          title={SCREEN_NAMES[currentTab]}
           {...headerAccount(employees)}
-          onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
-          isMobileMenuOpen={isMobileMenuOpen}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           customers={customers}
           appointmentRequests={requests}
           calendarEvents={calendarEvents}
           onSelectAppointment={openAppointment}
-          onOpenSettings={() => setCurrentTab('settings')}
           onSelectCustomer={(cust) => {
             navigate({ tab: 'customers', customerId: cust.id });
             setSearchQuery('');
@@ -814,13 +916,8 @@ export default function App() {
             navigate({ tab: 'home', requestId: req.id });
             setSearchQuery('');
           }}
-          needsAttentionCount={needsAttention.length}
-          needsAttentionNames={needsAttention.map((c) => c.customerName.split(' ')[0])}
-          latestAiBooking={latestAiBookedEvent}
-          needsAttentionUpdates={needsAttention.map(c => `${c.id}:${c.messages.at(-1)?.id}:${c.attentionReason}`).sort()}
-          onOpenConversations={() => openConversation()}
+          onNewAppointment={newAppointment}
           onOpenAssistant={() => setIsAssistantOpen(true)}
-
         />
 
         <PilotInterest
@@ -833,32 +930,29 @@ export default function App() {
         <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 overflow-x-clip pb-28 lg:pb-16 outline-none">
           {/* Every time in the app is the salon's. This says so, and only on a device set to another time zone. */}
           <SalonTimeNote timeZone={companySettings.timeZone} className="mx-4 mt-3 text-xs sm:mx-6 lg:mx-8" />
-          {currentTab === 'home' && rejectedRequests.length > 0 && (
-            <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-xs sm:mx-8">
-              <span>Request from {rejectedRequests.at(-1)?.request.customerName} declined.</span>
-              <button onClick={undoReject} className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-slate-100">Undo rejection</button>
-              <button aria-label="Dismiss undo rejection" onClick={() => setRejectedRequests(previous => previous.slice(0, -1))} className="ml-auto inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-slate-100"><X className="h-4 w-4" /></button>
-            </div>
-          )}
           {currentTab === 'home' && (
             <HomeView
               requests={requests}
               selectedRequestId={route.requestId ?? null}
-              onSelectRequest={id => navigate({ tab: 'home', requestId: id })}
               availabilityContext={availabilityContext}
+              customers={customers}
+              salonName={companySettings.companyName}
+              answers={requestAnswers}
               onOpenAppointment={openAppointment}
               onAcceptRequest={handleAcceptRequest}
               onRejectRequest={handleRejectRequest}
               onMoveRequest={handleMoveRequest}
+              onUndoAnswer={handleUndoAnswer}
+              onDismissAnswer={handleDismissAnswer}
+              onAcceptChatRequest={(id) => handleConfirmLiveBooking(id, true)}
               onSimulateNewRequest={handleSimulateNewRequest}
               now={now}
-              nextAppointment={nextAppointment}
-              onExportReport={() => handleExportReport()}
+              onOpenCalendar={() => { setCalendarDate(getSalonNow(companySettings.timeZone).date); setCurrentTab('calendar'); }}
               onOpenAnalytics={() => setCurrentTab('analytics')}
               conversations={allConversations}
               onOpenConversations={openConversation}
-              onOpenBookingPage={() => setCurrentTab('booking-page')}
-              onNewAppointment={() => { setStartNewAppointment(true); setCurrentTab('calendar'); }}
+              onOpenCustomer={(id) => navigate({ tab: 'customers', customerId: id })}
+              bookingLink={<BookingLinkCompact />}
             />
           )}
 
@@ -887,12 +981,22 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'shift-plan' && (
-            <ShiftPlanView
+          {currentTab === 'team' && (
+            <TeamView
+              tab={route.section as TeamSubTab | undefined}
+              onTabChange={(section) => navigate({ tab: 'team', section }, { replace: true })}
               employees={employees}
+              onAddEmployee={handleAddEmployee}
+              onUpdateEmployee={handleUpdateEmployee}
+              onDeleteEmployee={handleDeleteEmployee}
+              deletionBlocker={employeeDeletionBlocker}
+              companyName={companySettings.companyName}
               shiftOverview={shiftOverview}
               onUpdateShift={handleUpdateShift}
+              absences={absences}
+              onSaveAbsences={setAbsences}
               timeZone={companySettings.timeZone}
+              onUnsavedChange={noteUnsaved}
             />
           )}
 
@@ -908,26 +1012,8 @@ export default function App() {
               onAddCustomer={handleAddCustomer}
               onUpdateCustomer={handleUpdateCustomer}
               onDeleteCustomer={handleDeleteCustomer}
+              cannotDelete={(customer) => deletionDependency('customer', customer.id, customer.name, calendarEvents, requests)}
               onOpenChat={openChatForCustomer}
-            />
-          )}
-
-          {currentTab === 'resources' && (
-            <ResourcesView
-              resources={resources}
-              onAddResource={handleAddResource}
-              onUpdateResource={handleUpdateResource}
-              onDeleteResource={handleDeleteResource}
-            />
-          )}
-
-          {currentTab === 'employees' && (
-            <EmployeesView
-              employees={employees}
-              onAddEmployee={handleAddEmployee}
-              onUpdateEmployee={handleUpdateEmployee}
-              companyName={companySettings.companyName}
-              onDeleteEmployee={handleDeleteEmployee}
             />
           )}
 
@@ -938,6 +1024,7 @@ export default function App() {
               onAddService={handleAddService}
               onUpdateService={handleUpdateService}
               onDeleteService={handleDeleteService}
+              cannotDelete={(service) => deletionDependency('service', service.id, service.name, calendarEvents, requests)}
             />
           )}
 
@@ -978,36 +1065,51 @@ export default function App() {
 
           {currentTab === 'settings' && (
             <SettingsView
+              tab={route.section as SettingsSubTab | undefined}
+              onTabChange={(section) => navigate({ tab: 'settings', section }, { replace: true })}
               settings={companySettings}
               bookingHours={bookingHours}
               onSaveSettings={handleSaveSettings}
-              closedDates={closedDates} absences={absences} employees={employees}
-              onSaveClosedDates={setClosedDates} onSaveAbsences={setAbsences}
+              closedDates={closedDates}
+              onSaveClosedDates={setClosedDates}
+              onOpenAbsences={() => navigate({ tab: 'team', section: 'absences' })}
+              onUnsavedChange={noteUnsaved}
             />
           )}
-
-          {currentTab === 'booking-page' && bookingPage}
         </main>
 
         {/* Phones and tablets: app-style tab bar. Hidden inside an open chat, like messaging apps. */}
         <BottomNav
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
-          onOpenMore={() => setIsMobileMenuOpen(true)}
-          isMoreOpen={isMobileMenuOpen}
-          homeBadge={requests.length}
+          onNewAppointment={newAppointment}
+          onOpenMore={() => setIsMoreOpen(true)}
+          isMoreOpen={isMoreOpen}
+          homeBadge={openRequests}
           chatsBadge={needsAttention.length}
-          hideOnPhone={currentTab === 'conversations' && Boolean(route.conversationId)}
+          hideOnPhone={chatOpenOnPhone}
+        />
+        {/* What the tab bar has no room for, and who is signed in. */}
+        <MoreSheet
+          isOpen={isMoreOpen}
+          onClose={() => setIsMoreOpen(false)}
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          {...headerAccount(employees)}
+          companyName={companySettings.companyName}
+          onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
         />
       </div>
 
       {/* Feedback distinguishes a completed action from a problem or demo information.
+          Phones and tablets: just above the tab bar (4rem high, plus the phone's own bottom inset),
+          never over it and never over the page's title or buttons at the top.
           On wide screens the assistant can be docked on the right (it sets --assistant-dock to its
           width): the toast then moves left by that much and never lies over the assistant's input.
           While it is docked a long message also has to stay clear of the menu on the left (16rem),
           so it wraps earlier: min(16rem, dock) is the menu's width then, and nothing otherwise. */}
       {toast && (
-        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-24 sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap xl:right-[calc(1.25rem+var(--assistant-dock,0px))] xl:max-w-[calc(100vw-2.5rem-var(--assistant-dock,0px)-min(16rem,var(--assistant-dock,0px)))]">
+        <div ref={toastRef} role={toast.kind === 'error' ? 'alert' : 'status'} style={toastLift === null ? undefined : { bottom: toastLift }} className="fixed inset-x-4 bottom-[calc(4rem+env(safe-area-inset-bottom)+0.75rem)] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl sm:inset-x-auto sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap xl:right-[calc(1.25rem+var(--assistant-dock,0px))] xl:max-w-[calc(100vw-2.5rem-var(--assistant-dock,0px)-min(16rem,var(--assistant-dock,0px)))]">
           {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{toast.message}</span>
           {/* On phones an action gets its own row so the message keeps the full width. */}

@@ -3,7 +3,9 @@ import test from 'node:test';
 import React from 'react';
 import { PilotInterest } from '../src/components/PilotInterest';
 import { Sidebar } from '../src/components/Sidebar';
-import { AccountMenu, Header } from '../src/components/Header';
+import { Header } from '../src/components/Header';
+import { MoreSheet } from '../src/components/MoreSheet';
+import { StudyTools } from '../src/components/StudyTools';
 import { HomeView } from '../src/views/HomeView';
 import { ConversationsView } from '../src/views/ConversationsView';
 import { WAITLIST_FORM_URL } from '../src/config';
@@ -15,9 +17,9 @@ import { demoStorageKey } from '../src/useDemoState';
 import type { Conversation } from '../src/types';
 import { readableText, render, withScreen } from './renderHelpers';
 
-// Study tools (pilot banner, "Register interest", "Simulate incoming booking", the live-test strip,
-// the demo notice) are for the team's studies. A normal visitor must not see any of them; a study
-// link (?research=1) brings them back. Each test renders the same screen both ways.
+// Study tools (pilot banner, "Register interest", "Simulate incoming booking", "Reset demo data",
+// the live-test strip, the demo notice) are for the team's studies. A normal visitor must not see
+// any of them; a study link (?research=1) brings them back. Each test renders the same screen both ways.
 
 const nothing = () => {};
 
@@ -34,68 +36,79 @@ test('the pilot banner and its interest form appear only on a study link', () =>
 
 const sidebar = React.createElement(Sidebar, {
   companyName: 'Lumière Salon', companyLocation: 'Zürich, Switzerland', currentTab: 'home',
-  onSelectTab: nothing, isOpenMobile: false, onCloseMobile: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
+  onSelectTab: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
+});
+// "More" is the menu of phones and tablets. A test has no browser to open the sheet in; its content is drawn all the same.
+const more = React.createElement(MoreSheet, {
+  isOpen: true, onClose: nothing, currentTab: 'home', onSelectTab: nothing,
+  ownerName: 'Anna Weber', ownerRole: 'Owner', companyName: 'Lumière Salon', onOpenPilotInterest: nothing,
 });
 
-test('the menu offers "Register interest" only on a study link', () => {
-  assert.doesNotMatch(render(sidebar), /Register interest/);
-  assert.match(render(sidebar, { research: true }), />\s*Register interest\s*</);
+test('the menu offers "Register interest" only on a study link, on laptops and in "More" on phones', () => {
+  for (const menu of [sidebar, more]) {
+    assert.doesNotMatch(render(menu), /Register interest/);
+    assert.match(render(menu, { research: true }), />\s*Register interest\s*</);
+  }
 });
 
-test('the menu hides the unfinished Resources page and keeps what booking depends on', () => {
+test('the menu has no Rooms & equipment and keeps what booking depends on', () => {
   const html = render(sidebar);
-  assert.doesNotMatch(html, />Resources</);
-  for (const page of ['Services', 'Employees', 'Shift Plan', 'Company Settings', 'AI receptionist']) {
+  assert.doesNotMatch(html, /Resources|Rooms/);
+  for (const page of ['Services', 'Team', 'Settings', 'AI receptionist']) {
     assert.match(html, new RegExp(`>${page}<`));
   }
   // The settings of the customer-facing AI are not called "Assistant": that is the owner's helper in the header.
   assert.doesNotMatch(html, /AI Assistant/);
-  // One salon card: it takes its letter from the salon's name and leads to the salon's settings.
+  // The salon is shown once, with its letter taken from its name. It is no button and no second door to the settings.
   assert.equal(html.match(/>L</g)?.length, 1);
   assert.doesNotMatch(html, />\s*B\s*</);
-  assert.equal(html.match(/Open Company Settings/g)?.length, 2); // tooltip and screen-reader text of the one card
+  assert.doesNotMatch(html, /Open Company Settings|Company Settings/);
+  assert.equal(html.match(/>Settings</g)?.length, 2); // the heading of the group and the one entry
+  assert.equal(html.match(/<button/g)?.length, 9); // the nine screens, nothing else
 });
 
 const home: React.ComponentProps<typeof HomeView> = {
   // Monday 5 October 2026, 12:00 in Zurich, as in tests/fixedClock.ts: Home names the month it counts.
-  requests: [], selectedRequestId: null, onSelectRequest: nothing, now: new Date('2026-10-05T10:00:00Z'),
+  requests: [], selectedRequestId: null, now: new Date('2026-10-05T10:00:00Z'),
   availabilityContext: { requests: [], events: [], services: [], employees: [], bookingHours: [], shiftOverview: [] },
   onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null,
-  onSimulateNewRequest: nothing, onOpenBookingPage: nothing, onNewAppointment: nothing,
-  nextAppointment: null, onOpenAppointment: nothing,
-  onExportReport: nothing, conversations: [], onOpenConversations: nothing,
+  onSimulateNewRequest: nothing, onOpenAppointment: nothing, onOpenCalendar: nothing, onOpenAnalytics: nothing,
+  conversations: [], onOpenConversations: nothing,
 };
 
-test('an empty request list on Home reads as a product; simulating a booking is a study tool', () => {
+test('an empty inbox on Home reads as a product; simulating a booking is a study tool', () => {
   const html = render(React.createElement(HomeView, home));
-  assert.match(html, /All requests handled/);
-  assert.match(html, /New booking requests appear here as they come in\./);
-  assert.match(html, />Open booking page</);
-  assert.match(html, />New appointment</);
+  assert.match(html, /Nothing is waiting for you\./);
+  assert.match(html, /New booking requests and chats that need you appear here\./);
   assert.doesNotMatch(html, /Simulate incoming booking/);
   assert.doesNotMatch(html, /WhatsApp and Instagram/);
+  // A new appointment is started from the header and the tab bar, and the booking page is the customers' own.
+  assert.doesNotMatch(html, /New appointment|Open booking page/);
   assert.match(render(React.createElement(HomeView, home), { research: true }), /Simulate incoming booking/);
 });
 
-test('Home offers a next step only when it leads somewhere', () => {
-  const html = render(React.createElement(HomeView, { ...home, onOpenBookingPage: undefined, onNewAppointment: undefined }));
-  assert.match(html, /All requests handled/);
-  assert.doesNotMatch(html, /Open booking page/);
-  assert.doesNotMatch(html, /New appointment/);
+test('Home offers a link only when it leads somewhere, and shows the booking link card it is given', () => {
+  const html = render(React.createElement(HomeView, home));
+  assert.match(html, />Open calendar</);
+  assert.match(html, />View analytics</);
+  const bare = render(React.createElement(HomeView, { ...home, onOpenCalendar: undefined, onOpenAnalytics: undefined }));
+  assert.doesNotMatch(bare, /Open calendar|View analytics/);
+  // The compact card with the customers' booking link stands below the inbox. Without one, nothing is shown.
+  assert.doesNotMatch(html, /Your booking link/);
+  const withLink = render(React.createElement(HomeView, { ...home, bookingLink: React.createElement('section', { id: 'link-card' }, 'Your booking link') }));
+  assert.ok(withLink.indexOf('Waiting for you') < withLink.indexOf('id="link-card"'));
+  assert.ok(withLink.indexOf('id="link-card"') < withLink.indexOf('Booked by the AI'));
 });
 
 const header: React.ComponentProps<typeof Header> = {
-  companyName: 'Bella Hair Salon', companyLocation: 'St. Gallen', ownerName: 'Anna Weber', ownerRole: 'Owner',
-  onOpenMobileMenu: nothing, isMobileMenuOpen: false, searchQuery: '', onSearchChange: nothing,
+  title: 'Home', ownerName: 'Anna Weber', ownerRole: 'Owner', searchQuery: '', onSearchChange: nothing,
   customers: [], appointmentRequests: [], calendarEvents: [], onSelectAppointment: nothing,
-  needsAttentionCount: 0, needsAttentionNames: [], latestAiBooking: null,
-  onOpenConversations: nothing, onOpenSettings: nothing,
 };
 
 test('the header shows the person it is given and no checkout; the demo notice is a study tool', () => {
   const html = withScreen(() => render(React.createElement(Header, header)));
   assert.match(html, />AW</);
-  assert.match(html, />Anna</);
+  assert.match(html, />Anna Weber</);
   assert.match(html, />Owner</);
   assert.doesNotMatch(readableText(html), /POS|cash register|checkout|demo/i);
   const study = withScreen(() => render(React.createElement(Header, header), { research: true }));
@@ -103,25 +116,15 @@ test('the header shows the person it is given and no checkout; the demo notice i
   assert.match(readableText(study), /Demo\s+workspace\s+· sample data/);
 });
 
-const accountMenu = React.createElement(AccountMenu, {
-  ownerName: 'Anna Weber', ownerRole: 'Owner', companyName: 'Bella Hair Salon', companyLocation: 'St. Gallen', onOpenSettings: nothing,
-});
-
-test('the account menu names the owner and holds only entries that lead somewhere', () => {
-  const html = render(accountMenu);
-  assert.match(html, />Anna Weber</);
-  assert.match(html, />Owner · Bella Hair Salon · St\. Gallen</);
-  // One entry: Company Settings. Profile, billing, help or log-out come with their pages.
-  assert.equal(html.match(/<button/g)?.length, 1);
-  assert.match(html, />Company Settings</);
-  assert.doesNotMatch(readableText(html), /simulated|demo|this tab/i);
-});
-
-test('"Reset demo data" is offered only on a study link', () => {
-  assert.doesNotMatch(render(accountMenu), /Reset demo data/);
-  const study = render(accountMenu, { research: true });
-  assert.match(study, />Reset demo data</);
-  assert.match(study, /Demo workspace with sample data\. Changes stay in this browser tab\./);
+test('"Reset demo data" is offered only on a study link, at the end of the menu and of "More"', () => {
+  const tools = React.createElement(StudyTools, { onOpenPilotInterest: nothing });
+  assert.equal(render(tools), '');
+  for (const place of [tools, sidebar, more]) {
+    assert.doesNotMatch(readableText(render(place)), /Reset demo data|simulated|demo|this tab/i);
+    const study = render(place, { research: true });
+    assert.match(study, />Reset demo data</);
+    assert.match(study, /Demo workspace with sample data\. Changes stay in this browser tab\./);
+  }
 });
 
 const liveChat: Conversation = {

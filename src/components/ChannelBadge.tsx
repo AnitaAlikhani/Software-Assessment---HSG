@@ -1,15 +1,14 @@
 import React from 'react';
-import { Camera, Globe, MessageCircle, PhoneMissed, Send } from 'lucide-react';
+import { Camera, Globe, MessageCircle, Send } from 'lucide-react';
 
-/** Where a customer can reach the salon's assistant. "Phone" is a planned channel, never a chat. */
-export type ChannelKind = 'WhatsApp' | 'Instagram' | 'Website' | 'Telegram' | 'Phone';
+/** Where a customer can reach the salon's assistant. */
+export type ChannelKind = 'WhatsApp' | 'Instagram' | 'Website' | 'Telegram';
 
 const LOOK: Record<ChannelKind, { label: string; classes: string; Icon: typeof Globe }> = {
   WhatsApp: { label: 'WhatsApp', classes: 'bg-[#25D366] text-white', Icon: MessageCircle },
   Instagram: { label: 'Instagram', classes: 'bg-fuchsia-500 text-white', Icon: Camera },
   Telegram: { label: 'Telegram', classes: 'bg-sky-500 text-white', Icon: Send },
   Website: { label: 'Website chat', classes: 'bg-slate-700 text-white', Icon: Globe },
-  Phone: { label: 'Phone', classes: 'bg-amber-500 text-white', Icon: PhoneMissed },
 };
 
 /** The channel's name as the owner reads it, e.g. "Website chat". */

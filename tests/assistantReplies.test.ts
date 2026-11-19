@@ -47,7 +47,10 @@ test('finding 3: one person\'s time off never closes the salon, and the owner is
     assert.equal(result.reply?.proposal, undefined, message);
     assert.equal(result.reply?.language, language, message);
     // The screens are called what they are called in the app.
-    assert.match(text(result), /Company Settings.*Closed Dates and Absences.*Absences.*Shift Plan/, message);
+    // In English and in German alike: the page, then its tab, both under their own names.
+    assert.match(text(result), /Team.*Absences.*Team.*This week/, message);
+    // No screen is named that does not exist any more.
+    assert.doesNotMatch(text(result), /Company Settings|Closed Dates|Shift Plan|Booking Hours/, message);
     assert.match(text(result), language === 'de'
       ? new RegExp(`^Eine Abwesenheit für ${who ?? 'eine einzelne Person'} kann ich nicht eintragen\\. Es wurde nichts geändert, und der Salon wurde nicht geschlossen\\.`)
       : new RegExp(`^I cannot enter time off for ${who ?? 'one person'}\\. Nothing was changed, and the salon was not closed\\.`), message);
@@ -59,18 +62,18 @@ test('finding 3: one person\'s time off never closes the salon, and the owner is
   assert.deepEqual(interpret('Selina is taking Friday off', words()), { language: 'en', intent: 'absence', date: FRIDAY, employeeId: SELINA.id });
   assert.deepEqual(interpret('Luca ist morgen krank', words()), { language: 'de', intent: 'absence', date: TUESDAY, employeeId: LUCA.id });
 
-  // What the Shift Plan and the calendar hold for that person on that day is said too.
+  // What the shift plan and the calendar hold for that person on that day is said too.
   assert.deepEqual(chat().say('Selina is taking Friday off').reply?.text, [
     'I cannot enter time off for Selina. Nothing was changed, and the salon was not closed.',
-    'You enter it in Company Settings under Closed Dates and Absences (tab Absences). For a single day you can also change the shift in the Shift Plan.',
-    'In the Shift Plan Selina works from 09:00 to 18:00 on Friday, 09.10.2026.',
+    'You enter it in Team, on the tab Absences. For a single day you can also change the shift, in Team on the tab This week.',
+    'In the shift plan Selina works from 09:00 to 18:00 on Friday, 09.10.2026.',
     '1 appointment is booked with Selina that day. It stays in the calendar when you enter an absence.',
     'If the whole salon should be closed, write for example “Close Friday”.',
   ]);
   assert.deepEqual(chat().say('Luca ist morgen krank').reply?.text, [
     'Eine Abwesenheit für Luca kann ich nicht eintragen. Es wurde nichts geändert, und der Salon wurde nicht geschlossen.',
-    'Du trägst sie in den Company Settings unter Closed Dates and Absences ein (Reiter Absences). Für einen einzelnen Tag kannst du auch die Schicht im Shift Plan ändern.',
-    'Im Shift Plan hat Luca morgen (Dienstag, 06.10.2026) keine Schicht.',
+    'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Schicht ändern, unter Team im Reiter This week.',
+    'Im Schichtplan hat Luca morgen (Dienstag, 06.10.2026) keine Schicht.',
     'Wenn der ganze Salon geschlossen sein soll, schreibe zum Beispiel «Am Freitag geschlossen».',
   ]);
   const away = salon({ absences: [{ id: 'away-1', employeeId: SELINA.id, start: FRIDAY, end: FRIDAY }] });
@@ -289,11 +292,11 @@ test('a customer\'s appointments are read from the calendar, with what the calen
   }
 });
 
-test('whether the salon is open is read from the booking hours and the closed dates', () => {
+test('whether the salon is open is read from the opening hours and the closed dates', () => {
   const data = salon({ closedDates: [{ id: 'closed-x', name: 'Christmas', start: '2026-12-24', end: '2026-12-26' }] });
   assert.deepEqual(ask({ intent: 'hours', date: FRIDAY }, data).text, ['Friday, 09.10.2026: the salon is open from 09:00 to 18:00.']);
   assert.deepEqual(ask({ intent: 'hours', date: TODAY }, data).text, ['Today (Monday, 05.10.2026): the salon is open from 09:00 to 18:00.']);
-  assert.deepEqual(ask({ intent: 'hours', date: SATURDAY }, data).text, ['Saturday, 10.10.2026: the salon is closed. It is closed on Saturdays in the booking hours.']);
+  assert.deepEqual(ask({ intent: 'hours', date: SATURDAY }, data).text, ['Saturday, 10.10.2026: the salon is closed. It is closed on Saturdays in the opening hours.']);
   assert.deepEqual(ask({ intent: 'hours', date: '2026-12-24' }, data).text, ['Thursday, 24.12.2026: the salon is closed (closed date “Christmas”).']);
   assert.deepEqual(ask({ language: 'de', intent: 'hours', date: '2026-12-24' }, data).text, ['Donnerstag, 24.12.2026: Der Salon ist geschlossen (Schliesstag «Christmas»).']);
   assert.deepEqual(ask({ language: 'de', intent: 'hours', date: FRIDAY }, data).text, ['Freitag, 09.10.2026: Der Salon ist von 09:00 bis 18:00 Uhr geöffnet.']);
@@ -310,7 +313,7 @@ test('whether the salon is open is read from the booking hours and the closed da
   ]);
   // No day: the week as it is set, and the closed dates still to come.
   const weekly = ask({ intent: 'hours' }, data);
-  assert.deepEqual(weekly.text, ['The salon’s booking hours (set in Company Settings under Booking Hours):']);
+  assert.deepEqual(weekly.text, ['The salon’s opening hours (set in Settings under Opening hours):']);
   assert.deepEqual(weekly.list, [
     'Monday · 09:00–18:00', 'Tuesday · 09:00–18:00', 'Wednesday · 09:00–18:00', 'Thursday · 09:00–18:00', 'Friday · 09:00–18:00',
     'Saturday · closed', 'Sunday · closed', 'Closed date “Christmas” · 24.–26.12.2026',

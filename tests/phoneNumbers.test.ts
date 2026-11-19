@@ -205,15 +205,21 @@ test('every screen writes a number the same way, whatever spelling the record ho
   const GROUPED = '+41 79 123 45 67';
   const spellings = ['+41791234567', '0791234567', '+41 79 123 45 67', '079 123 45 67'];
   for (const stored of spellings) {
-    // Home: the request card.
+    // Home: the request's contact line, and the number to call once the request is answered.
     const request = { ...demoRequests[0], customerPhone: stored };
-    const home = render(React.createElement(HomeView, {
-      requests: [request], selectedRequestId: null, onSelectRequest: nothing, now: FIXED_NOW,
+    const homeProps: React.ComponentProps<typeof HomeView> = {
+      requests: [request], selectedRequestId: null, now: FIXED_NOW,
       availabilityContext: { requests: [request], events: demoEvents, services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts, now: FIXED_NOW, timeZone: 'Europe/Zurich' },
       onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null, onSimulateNewRequest: nothing,
-      nextAppointment: null, onOpenAppointment: nothing, onExportReport: nothing, conversations: [], onOpenConversations: nothing,
+      onOpenAppointment: nothing, conversations: [], onOpenConversations: nothing,
+    };
+    const home = render(React.createElement(HomeView, homeProps));
+    assert.match(shown(home), new RegExp(`${GROUPED.replace('+', '\\+')} · Booking page`), stored);
+    const rejected = render(React.createElement(HomeView, {
+      ...homeProps, requests: [], availabilityContext: { ...homeProps.availabilityContext, requests: [] },
+      answers: [{ kind: 'request', id: request.id, outcome: 'rejected', at: FIXED_NOW.getTime(), request, index: 0 }],
     }));
-    assert.match(shown(home), new RegExp(`Phone: ${GROUPED.replace('+', '\\+')}`), stored);
+    assert.match(rejected, new RegExp(`href="tel:\\+41791234567"[^>]*>.*?>${GROUPED.replace('+', '\\+')}<`), stored);
 
     // Calendar: the appointment's details.
     const appointment = { ...demoEvents[0], id: 'cal-phone', customerPhone: stored };

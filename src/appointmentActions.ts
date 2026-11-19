@@ -20,8 +20,25 @@ export function upsertAppointment(events: CalendarEvent[], appointment: Calendar
     : [appointment, ...events];
 }
 
+const minutesOf = (time: string): number => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+
+/**
+ * Start, end and length of a request as it was made ("10:00 - 10:30"). Null for a text that is no
+ * such span, which the app never writes but a tab stored long ago might hold.
+ */
+export function requestTimes(request: Pick<AppointmentRequest, 'timeStr'>): { start: string; end: string; minutes: number } | null {
+  const match = /^((?:[01]\d|2[0-3]):[0-5]\d)\s*-\s*((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(request.timeStr.trim());
+  if (!match) return null;
+  const minutes = minutesOf(match[2]) - minutesOf(match[1]);
+  return minutes > 0 ? { start: match[1], end: match[2], minutes } : null;
+}
+
+/** The id of the appointment that accepting a request creates. Undo finds the appointment by it. */
+export const appointmentIdForRequest = (requestId: string): string => `cal-${requestId}`;
+
 export function appointmentFromRequest(request: AppointmentRequest, services: ServiceItem[], employees: Employee[] = []): CalendarEvent {
-  const startTime = request.timeStr.split(/\s*-\s*/)[0];
+  const times = requestTimes(request);
+  const startTime = times?.start ?? request.timeStr.split(/\s*-\s*/)[0];
   const service = request.serviceId !== undefined
     ? services.find((item) => item.id === request.serviceId)
     : services.find((item) => item.name === request.serviceName);
@@ -29,9 +46,11 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
   const employee = request.employeeId !== undefined
     ? employees.find((item) => item.id === request.employeeId)
     : employees.find((item) => item.name === request.staffName);
-  const duration = service?.durationMinutes ?? 30;
+  // A request keeps the length it was made with: the customer asked for that time, also when
+  // the owner has given the service another length since.
+  const duration = times?.minutes ?? service?.durationMinutes ?? 30;
   return {
-    id: `cal-${request.id}`,
+    id: appointmentIdForRequest(request.id),
     serviceId: request.serviceId,
     employeeId: request.employeeId,
     customerName: request.customerName,

@@ -4,9 +4,9 @@ import { formatDate, formatDateShort, formatPhone, formatStoredTimeRange } from 
 import { accountOwner } from './mockData';
 
 /**
- * The account shown in the header: the person who runs the salon account, taken from the team
- * data, so a rename in Employees shows here at once. Empty texts when the team is empty; no role
- * is invented for somebody who has none.
+ * The account shown in the header and in "More": the person who runs the salon account, taken
+ * from the team data, so a rename in Team shows here at once. Empty texts when the team is empty;
+ * no role is invented for somebody who has none.
  */
 export const headerAccount = (employees: Employee[]): { ownerName: string; ownerRole: string } => {
   const owner = accountOwner(employees);
@@ -53,71 +53,3 @@ export const headerSearchDetail = (result: HeaderSearchResult): string => {
       : [result.record.serviceName, formatDate(result.record.date), result.record.startTime];
   return parts.filter(Boolean).join(' · ');
 };
-
-interface NotificationDetails {
-  id: string;
-  revision: string;
-  revisionTokens?: string[];
-  title: string;
-  detail: string;
-}
-
-export type HeaderNotification = NotificationDetails & (
-  | { kind: 'attention' }
-  | { kind: 'request'; record: AppointmentRequest }
-  | { kind: 'appointment'; record: CalendarEvent }
-);
-
-export function getHeaderNotifications(
-  requests: AppointmentRequest[],
-  needsAttentionCount: number,
-  needsAttentionNames: string[],
-  latestAiBooking: CalendarEvent | null,
-  needsAttentionRevision?: string,
-  needsAttentionUpdates?: string[],
-): HeaderNotification[] {
-  const notifications: HeaderNotification[] = [];
-  if (needsAttentionCount > 0) {
-    notifications.push({
-      kind: 'attention',
-      id: 'attention',
-      revision: needsAttentionRevision ?? JSON.stringify([needsAttentionCount, [...needsAttentionNames].sort()]),
-      revisionTokens: needsAttentionUpdates,
-      title: `${needsAttentionCount} ${needsAttentionCount === 1 ? 'chat needs' : 'chats need'} your attention`,
-      detail: `${needsAttentionNames.join(', ')} ${needsAttentionCount === 1 ? 'is' : 'are'} waiting`,
-    });
-  }
-  for (const request of requests.filter((item) => item.status === 'pending')) {
-    notifications.push({
-      kind: 'request',
-      id: `request:${request.id}`,
-      revision: JSON.stringify([request.customerName, request.serviceId, request.serviceName,
-        request.employeeId, request.staffName, request.date, request.timeStr]),
-      title: 'Appointment request',
-      detail: `${request.customerName} · ${formatDate(request.date)} · ${formatStoredTimeRange(request.timeStr)}`,
-      record: request,
-    });
-  }
-  if (latestAiBooking) {
-    notifications.push({
-      kind: 'appointment',
-      id: `appointment:${latestAiBooking.id}`,
-      revision: JSON.stringify([latestAiBooking.customerName, latestAiBooking.serviceId,
-        latestAiBooking.serviceName, latestAiBooking.employeeId, latestAiBooking.staffName,
-        latestAiBooking.date, latestAiBooking.startTime, latestAiBooking.endTime]),
-      title: `AI booked ${latestAiBooking.customerName}`,
-      detail: `${formatDate(latestAiBooking.date)} · ${latestAiBooking.startTime} · ${latestAiBooking.serviceName}`,
-      record: latestAiBooking,
-    });
-  }
-  return notifications;
-}
-
-export const notificationReadTokens = (notification: HeaderNotification): string[] =>
-  notification.revisionTokens ?? [notification.revision];
-
-export const isHeaderNotificationUnread = (
-  notification: HeaderNotification,
-  readRevisions: Record<string, string[]>,
-): boolean => notificationReadTokens(notification).some((token) =>
-  !readRevisions[notification.id]?.includes(token));

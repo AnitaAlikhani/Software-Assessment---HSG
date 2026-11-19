@@ -649,7 +649,7 @@ function close(task: AssistantTask, data: AssistantData): AssistantReply {
   if (start === end && !isOpenWeekday(data, start)) {
     return { language, text: [de
       ? `Am ${weekdayName(start, 'de')} ist der Salon nach den Öffnungszeiten sowieso geschlossen. Es gibt nichts zu ändern.`
-      : `The salon is closed on ${weekdayName(start, 'en')}s anyway (booking hours). There is nothing to change.`] };
+      : `The salon is closed on ${weekdayName(start, 'en')}s anyway (opening hours). There is nothing to change.`] };
   }
   const inPeriod = (date: string) => date >= start && date <= end;
   const appointments = data.events.filter(event => inPeriod(event.date)).length;
@@ -696,8 +696,8 @@ function reopen(task: AssistantTask, data: AssistantData): AssistantReply {
   if (closures.length === 0) {
     if (start === end && !isOpenWeekday(data, start)) {
       return { language, text: [de
-        ? `Am ${weekdayName(start, 'de')} ist der Salon nach den Öffnungszeiten geschlossen. Das änderst du in den Company Settings unter Booking Hours.`
-        : `The salon is closed on ${weekdayName(start, 'en')}s in the booking hours. You change that in Company Settings under Booking Hours.`] };
+        ? `Am ${weekdayName(start, 'de')} ist der Salon nach den Öffnungszeiten geschlossen. Das änderst du in den Settings unter Opening hours.`
+        : `The salon is closed on ${weekdayName(start, 'en')}s in the opening hours. You change that in Settings under Opening hours.`] };
     }
     return { language, text: [de
       ? `${period(start, end, language, today)} ist nicht geschlossen.`
@@ -725,7 +725,7 @@ function reopen(task: AssistantTask, data: AssistantData): AssistantReply {
       ],
       warnings: stillClosed.length > 0 ? [de
         ? `${stillClosed.map(day => weekdayName(day, 'de')).filter((name, index, all) => all.indexOf(name) === index).join(', ')}: nach den Öffnungszeiten weiterhin geschlossen.`
-        : `${stillClosed.map(day => weekdayName(day, 'en')).filter((name, index, all) => all.indexOf(name) === index).join(', ')}: still closed in the booking hours.`] : [],
+        : `${stillClosed.map(day => weekdayName(day, 'en')).filter((name, index, all) => all.indexOf(name) === index).join(', ')}: still closed in the opening hours.`] : [],
       confirmLabel: de ? 'Bestätigen' : 'Confirm',
       cancelLabel: de ? 'Abbrechen' : 'Cancel',
     },
@@ -881,7 +881,7 @@ function appointments(task: AssistantTask, data: AssistantData): AssistantReply 
 // ---------- open or closed ----------
 
 /**
- * "Are we closed on Friday?", "What time do we close on Saturday?": read from the booking hours
+ * "Are we closed on Friday?", "What time do we close on Saturday?": read from the opening hours
  * and the closed dates, the same two things the booking rules look at. It changes nothing.
  */
 function hours(task: AssistantTask, data: AssistantData): AssistantReply {
@@ -903,12 +903,12 @@ function hours(task: AssistantTask, data: AssistantData): AssistantReply {
   const weekStart = !task.date && task.fromDate ? (task.fromDate < today ? today : task.fromDate) : undefined;
   const start = task.date ?? weekStart;
   if (!start) {
-    // No day asked: the week as it is set in the booking hours, and the closed dates still to come.
+    // No day asked: the week as it is set in the opening hours, and the closed dates still to come.
     const week = daysBetween(startOfWeek(today), addDays(startOfWeek(today), 6));
     const closures = (data.closedDates ?? []).filter(closure => closure.end >= today).sort((a, b) => a.start.localeCompare(b.start)).slice(0, 3);
     return {
       language, task,
-      text: [de ? 'Die Öffnungszeiten des Salons (Booking Hours in den Company Settings):' : 'The salon’s booking hours (set in Company Settings under Booking Hours):'],
+      text: [de ? 'Die Öffnungszeiten des Salons (Opening hours in den Settings):' : 'The salon’s opening hours (set in Settings under Opening hours):'],
       list: [
         ...week.map(date => {
           const open = weekly(date);
@@ -948,7 +948,7 @@ function hours(task: AssistantTask, data: AssistantData): AssistantReply {
     : !open
       ? (de
         ? `${day}: Der Salon ${is} geschlossen. Am ${weekdayName(start, 'de')} ist er nach den Öffnungszeiten immer geschlossen.`
-        : `${day}: the salon ${is} closed. It is closed on ${weekdayName(start, 'en')}s in the booking hours.`)
+        : `${day}: the salon ${is} closed. It is closed on ${weekdayName(start, 'en')}s in the opening hours.`)
       : (de ? `${day}: Der Salon ${is} von ${open.from} bis ${open.to} Uhr geöffnet.` : `${day}: the salon ${is} open from ${open.from} to ${open.to}.`);
   return { language, task, text: [text], calendar: openCalendar(start) };
 }
@@ -957,8 +957,9 @@ function hours(task: AssistantTask, data: AssistantData): AssistantReply {
 
 /**
  * "Selina is taking Friday off": the assistant can only close the whole salon, and one person's
- * day off must never do that. It says where absences are entered, with the screens' own names,
- * and what the Shift Plan and the calendar hold for that person on that day.
+ * day off must never do that. It says where absences are entered, with the screens' own names
+ * (Team, with its tabs "Absences" and "This week"), and what the shift plan and the calendar
+ * hold for that person on that day.
  */
 function absence(task: AssistantTask, data: AssistantData): AssistantReply {
   const language = task.language;
@@ -973,8 +974,8 @@ function absence(task: AssistantTask, data: AssistantData): AssistantReply {
     const away = (data.absences ?? []).some(entry => entry.employeeId === person.id && date >= entry.start && date <= entry.end);
     const shift = data.shiftOverview.find(entry => entry.employeeId === person.id)?.shifts[date];
     if (away) facts.push(de ? `Für ${name} ist ${on} schon eine Abwesenheit eingetragen.` : `An absence is already entered for ${name} ${on}.`);
-    else if (shift) facts.push(de ? `Im Shift Plan arbeitet ${name} ${on} von ${shift.start} bis ${shift.end} Uhr.` : `In the Shift Plan ${name} works from ${shift.start} to ${shift.end} ${on}.`);
-    else facts.push(de ? `Im Shift Plan hat ${name} ${on} keine Schicht.` : `In the Shift Plan ${name} has no shift ${on}.`);
+    else if (shift) facts.push(de ? `Im Schichtplan arbeitet ${name} ${on} von ${shift.start} bis ${shift.end} Uhr.` : `In the shift plan ${name} works from ${shift.start} to ${shift.end} ${on}.`);
+    else facts.push(de ? `Im Schichtplan hat ${name} ${on} keine Schicht.` : `In the shift plan ${name} has no shift ${on}.`);
     const booked = data.events.filter(event => event.date === date &&
       (event.employeeId !== undefined ? event.employeeId === person.id : event.staffName === person.name)).length;
     if (booked > 0) {
@@ -990,8 +991,8 @@ function absence(task: AssistantTask, data: AssistantData): AssistantReply {
         ? `Eine Abwesenheit für ${name ?? 'eine einzelne Person'} kann ich nicht eintragen. Es wurde nichts geändert, und der Salon wurde nicht geschlossen.`
         : `I cannot enter time off for ${name ?? 'one person'}. Nothing was changed, and the salon was not closed.`,
       de
-        ? 'Du trägst sie in den Company Settings unter Closed Dates and Absences ein (Reiter Absences). Für einen einzelnen Tag kannst du auch die Schicht im Shift Plan ändern.'
-        : 'You enter it in Company Settings under Closed Dates and Absences (tab Absences). For a single day you can also change the shift in the Shift Plan.',
+        ? 'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Schicht ändern, unter Team im Reiter This week.'
+        : 'You enter it in Team, on the tab Absences. For a single day you can also change the shift, in Team on the tab This week.',
       ...facts,
       de
         ? 'Wenn der ganze Salon geschlossen sein soll, schreibe zum Beispiel «Am Freitag geschlossen».'
@@ -1139,7 +1140,7 @@ export function confirmProposal(proposal: AssistantProposal, language: Assistant
   const sorted = (dates: ClosedDate[]) => [...dates].sort((a, b) => a.start.localeCompare(b.start));
   if (action.kind === 'close') {
     const { start, end } = action;
-    // Company Settings refuses a second closure for exactly the same days; so does the assistant.
+    // Settings refuses a second closure for exactly the same days; so does the assistant.
     if (closedDates.some(closure => closure.start === start && closure.end === end)) {
       return { language, text: [de ? 'Das ist schon geschlossen.' : 'That is already closed.'] };
     }
@@ -1147,8 +1148,8 @@ export function confirmProposal(proposal: AssistantProposal, language: Assistant
     return {
       language, tone: 'success',
       text: [de
-        ? `Erledigt. Der Salon ist ${inPeriod(start, end, language, today)} geschlossen. Der Eintrag steht in den Company Settings unter Closed Dates and Absences.`
-        : `Done. The salon is closed ${inPeriod(start, end, language, today)}. The entry is listed in Company Settings under Closed Dates and Absences.`],
+        ? `Erledigt. Der Salon ist ${inPeriod(start, end, language, today)} geschlossen. Der Eintrag steht in den Settings unter Closed dates.`
+        : `Done. The salon is closed ${inPeriod(start, end, language, today)}. The entry is listed in Settings under Closed dates.`],
       calendar: openCalendar(start < today ? today : start),
     };
   }

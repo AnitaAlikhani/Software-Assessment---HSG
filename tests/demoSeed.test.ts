@@ -8,7 +8,7 @@ import { customerStatsFromCalendar } from '../src/customerStats';
 import { nextUpcomingAppointment } from '../src/dashboard';
 import { demoPeople, demoWindow, salonInstant } from '../src/demoSeed';
 import { createDemoWorkspace, type DemoWorkspace } from '../src/demoWorkspace';
-import { accountOwner, demoShiftPattern, initialBookingHours, initialCompanySettings, initialEmployees, initialResources, initialServices } from '../src/mockData';
+import { accountOwner, demoShiftPattern, initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData';
 import { addDays, getSalonNow, startOfWeek } from '../src/scheduling';
 import type { CalendarEvent } from '../src/types';
 import { salonContext } from '../server/ai';
@@ -457,7 +457,7 @@ test('people and contact details are invented, varied and never those of a team 
 
 test('nothing in the starting data is a placeholder, a team member\'s name or a link to somebody else\'s page', () => {
   const everything = JSON.stringify([
-    workspaceAt(FIXED_NOW), demoPeople(), initialEmployees, initialServices, initialResources, initialCompanySettings, initialBookingHours,
+    workspaceAt(FIXED_NOW), demoPeople(), initialEmployees, initialServices, initialCompanySettings, initialBookingHours,
   ]);
   for (const tell of [
     // First line: the names of the people who build this app, and the people of the earlier sample

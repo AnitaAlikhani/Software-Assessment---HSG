@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
-import { Plus, X, Trash2 } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Employee, ServiceItem } from '../types';
 import { formatMoney } from '../format';
+import { DeleteQuestion } from './DeleteQuestion';
 
 interface ServicesViewProps {
   services: ServiceItem[];
@@ -10,10 +11,16 @@ interface ServicesViewProps {
   onAddService: (srv: Omit<ServiceItem, 'id'>) => void;
   onUpdateService: (id: string, srv: Partial<ServiceItem>) => void;
   onDeleteService: (id: string) => void;
+  /**
+   * Why a service cannot be deleted at the moment (appointments or requests still use it), or
+   * null. The edit form then says so instead of asking whether to delete.
+   */
+  cannotDelete?: (service: ServiceItem) => string | null;
 }
 
-export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees, onAddService, onUpdateService, onDeleteService }) => {
+export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees, onAddService, onUpdateService, onDeleteService, cannotDelete }) => {
   const [editingService, setEditingService] = useState<ServiceItem | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
   const tableScrolls = useHorizontalOverflow(tableRef);
   const [isCreating, setIsCreating] = useState(false);
@@ -54,7 +61,13 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => { document.removeEventListener('keydown', onKeyDown); document.body.style.overflow = previousOverflow; trigger?.focus(); };
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (trigger?.isConnected) trigger.focus();
+      // The service whose "Edit" opened the form was deleted: the page's heading takes the focus.
+      else if (headingRef.current) { headingRef.current.tabIndex = -1; headingRef.current.focus({ preventScroll: true }); }
+    };
   }, [isOpen]);
 
   const startEdit = (service: ServiceItem) => {
@@ -104,7 +117,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
   return (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Services</h1>
+        <h1 ref={headingRef} className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Services</h1>
         <button onClick={startCreate} className="flex min-h-11 items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl">
           <Plus className="w-3.5 h-3.5" /><span>New Service</span>
         </button>
@@ -118,8 +131,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
           return <div key={service.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <button onClick={() => startEdit(service)} className="min-h-11 min-w-11 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button>
-                <p className="text-slate-500 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && ` (+ ${(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time)`} · {assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</p>
+                <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{service.name}</p>
+                <p className="mt-1 text-slate-500 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && ` (+ ${(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time)`} · {assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</p>
               </div>
               <span className="shrink-0 font-semibold tabular-nums">{formatMoney(service.priceCHF)}</span>
             </div>
@@ -131,10 +144,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
                   className="h-5 w-5 accent-[#5551FF]" />
                 Online booking
               </label>
-              <div className="flex items-center gap-2">
-                <button onClick={() => startEdit(service)} className="min-h-11 min-w-11 px-2 font-semibold text-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button>
-                <button onClick={() => onDeleteService(service.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${service.name}`}><Trash2 className="w-4 h-4" /></button>
-              </div>
+              {/* One way into the form. Deleting is in there too, and asks first. */}
+              <button onClick={() => startEdit(service)} className="-mr-2 min-h-11 min-w-11 rounded-lg px-2 font-semibold text-[#5551FF] hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button>
             </div>
             {unassigned && <p id={`service-${service.id}-hint`} className="text-slate-500">Assign an employee in Edit service to offer it online.</p>}
           </div>;
@@ -152,7 +163,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
             {services.map((service) => {
               const assignments = resolveAssignments(service);
               return <tr key={service.id} className="group hover:bg-slate-50">
-                <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 py-4 px-4"><button onClick={() => startEdit(service)} className="min-h-11 max-w-40 [overflow-wrap:anywhere] text-left font-semibold text-slate-900 hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button></td>
+                <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 py-4 px-4"><span className="block max-w-40 [overflow-wrap:anywhere] font-semibold text-slate-900">{service.name}</span></td>
                 <td className="py-4 px-4 text-slate-600 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && <span className="block text-[11px] text-slate-400">+ {(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time</span>}</td>
                 <td className="py-4 px-4 font-semibold tabular-nums whitespace-nowrap">{formatMoney(service.priceCHF)}</td>
                 <td className="py-4 px-4">
@@ -165,7 +176,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
                   {assignments.length === 0 && <span id={`service-${service.id}-table-hint`} className="block max-w-28 text-[10px] leading-tight text-slate-400">Assign an employee first</span>}
                 </td>
                 <td className="py-4 px-4 text-slate-500 whitespace-nowrap">{assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</td>
-                <td className="py-4 px-2 sm:px-4"><div className="flex items-center justify-end gap-2"><button onClick={() => startEdit(service)} className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button><button onClick={() => onDeleteService(service.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-500 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${service.name}`}><Trash2 className="w-4 h-4" /></button></div></td>
+                <td className="py-4 px-2 text-right sm:px-4"><button onClick={() => startEdit(service)} className="min-h-11 min-w-11 rounded-lg px-2 font-semibold text-[#5551FF] hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Edit ${service.name}`}>Edit</button></td>
               </tr>;
             })}
           </tbody>
@@ -192,6 +203,18 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
           </fieldset>
           {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{error}</p>}
           <div className="pt-4 border-t border-slate-100 flex gap-2 mt-auto"><button type="button" onClick={closeModal} className="min-h-11 flex-1 py-2 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button><button type="submit" className="min-h-11 flex-1 py-2 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl">Save</button></div>
+          {/* Deleting lives here, with the service open, and asks first. A service that appointments or requests still use says so instead. */}
+          {editingService && (
+            <div className="border-t border-slate-100 pt-3">
+              <DeleteQuestion
+                kind="service"
+                name={editingService.name}
+                consequence="It is removed from your list of services."
+                blocked={cannotDelete?.(editingService) ?? null}
+                onDelete={() => { onDeleteService(editingService.id); closeModal(); }}
+              />
+            </div>
+          )}
         </form>
       </div>}
     </div>

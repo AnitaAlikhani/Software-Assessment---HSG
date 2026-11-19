@@ -5,7 +5,6 @@ import {
   Bot,
   CalendarCheck,
   CheckCircle2,
-  Eye,
   Languages,
   Send,
   X,
@@ -19,7 +18,7 @@ import {
   ConversationStatus,
 } from '../types';
 import { conversationTimeLabel, LANGUAGE_NAMES } from '../conversationData';
-import { conversationForSelection, messageForOwner, ownerLanguageName } from '../conversationPresentation';
+import { conversationForSelection, conversationsInFilter, messageForOwner, ownerLanguageName, type ConversationFilter } from '../conversationPresentation';
 import { useDemoState } from '../useDemoState';
 import type { LiveChannels } from '../liveWhatsApp';
 import { researchMode } from '../flags';
@@ -55,8 +54,6 @@ interface ConversationsViewProps {
   /** Tests pass a fixed time. */
   now?: Date;
 }
-
-type Filter = 'all' | 'needs' | 'languages' | 'ai';
 
 const LANG_CHIP: Record<string, string> = {
   FR: 'bg-violet-100 text-violet-700',
@@ -113,10 +110,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   timeZone,
   now = new Date(),
 }) => {
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<ConversationFilter>('all');
   const [drafts, setDrafts] = useDemoState<Record<string, string>>('conversationDrafts', {});
-  const [showWhatsApp, setShowWhatsApp] = useState(false);
-  const whatsAppDialogRef = useRef<HTMLDialogElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -148,30 +143,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     };
   }, [reviewId]);
 
-  useEffect(() => {
-    const dialog = whatsAppDialogRef.current;
-    if (!dialog) return;
-    if (showWhatsApp && !dialog.open) dialog.showModal();
-    if (!showWhatsApp && dialog.open) dialog.close();
-  }, [showWhatsApp]);
-
-  useEffect(() => {
-    if (!showWhatsApp) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [showWhatsApp]);
-
-  const needsCount = conversations.filter(
-    (c) => c.status === 'needs-attention'
-  ).length;
-
-  const visible = conversations.filter((c) => {
-    if (filter === 'needs') return c.status === 'needs-attention';
-    if (filter === 'languages') return c.language !== 'EN';
-    if (filter === 'ai') return c.status === 'ai-handled';
-    return true;
-  });
+  const needsCount = conversationsInFilter(conversations, 'needs').length;
+  const visible = conversationsInFilter(conversations, filter);
 
   const selected = conversationForSelection(conversations, selectedId);
   const selectedAppointment = selected ? appointmentFor?.(selected) ?? null : null;
@@ -198,8 +171,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
     }
   }, [mobileDetailOpen, selectedId]);
 
-  // A Back gesture changes the conversation underneath an open preview or approval: close it.
-  useEffect(() => { setReviewId(null); setShowWhatsApp(false); }, [selectedId, mobileDetailOpen]);
+  // A Back gesture changes the conversation underneath an open approval: close it.
+  useEffect(() => { setReviewId(null); }, [selectedId, mobileDetailOpen]);
 
   // The message pane scrolls on wide screens: keep the newest message in view, also when the
   // banner above it changes size (take over / hand back) and when the pane itself resizes.
@@ -215,11 +188,11 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const draft = selected ? drafts[selected.id] ?? '' : '';
   const ownerLanguage = ownerLanguageName(aiSettings);
 
-  const tabs: { key: Filter; label: string }[] = [
+  // The filters carry the words of the status tags in the list below.
+  const tabs: { key: ConversationFilter; label: string }[] = [
     { key: 'all', label: 'All' },
-    { key: 'needs', label: 'Needs attention' },
-    { key: 'languages', label: 'Languages' },
-    { key: 'ai', label: 'AI handled' },
+    { key: 'needs', label: STATUS_TAG['needs-attention'].label },
+    { key: 'booked', label: STATUS_TAG.booked.label },
   ];
 
   const isTranslated = (c: Conversation) =>
@@ -337,11 +310,12 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs md:overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[600px] md:h-[calc(100dvh-7rem)] md:min-h-[480px]">
         {/* Chat list */}
         <div className={`md:col-span-4 lg:col-span-5 xl:col-span-4 min-w-0 min-h-0 border-b md:border-b-0 md:border-r border-slate-200/70 flex-col ${mobileDetailOpen ? 'hidden md:flex' : 'flex'}`}>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0 px-4 pt-3 border-b border-slate-100">
+          <div role="group" aria-label="Filter conversations" className="flex flex-wrap items-center gap-x-3 gap-y-0 px-4 pt-3 border-b border-slate-100">
             {tabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setFilter(t.key)}
+                aria-pressed={filter === t.key}
                 className={`min-h-11 min-w-11 px-1 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
                   filter === t.key
                     ? 'border-[#5551FF] text-slate-900'
@@ -454,28 +428,23 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              {/* One row on a phone: beside "View appointment" the note about the AI gives way and takes
+                  two lines. Below 360 px even that does not fit (its longest word needs the room),
+                  so there the two stand below each other. */}
+              <div className="flex flex-wrap items-center gap-2 min-[360px]:flex-nowrap">
                 <button
                   onClick={onOpenAiSettings}
                   title="Open AI receptionist settings"
-                  className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
+                  className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-1.5 rounded-xl text-left text-xs leading-tight font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
                   <Bot className="w-4 h-4 shrink-0" />
                   {/* The approval setting acts when a chat is handed back to the AI; a live chat has no such waiting reply. */}
                   {selected.takenOver ? 'AI paused in this chat' : !selected.live && aiSettings.askBeforeSending ? 'AI asks before sending' : 'AI replies automatically'}
                 </button>
-                {!selected.live && <button
-                  onClick={() => setShowWhatsApp(true)}
-                  className="flex min-h-11 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
-                >
-                  <Eye className="w-4 h-4 shrink-0 text-slate-500" aria-hidden="true" />
-                  Customer view
-                </button>}
-                {/* The way from a chat to its booking; the appointment's details lead back with "Open conversation".
-                    A little narrower than its neighbour, so that the two share a row on a 375 px phone. */}
+                {/* The way from a chat to its booking; the appointment's details lead back with "Open conversation". */}
                 {selectedAppointment && onOpenAppointment && <button
                   onClick={() => onOpenAppointment(selectedAppointment)}
-                  className="flex min-h-11 items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-[#5551FF] bg-white hover:bg-indigo-50 border border-slate-200 shadow-2xs transition-colors"
+                  className="flex min-h-11 shrink-0 items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap text-[#5551FF] bg-white hover:bg-indigo-50 border border-slate-200 shadow-2xs transition-colors"
                 >
                   <CalendarCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
                   View appointment
@@ -563,7 +532,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 <div className="w-8 h-8 rounded-full bg-[#5551FF] text-white flex items-center justify-center shrink-0">
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
-                <div className="flex-1 min-w-[8rem]">
+                {/* The one place that says the take-over worked: read out when it appears. */}
+                <div role="status" className="flex-1 min-w-[8rem]">
                   <p className="text-sm font-semibold text-slate-900">You've taken over</p>
                   <p className="text-xs text-slate-500">
                     {selected.live
@@ -684,75 +654,6 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               }}
               className="min-h-11 rounded-xl bg-[#5551FF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >Approve reply</button>
-          </div>
-        </dialog>
-      )}
-
-      {/* The chat as the customer reads it: every message in their own language. Nothing can be typed here. */}
-      {selected && (
-        <dialog
-          ref={whatsAppDialogRef}
-          aria-label={`Customer view of the chat with ${selected.customerName}`}
-          onCancel={() => setShowWhatsApp(false)}
-          onClose={() => setShowWhatsApp(false)}
-          onClick={(event) => {
-            if (event.target !== event.currentTarget) return;
-            const bounds = event.currentTarget.getBoundingClientRect();
-            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
-              setShowWhatsApp(false);
-            }
-          }}
-          className="fixed inset-0 m-auto p-0 w-[340px] max-w-[calc(100vw-2rem)] h-[640px] max-h-[calc(100dvh-2rem)] bg-[#0b141a] rounded-[2rem] border-[6px] border-slate-900 shadow-2xl overflow-hidden backdrop:bg-slate-900/50 backdrop:backdrop-blur-xs"
-        >
-          <div className="h-full min-h-0 flex flex-col">
-            <div className="flex shrink-0 items-center gap-2 px-2 py-2 bg-[#1f2c34] text-white">
-              <button
-                autoFocus
-                onClick={() => setShowWhatsApp(false)}
-                aria-label="Back to conversations"
-                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-white/10"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div
-                className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${selected.avatarColor}`}
-              >
-                {selected.initials}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate">{selected.customerName}</p>
-                <p className="text-[10px] text-white/60 truncate">{contactLine(selected)}</p>
-              </div>
-              <button
-                onClick={() => setShowWhatsApp(false)}
-                aria-label="Close"
-                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-white/10"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2">
-              <p className="text-center text-[10px] text-white/50 pb-1">
-                {`How ${selected.customerName.split(' ')[0]} sees this chat`}
-              </p>
-              {selected.messages.map((m) => {
-                const mine = m.sender !== 'customer';
-                return (
-                  <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[82%] min-w-0 [overflow-wrap:anywhere] rounded-xl px-3 py-2 text-[13px] text-white leading-snug ${
-                        mine ? selected.channel === 'Instagram' ? 'bg-fuchsia-700' : 'bg-[#005c4b]' : 'bg-[#202c33]'
-                      }`}
-                    >
-                      {m.original}
-                      <span className="block text-[9px] text-white/50 text-right mt-0.5">
-                        {m.time}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </dialog>
       )}

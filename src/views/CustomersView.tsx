@@ -1,21 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Search,
-  SlidersHorizontal,
   Download,
   Plus,
-  Trash2,
   X,
   MessageSquare,
 } from 'lucide-react';
 import { CalendarEvent, Customer } from '../types';
 import { createCsv } from '../csv';
 import { customerStatsFromCalendar, emptyCustomerStats } from '../customerStats';
+import { CUSTOMER_SORT_OPTIONS, customerSortValue, nextCustomerSort, sortCustomers, type CustomerSort, type CustomerSortKey } from '../customerSort';
 import { validateOptionalContact, validatePersonName } from '../managementValidation';
 import { formatDate } from '../scheduling';
 import { customerMatches } from '../bookingData';
 import { formatPhone, normalizePhone } from '../format';
+import { DeleteQuestion } from './DeleteQuestion';
 
 interface CustomersViewProps {
   customers: Customer[];
@@ -31,11 +34,19 @@ interface CustomersViewProps {
   onAddCustomer: (customer: Omit<Customer, 'id' | 'initials'>) => void;
   onUpdateCustomer: (id: string, customer: Partial<Customer>) => void;
   onDeleteCustomer: (id: string) => void;
+  /**
+   * Why a customer cannot be deleted at the moment (appointments or requests still use the
+   * record), or null. The edit form then says so instead of asking whether to delete.
+   */
+  cannotDelete?: (customer: Customer) => string | null;
   onOpenChat?: (customerId: string) => void;
 }
 
 /** The list grows by this many customers per "Show more". */
 const PAGE_SIZE = 25;
+
+/** One set of columns for the header and every row: name, email, phone, language, last visit, next appointment, visits, chat. */
+const COLUMNS = 'grid grid-cols-[170px_minmax(100px,1fr)_130px_76px_124px_168px_64px_44px]';
 
 /** Shown in place of a phone number for someone who is only known from a chat. */
 const reachedVia = (customer: Customer): string | null =>
@@ -57,17 +68,18 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   onAddCustomer,
   onUpdateCustomer,
   onDeleteCustomer,
+  cannotDelete,
   onOpenChat,
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const tableRef = useRef<HTMLDivElement>(null);
   const tableScrolls = useHorizontalOverflow(tableRef);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formError, setFormError] = useState('');
-  const [showOptions, setShowOptions] = useState(false);
-  const [languageFilter, setLanguageFilter] = useState('all');
-  const [sortOrder, setSortOrder] = useState('recent');
+  // The list opens as it is kept (most recent contact first) until the owner chooses an order.
+  const [sort, setSort] = useState<CustomerSort>(null);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -86,6 +98,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       dialog?.close();
       document.body.style.overflow = previousOverflow;
       if (trigger?.isConnected) trigger.focus();
+      // The customer whose name opened the form was deleted: the page's heading takes the focus.
+      else if (headingRef.current) { headingRef.current.tabIndex = -1; headingRef.current.focus({ preventScroll: true }); }
     };
   }, [showAddModal]);
 
@@ -102,13 +116,13 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
   // A phone number is found in any spelling: "079 123", "+41 79 123" and "+4179123" are the same search.
-  const filteredCustomers = (selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter(
-    (c) => customerMatches(c, filterQuery)
-  )).filter((customer) => languageFilter === 'all' || customer.language === languageFilter).sort((a, b) =>
-    sortOrder === 'name' ? a.name.localeCompare(b.name) : sortOrder === 'bookings' ? statsOf(b).visits - statsOf(a).visits : 0);
+  const filteredCustomers = sortCustomers(
+    selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter((c) => customerMatches(c, filterQuery)),
+    statsOf, sort,
+  );
   // A long list opens with its first 25 customers; "Show more" adds the next 25.
   const [shownCount, setShownCount] = useState(PAGE_SIZE);
-  useEffect(() => { setShownCount(PAGE_SIZE); }, [filterQuery, languageFilter, sortOrder, selectedCustomerId]);
+  useEffect(() => { setShownCount(PAGE_SIZE); }, [filterQuery, sort, selectedCustomerId]);
   const shownCustomers = filteredCustomers.slice(0, shownCount);
   const hiddenCount = filteredCustomers.length - shownCustomers.length;
   const showMore = hiddenCount > 0 && (
@@ -116,6 +130,30 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       Show {Math.min(PAGE_SIZE, hiddenCount)} more
     </button>
   );
+  // A link to one customer says in its own line when that customer is gone; an empty list says why it is empty.
+  const emptyText = selectedCustomerId ? '' : filterQuery ? `No customers found matching "${filterQuery}"` : 'No customers yet.';
+
+  /**
+   * A column header that sorts the list. A real button, so the keyboard reaches it; the arrow
+   * shows the direction, and screen readers hear it from aria-sort on the header. Above a column
+   * of numbers the arrow stands in front, so the word ends where the numbers end.
+   */
+  const sortHeader = (key: CustomerSortKey, label: string, { cell = '', numbers = false } = {}) => {
+    const direction = sort?.key === key ? sort.direction : undefined;
+    const Arrow = direction === 'ascending' ? ArrowUp : direction === 'descending' ? ArrowDown : ArrowUpDown;
+    return (
+      <div role="columnheader" aria-sort={direction} className={['flex', numbers && 'justify-end', cell].filter(Boolean).join(' ')}>
+        <button
+          type="button"
+          onClick={() => setSort((current) => nextCustomerSort(current, key))}
+          className={['-my-3.5 inline-flex min-h-11 items-center gap-1 rounded-lg font-semibold hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF]', numbers && 'flex-row-reverse', direction && 'text-slate-900'].filter(Boolean).join(' ')}
+        >
+          {label}
+          <Arrow aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${direction ? 'text-[#5551FF]' : 'text-slate-400'}`} />
+        </button>
+      </div>
+    );
+  };
 
   const openEditor = (customer: Customer | null = null) => {
     setEditingCustomer(customer);
@@ -148,6 +186,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     const headers = ['Name', 'Email', 'Phone', 'Language', 'Last visit', 'Next appointment', 'Visits'];
     // A file carries dates as data (YYYY-MM-DD), like the appointment export, so a spreadsheet
     // reads them as dates in every language. Every phone number is written the same way.
+    // The rows are the customers that match the filter, in the order chosen for the list.
     const rows = filteredCustomers.map((c) => {
       const { lastVisit, nextAppointment, visits } = statsOf(c);
       return [
@@ -174,7 +213,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+        <h1 ref={headingRef} className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
           Customers
         </h1>
 
@@ -191,11 +230,6 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               className="min-w-0 min-h-11 text-base sm:text-sm w-full pl-9 pr-3 py-2 bg-slate-100/90 rounded-xl border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden text-slate-700 placeholder-slate-400"
             />
           </div>
-
-          <button onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="customer-options" className="flex min-h-11 items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
-            <span>Options</span>
-          </button>
 
           <button
             onClick={handleExportCSV}
@@ -216,13 +250,6 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         </div>
       </div>
 
-      {showOptions && <div id="customer-options" className="flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 text-xs">
-        <label className="flex min-w-0 flex-col gap-1 font-semibold text-slate-700">Language<select value={languageFilter} onChange={(event) => setLanguageFilter(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 px-3 text-base sm:text-sm"><option value="all">All languages</option>{['EN', 'FR', 'DE', 'IT'].map((language) => <option key={language}>{language}</option>)}</select></label>
-        <label className="flex min-w-0 flex-col gap-1 font-semibold text-slate-700">Sort by<select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="min-h-11 rounded-lg border border-slate-200 px-3 text-base sm:text-sm"><option value="recent">Default order</option><option value="name">Name A–Z</option><option value="bookings">Most visits</option></select></label>
-        <button onClick={() => { setLanguageFilter('all'); setSortOrder('recent'); setFilterQuery(''); onClearSelection(); }} className="min-h-11 px-3 font-semibold text-[#5551FF]">Reset filters</button>
-        <p className="w-full text-slate-500">CSV export includes all customers that match the filter, in this order.</p>
-      </div>}
-
       {selectedCustomerId && <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-slate-700">
         <span>{selectedCustomer ? `Showing ${selectedCustomer.name}` : 'This customer is no longer available.'}</span>
         <button onClick={() => { setFilterQuery(''); onClearSelection(); }} className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-indigo-100/60">View all customers</button>
@@ -230,6 +257,20 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
       {/* Phones: one card per customer so every field is readable without sideways scrolling */}
       <div className="space-y-2 md:hidden" aria-label="Customers">
+        {/* Cards have no column headers to sort by: one list sets the order instead. A link to one customer needs none. */}
+        {!selectedCustomerId && (
+          <div className="flex items-center gap-3 pb-1">
+            <label htmlFor="customer-sort" className="shrink-0 text-xs font-semibold text-slate-600">Sort by</label>
+            <select
+              id="customer-sort"
+              value={customerSortValue(sort)}
+              onChange={(event) => setSort(CUSTOMER_SORT_OPTIONS.find((option) => option.value === event.target.value)?.sort ?? null)}
+              className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-[#5551FF] focus:outline-hidden"
+            >
+              {CUSTOMER_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
+        )}
         {shownCustomers.map((cust) => (
           <div key={cust.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
             <div className="flex items-center gap-3">
@@ -238,13 +279,6 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               </div>
               <button onClick={() => openEditor(cust)} className="min-h-11 min-w-0 flex-1 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Edit ${cust.name}`} title={`Edit ${cust.name}`}>{cust.name}</button>
               <span className={`shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>{cust.language}</span>
-              <button
-                onClick={() => onDeleteCustomer(cust.id)}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
-                aria-label={`Delete ${cust.name}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
             </div>
             <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
               <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{cust.email || '—'}</dd>
@@ -256,8 +290,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             {onOpenChat && customersWithChat?.has(cust.id) && <button onClick={() => onOpenChat(cust.id)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg px-3 font-semibold text-[#5551FF] hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Open conversation with ${cust.name}`}><MessageSquare className="h-4 w-4" />Open conversation</button>}
           </div>
         ))}
-        {filteredCustomers.length === 0 && (
-          <p className="rounded-2xl border border-slate-200/80 bg-white py-10 text-center text-xs text-slate-400">No customers found matching "{filterQuery}"</p>
+        {filteredCustomers.length === 0 && emptyText && (
+          <p className="rounded-2xl border border-slate-200/80 bg-white py-10 text-center text-xs text-slate-400">{emptyText}</p>
         )}
         {filteredCustomers.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 px-1 pt-2 text-xs text-slate-500">
@@ -267,30 +301,32 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         )}
       </div>
 
-      {/* Customers Table matching Figma Page 14 */}
-      {tableScrolls && <p id="customers-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see contact details and actions. Names stay visible.</p>}
+      {/* Wide screens: a table. The headers of name, last visit, next appointment and visits sort it. */}
+      {tableScrolls && <p id="customers-scroll-hint" className="hidden text-xs text-slate-500 md:block">Swipe horizontally to see contact details and visits. Names stay visible.</p>}
       <div ref={tableRef} role="region" aria-label="Customers" aria-describedby={tableScrolls ? 'customers-scroll-hint' : undefined} tabIndex={tableScrolls ? 0 : undefined} className="relative hidden max-w-full bg-white rounded-2xl md:rounded-b-none border border-slate-200/80 shadow-xs overflow-x-auto focus-visible:outline-2 focus-visible:outline-[#5551FF] md:block">
-        <div className="min-w-[900px]">
+        <div role="table" aria-label="Customers" className="min-w-[900px]">
           {/* Header Row */}
-          <div className="grid grid-cols-[170px_minmax(100px,1fr)_130px_76px_124px_168px_124px] border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-2 sm:pr-6 bg-slate-50">
-            <div className="sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
-            <div>Email</div>
-            <div>Phone</div>
-            <div className="text-center">Language</div>
-            <div>Last visit</div>
-            <div>Next appointment</div>
-            <div className="text-right">Visits / Actions</div>
+          <div role="row" className={`${COLUMNS} border-b border-slate-100 text-xs font-semibold text-slate-500 py-3.5 pr-2 sm:pr-6 bg-slate-50`}>
+            {sortHeader('name', 'Name', { cell: 'sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3' })}
+            <div role="columnheader">Email</div>
+            <div role="columnheader">Phone</div>
+            <div role="columnheader" className="text-center">Language</div>
+            {sortHeader('lastVisit', 'Last visit')}
+            {sortHeader('nextAppointment', 'Next appointment')}
+            {sortHeader('visits', 'Visits', { numbers: true })}
+            <div role="columnheader"><span className="sr-only">Conversation</span></div>
           </div>
 
           {/* Body Rows */}
-          <div className="divide-y divide-slate-100">
+          <div role="rowgroup" className="divide-y divide-slate-100">
             {shownCustomers.map((cust) => (
               <div
                 key={cust.id}
-                className="grid grid-cols-[170px_minmax(100px,1fr)_130px_76px_124px_168px_124px] items-center py-3.5 pr-2 sm:pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group"
+                role="row"
+                className={`${COLUMNS} items-center py-3.5 pr-2 sm:pr-6 bg-white hover:bg-slate-50 transition-colors text-xs text-slate-700 group`}
               >
                 {/* Name with initials circle */}
-                <div className="sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">
+                <div role="cell" className="sticky left-0 z-10 flex items-center gap-3 self-stretch bg-white group-hover:bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
@@ -298,53 +334,39 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 </div>
 
                 {/* Email */}
-                <div className="text-slate-600 truncate pr-2" title={cust.email}>{cust.email || '—'}</div>
+                <div role="cell" className="text-slate-600 truncate pr-2" title={cust.email}>{cust.email || '—'}</div>
 
                 {/* Phone, or how a chat-only customer reached the salon */}
                 {cust.phone
-                  ? <div className="text-slate-600 tabular-nums truncate pr-2" title={formatPhone(cust.phone)}>{formatPhone(cust.phone)}</div>
-                  : <div className="text-slate-500 truncate">{reachedVia(cust) ?? '—'}</div>}
+                  ? <div role="cell" className="text-slate-600 tabular-nums truncate pr-2" title={formatPhone(cust.phone)}>{formatPhone(cust.phone)}</div>
+                  : <div role="cell" className="text-slate-500 truncate">{reachedVia(cust) ?? '—'}</div>}
 
                 {/* Language Tag */}
-                <div className="flex justify-center">
+                <div role="cell" className="flex justify-center">
                   <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>
                     {cust.language}
                   </span>
                 </div>
 
                 {/* Last visit and next appointment, both read from the calendar */}
-                <div className="text-slate-500 truncate pr-2" title={lastVisitOf(cust)}>{lastVisitOf(cust) || '—'}</div>
-                <div className="text-slate-500 truncate pr-2" title={nextAppointmentOf(cust)}>{nextAppointmentOf(cust) || '—'}</div>
+                <div role="cell" className="text-slate-500 truncate pr-2" title={lastVisitOf(cust)}>{lastVisitOf(cust) || '—'}</div>
+                <div role="cell" className="text-slate-500 truncate pr-2" title={nextAppointmentOf(cust)}>{nextAppointmentOf(cust) || '—'}</div>
 
-                {/* Visits, chat & trash */}
-                <div className="flex items-center justify-end gap-1">
-                  <span className="font-semibold text-slate-800 tabular-nums">
-                    {statsOf(cust).visits}
-                  </span>
-                  {/* Without a chat the button's place stays empty, so the visit counts line up. */}
-                  {onOpenChat && customersWithChat?.has(cust.id)
-                    ? <button onClick={() => onOpenChat(cust.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-[#5551FF]" aria-label={`Open conversation with ${cust.name}`} title="Open conversation"><MessageSquare className="h-4 w-4" /></button>
-                    : <span aria-hidden="true" className="h-11 w-11 shrink-0" />}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteCustomer(cust.id);
-                    }}
-                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
-                    title="Delete customer"
-                    aria-label={`Delete ${cust.name}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                {/* Visits, under their header */}
+                <div role="cell" className="text-right font-semibold text-slate-800 tabular-nums">{statsOf(cust).visits}</div>
+
+                {/* The way to the customer's chat. Without a chat the cell stays empty. */}
+                <div role="cell" className="flex justify-end">
+                  {onOpenChat && customersWithChat?.has(cust.id) && <button onClick={() => onOpenChat(cust.id)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-[#5551FF]" aria-label={`Open conversation with ${cust.name}`} title="Open conversation"><MessageSquare className="h-4 w-4" /></button>}
                 </div>
               </div>
             ))}
 
           </div>
         </div>
-        {filteredCustomers.length === 0 && (
+        {filteredCustomers.length === 0 && emptyText && (
           <div className="py-12 text-center text-xs text-slate-400">
-            No customers found matching "{filterQuery}"
+            {emptyText}
           </div>
         )}
 
@@ -444,6 +466,19 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 Save Customer
               </button>
             </div>
+
+            {/* Deleting lives here, with the customer open, and asks first: a bin in every row of the list was one slip away. */}
+            {editingCustomer && (
+              <div className="border-t border-slate-100 pt-3">
+                <DeleteQuestion
+                  kind="customer"
+                  name={editingCustomer.name}
+                  consequence="Their contact details are removed from your customer list."
+                  blocked={cannotDelete?.(editingCustomer) ?? null}
+                  onDelete={() => { onDeleteCustomer(editingCustomer.id); setShowAddModal(false); }}
+                />
+              </div>
+            )}
           </form>
         </dialog>
       )}

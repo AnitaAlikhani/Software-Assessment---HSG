@@ -76,7 +76,9 @@ export const createDemoRequests = (
       createdAt,
       staffName: employee.name,
       channel: plan.channel,
-      isAiBooked: true,
+      // They come from the booking page and wait for the owner: nothing here was booked by the AI.
+      // What the AI collects waits in its chat (see src/inbox.ts) and counts as its booking once confirmed.
+      isAiBooked: false,
       status: 'pending',
     });
   });

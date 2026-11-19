@@ -317,7 +317,7 @@ test('closing a day shows what is booked on it and saves through the Settings se
 
   const done = confirmProposal(reply.proposal!, 'en', state.data, handlers);
   assert.equal(done.tone, 'success');
-  assert.match(said(done), /^Done\. The salon is closed on Friday, 09\.10\.2026\. The entry is listed in Company Settings/);
+  assert.match(said(done), /^Done\. The salon is closed on Friday, 09\.10\.2026\. The entry is listed in Settings under Closed dates\.$/);
   assert.equal(state.closures.length, 1);
   assert.deepEqual(state.closures[0].map(({ name, start, end }) => ({ name, start, end })), [{ name: 'Closed', start: FRIDAY, end: FRIDAY }]);
   assert.match(state.closures[0][0].id, /^closed-/);
@@ -339,7 +339,7 @@ test('closing a day shows what is booked on it and saves through the Settings se
   assert.equal(ask({ intent: 'close', date: '2026-10-01' }).tone, 'problem');
   assert.equal(ask({ intent: 'close' }).asked, 'date');
 
-  // Several days in one closure, kept in date order like in Company Settings.
+  // Several days in one closure, kept in date order like in Settings.
   const holidays = conversation(state).say('We are closed from 24 December to 2 January')!;
   assert.deepEqual(holidays.proposal?.rows[0], { label: 'When', value: 'Thursday, 24.12.2026 to Saturday, 02.01.2027 (10 days)' });
   assert.match(said(confirmProposal(holidays.proposal!, 'en', state.data, handlers)),
@@ -370,7 +370,7 @@ test('opening a day again removes the closure or shortens it', () => {
   assert.equal(new Set(state.data.closedDates?.map(closure => closure.id)).size, 2);
 
   assert.match(said(conversation(state).say('Open Friday again')!), /^Friday, 09\.10\.2026 is not closed\.$/);
-  assert.match(said(conversation(state).say('Open Saturday again')!), /closed on Saturdays in the booking hours/);
+  assert.match(said(conversation(state).say('Open Saturday again')!), /closed on Saturdays in the opening hours\. You change that in Settings under Opening hours\./);
 });
 
 test('a cancellation goes through the Calendar handler and frees the time', () => {

@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseRoute, routeHash } from '../src/navigation';
-import { mostRecentAiAppointment, nextUpcomingAppointment } from '../src/dashboard';
-import { initialServices } from '../src/mockData';
-import { demoEvents, demoRequests } from './fixedClock';
-import { appointmentFromRequest, upsertAppointment } from '../src/appointmentActions';
+import { MENU_GROUPS, MORE_TABS, SCREEN_NAMES, SETTINGS_TABS, TAB_BAR_TABS, TEAM_TABS, isOldAddress, parseRoute, routeForTab, routeHash } from '../src/navigation';
+import { nextUpcomingAppointment } from '../src/dashboard';
+import { demoEvents } from './fixedClock';
 
-test('search and notification routes retain exact record IDs across navigation', () => {
+test('search routes retain exact record IDs across navigation', () => {
   for (const route of [
     { tab: 'home' as const, requestId: 'req-2' },
     { tab: 'customers' as const, customerId: 'customer & 2' },
@@ -17,8 +15,75 @@ test('search and notification routes retain exact record IDs across navigation',
 
 test('unknown routes fall back and unrelated selection IDs are ignored', () => {
   assert.deepEqual(parseRoute('#/missing'), { tab: 'home' });
+  assert.deepEqual(parseRoute('#/constructor'), { tab: 'home' });
   assert.deepEqual(parseRoute('#/customers?appointmentId=cal-2'), { tab: 'customers' });
   assert.deepEqual(parseRoute(''), { tab: 'home' });
+});
+
+test('the menu has nine screens in three groups, each under one name in sentence case', () => {
+  assert.deepEqual(MENU_GROUPS.map((group) => [group.heading, group.tabs.map((tab) => SCREEN_NAMES[tab])]), [
+    [undefined, ['Home', 'Calendar', 'Conversations', 'Customers']],
+    ['Salon', ['Team', 'Services', 'Analytics']],
+    ['Settings', ['AI receptionist', 'Settings']],
+  ]);
+  // Every screen is in the menu exactly once, and no two share a name.
+  const inMenu = MENU_GROUPS.flatMap((group) => group.tabs);
+  assert.deepEqual([...inMenu].sort(), Object.keys(SCREEN_NAMES).sort());
+  assert.equal(new Set(Object.values(SCREEN_NAMES)).size, 9);
+  // Sentence case: one capital at the start, except for the abbreviation "AI".
+  for (const name of Object.values(SCREEN_NAMES)) assert.match(name, /^(AI )?[A-Z]?[a-z]+( [a-z]+)*$/, name);
+  // What went: the booking page preview, the shift plan and the employees as screens of their own, and the rooms.
+  assert.doesNotMatch(Object.values(SCREEN_NAMES).join('|'), /Booking|Shift|Employees|Rooms|Company/);
+});
+
+test('the tab bar on phones opens three screens and "More" lists exactly the other six', () => {
+  assert.deepEqual(TAB_BAR_TABS, ['home', 'calendar', 'conversations']);
+  assert.deepEqual(MORE_TABS.map((tab) => SCREEN_NAMES[tab]), ['Customers', 'Team', 'Services', 'Analytics', 'AI receptionist', 'Settings']);
+  // Together they reach every screen: one tap from the bar, two through "More".
+  assert.deepEqual([...TAB_BAR_TABS, ...MORE_TABS].sort(), Object.keys(SCREEN_NAMES).sort());
+  assert.ok(MORE_TABS.every((tab) => !TAB_BAR_TABS.includes(tab)));
+});
+
+test('Team and Settings keep their open tab in the address, and a page opens on its first tab', () => {
+  assert.deepEqual(TEAM_TABS.map((tab) => tab.label), ['People', 'This week', 'Absences']);
+  assert.deepEqual(SETTINGS_TABS.map((tab) => tab.label), ['Salon', 'Opening hours', 'Closed dates', 'Online booking']);
+  for (const route of [
+    { tab: 'team' as const, section: 'week' as const },
+    { tab: 'team' as const, section: 'absences' as const },
+    { tab: 'settings' as const, section: 'hours' as const },
+    { tab: 'settings' as const, section: 'online-booking' as const },
+  ]) assert.deepEqual(parseRoute(routeHash(route)), route);
+  assert.equal(routeHash({ tab: 'team', section: 'week' }), '#/team?tab=week');
+  assert.equal(routeHash({ tab: 'settings', section: 'online-booking' }), '#/settings?tab=online-booking');
+  // The first tab needs no mark: the plain address is the page.
+  assert.equal(routeHash({ tab: 'team', section: 'people' }), '#/team');
+  assert.equal(routeHash({ tab: 'settings', section: 'salon' }), '#/settings');
+  assert.deepEqual(parseRoute('#/team?tab=people'), { tab: 'team' });
+  assert.deepEqual(parseRoute('#/team'), { tab: 'team' });
+  // A tab that the page does not have, or that belongs to the other page, is ignored.
+  assert.deepEqual(parseRoute('#/team?tab=hours'), { tab: 'team' });
+  assert.deepEqual(parseRoute('#/settings?tab=week'), { tab: 'settings' });
+  assert.deepEqual(parseRoute('#/calendar?tab=week'), { tab: 'calendar' });
+  assert.equal(routeHash({ tab: 'calendar', section: 'week' }), '#/calendar');
+});
+
+test('the addresses of screens that moved lead to their new place', () => {
+  const leadsTo = (old: string) => routeHash(parseRoute(old));
+  assert.equal(leadsTo('#/employees'), '#/team');
+  assert.equal(leadsTo('#/shift-plan'), '#/team?tab=week');
+  assert.equal(leadsTo('#/booking-page'), '#/settings?tab=online-booking');
+  assert.equal(leadsTo('#/resources'), '#/home');
+  // Also when something is attached to the old address.
+  assert.equal(leadsTo('#/shift-plan?week=2026-10-05'), '#/team?tab=week');
+  for (const old of ['#/employees', '#/shift-plan', '#/booking-page', '#/resources', '#resources']) assert.equal(isOldAddress(old), true, old);
+  for (const current of ['', '#/home', '#/team', '#/team?tab=week', '#/settings?tab=online-booking', '#/missing', '#/constructor']) assert.equal(isOldAddress(current), false, current);
+  // A part of the app that still asks for a screen by its old name gets the new place too.
+  assert.deepEqual(routeForTab('booking-page'), { tab: 'settings', section: 'online-booking' });
+  assert.deepEqual(routeForTab('shift-plan'), { tab: 'team', section: 'week' });
+  assert.deepEqual(routeForTab('customers'), { tab: 'customers' });
+  // The answer is a route of its own each time: changing it does not change where the address leads.
+  routeForTab('employees').tab = 'home';
+  assert.deepEqual(parseRoute('#/employees'), { tab: 'team' });
 });
 
 test('next appointment is derived from the earliest upcoming calendar record', () => {
@@ -41,9 +106,3 @@ test('next appointment uses salon timezone across midnight and does not mutate c
   assert.equal(events[0].id, 'tomorrow');
 });
 
-test('accepting an AI request replaces the previous AI booking notification target', () => {
-  const accepted = appointmentFromRequest(demoRequests[0], initialServices);
-  const calendar = upsertAppointment(demoEvents, accepted);
-  assert.equal(mostRecentAiAppointment(calendar)?.id, accepted.id);
-  assert.notEqual(mostRecentAiAppointment(calendar.filter(event => event.id !== accepted.id))?.id, accepted.id);
-});

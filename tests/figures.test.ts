@@ -107,10 +107,10 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
 
 const home = (events: CalendarEvent[], conversations: Conversation[] = demoConversations, requests = demoRequests) =>
   render(React.createElement(HomeView, {
-    requests, selectedRequestId: null, onSelectRequest: nothing, now: FIXED_NOW,
+    requests, selectedRequestId: null, now: FIXED_NOW,
     availabilityContext: { requests, events, services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts, now: FIXED_NOW, timeZone: ZONE },
     onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null, onSimulateNewRequest: nothing,
-    nextAppointment: null, onOpenAppointment: nothing, onExportReport: nothing, onOpenAnalytics: nothing,
+    onOpenAppointment: nothing, onOpenAnalytics: nothing,
     conversations, onOpenConversations: nothing,
   }));
 
@@ -128,7 +128,9 @@ const homeNumbers = (html: string) => {
 
 /** The numbers a person reads in Analytics, which opens on "This month". */
 const analyticsNumbers = (html: string) => {
-  const page = text(html);
+  // Analytics is one page: the appointments of the period stand in a section of their own, and
+  // only that section is read here. The chats below it are no figures of the period.
+  const page = text(/<section aria-label="Appointments"[^>]*>(.*?)<\/section>/s.exec(html)?.[1] ?? '');
   const headline = /(\d+) appointments? ([^·]+?)(?: · (\d+) so far, (\d+) still to come| · all still to come)? (?:0 |No appointments|Customers with)/.exec(page);
   const cards = /Customers with appointments (\d+) Booked by AI (\d+) (?:(\d+%) of appointments )?Other bookings (\d+)/.exec(page);
   assert.ok(headline && cards, 'Analytics shows its headline and its three figures');
@@ -296,8 +298,8 @@ const liveChat = (id: string, partial: Partial<Conversation> = {}): Conversation
   ...partial,
 });
 
-test('Home\'s chat card counts live chats as the header does and shows the newest that wait', () => {
-  const waitingLive = liveChat('one', { status: 'needs-attention', attentionReason: 'The customer asked for a discount.', languageLabel: 'Spanish' });
+test('Home\'s inbox lists every chat that waits, live ones included, and counts them with the requests', () => {
+  const waitingLive = liveChat('one', { status: 'needs-attention', attentionReason: 'The customer asked for a discount.', languageLabel: 'Spanish', lastMessageAt: '2026-10-05T09:59:00Z' });
   // As the app joins them: live chats first, then the others.
   const all = [waitingLive, liveChat('two'), ...demoConversations];
   const sampleWaiting = demoConversations.filter((chat) => chat.status === 'needs-attention');
@@ -305,26 +307,35 @@ test('Home\'s chat card counts live chats as the header does and shows the newes
   const waiting = conversationsWaiting(all);
   assert.deepEqual(waiting.map((chat) => chat.id), ['live-web-one', ...sampleWaiting.map((chat) => chat.id)]);
 
-  // The card shows the count the header is given, and the two newest chats that wait.
+  /** The number beside "Waiting for you". */
+  const counted = (html: string) => Number(/Waiting for you<\/h2><span[^>]*>(\d+)</.exec(html)?.[1] ?? 0);
+  // Every chat the Chats badge counts has an entry, with the reason it waits for.
   const withLive = home(demoEvents, all);
-  assert.ok(withLive.includes(`>${waiting.length} need you<`));
-  assert.match(withLive, />Visitor one</);
-  assert.ok(withLive.includes(`>${sampleWaiting[0].customerName}<`));
-  assert.ok(!withLive.includes(`>${sampleWaiting[1].customerName}<`));
+  assert.equal(counted(withLive), waiting.length + demoRequests.length);
+  for (const chat of waiting) assert.ok(withLive.includes(`>${chat.customerName}<`), chat.customerName);
+  assert.match(withLive, />The customer asked for a discount\.</);
   // The language the AI detected, not the code "EN" that stands in for every other language.
   assert.match(withLive, />Spanish</);
+  // A chat that waits for nobody is not listed.
   assert.doesNotMatch(withLive, />Visitor two</);
+  // Whoever has waited longest comes first; the live chat wrote a minute ago and stands last among the chats.
+  const order = [...sampleWaiting].sort((a, b) => a.lastMessageAt!.localeCompare(b.lastMessageAt!)).map((chat) => chat.customerName);
+  const positions = [...order, 'Visitor one'].map((name) => withLive.indexOf(`>${name}<`));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
 
-  // Without a live key the card counts the sample chats that wait.
+  // Without a live key the inbox counts the sample chats that wait, and the requests.
   const withoutLive = home(demoEvents);
-  assert.ok(withoutLive.includes(`>${sampleWaiting.length} need you<`));
+  assert.equal(counted(withoutLive), sampleWaiting.length + demoRequests.length);
   assert.doesNotMatch(withoutLive, /Visitor/);
-  // Nobody waiting: no count, the two newest chats are listed.
+  // Nobody waiting: the chats are not listed, the requests still are.
   const handled = demoConversations.map((chat) => ({ ...chat, status: 'ai-handled' as const }));
   const calm = home(demoEvents, handled);
-  assert.doesNotMatch(calm, /need you/);
-  assert.match(calm, new RegExp(`>${handled[0].customerName}<`));
-  assert.match(home(demoEvents, []), /No conversations yet\./);
+  assert.equal(counted(calm), demoRequests.length);
+  assert.doesNotMatch(calm, new RegExp(`>${handled[0].customerName}<`));
+  // Nothing at all: the inbox says so, without a number.
+  const empty = home(demoEvents, [], []);
+  assert.match(empty, /Nothing is waiting for you\./);
+  assert.equal(counted(empty), 0);
 });
 
 test('messages and languages in Analytics include live chats', () => {
@@ -353,6 +364,32 @@ test('messages and languages in Analytics include live chats', () => {
   assert.equal(result.languages.reduce((sum, item) => sum + item.count, 0), all.length);
   // The four languages the salon answers in are listed even when no chat is in them.
   assert.deepEqual(conversationAnalytics([]).languages, ['English', 'French', 'German', 'Italian'].map((name) => ({ name, count: 0 })));
+
+  // The page shows every one of these figures under the appointments: no tab has to be opened for them.
+  const html = analytics(demoEvents, all);
+  assert.doesNotMatch(html, /role="tab/);
+  const chats = text(/<section aria-labelledby="analytics-conversations"[^>]*>(.*)<\/section>/s.exec(html)?.[1] ?? '');
+  assert.ok(chats.includes(
+    `Messages ${result.total} messages in ${all.length} conversations ${result.waiting} conversations are waiting for you. `
+    + `Customer messages ${result.customer} AI replies ${result.ai} Owner replies ${result.owner} `,
+  ), chats);
+  assert.ok(chats.includes(
+    `Languages Conversations by the language the customer writes in. ${result.languages.map((item) => `${item.name} ${item.count}`).join(' ')} `,
+  ), chats);
+  // The number that waits follows the rule behind every "needs you" count, so Home shows the same one.
+  assert.equal(result.waiting, conversationsWaiting(all).length);
+  // These figures have no period, and the page says so where the period is chosen above them.
+  assert.match(chats, /^ Conversations Counted over all your conversations\. The period above applies to appointments only\. /);
+  // The appointment figures are read from their own section: no number of the chats can stand in for one.
+  assert.doesNotMatch(text(/<section aria-label="Appointments"[^>]*>(.*?)<\/section>/s.exec(html)?.[1] ?? ''), /messages|Languages|conversations/);
+  assert.equal(analyticsNumbers(html).appointments, homeFigures(demoEvents, FIXED_NOW, ZONE).appointments);
+
+  // One chat that waits and one message are worded in the singular; no chat at all is said in a sentence.
+  const single = text(analytics(demoEvents, [liveChat('solo', { status: 'needs-attention', messages: [{ id: 's-1', sender: 'customer', original: 'Hi', translation: 'Hi', time: '11:57' }] })]));
+  assert.match(single, /Messages 1 message in 1 conversation 1 conversation is waiting for you\. Customer messages 1 AI replies 0 Owner replies 0 /);
+  const none = text(analytics(demoEvents, []));
+  assert.match(none, / Conversations No conversations yet\. $/);
+  assert.doesNotMatch(none, /Customer messages|Languages|waiting for you/);
 });
 
 // ---------- wording ----------
@@ -366,16 +403,16 @@ test('Home and Analytics name no sample data and show only figures the data can 
     assert.doesNotMatch(readableText(page), /after.hours|reply time|messages today|revenue|CHF|no.show|cancell/i);
   }
   const page = home(demoEvents);
-  assert.match(page, />This month</);
+  assert.match(page, />\s*This month\s*</);
   assert.match(page, />View analytics</);
-  assert.match(page, /aria-label="Export CSV for this month"/);
-  assert.match(page, />Export CSV</);
+  // The export has one place, Analytics: Home leads there and offers no second button.
+  assert.doesNotMatch(page, /Export CSV/);
   // The link to Analytics is offered only when it leads somewhere.
   const withoutLink = render(React.createElement(HomeView, {
-    requests: [], selectedRequestId: null, onSelectRequest: nothing, now: FIXED_NOW,
+    requests: [], selectedRequestId: null, now: FIXED_NOW,
     availabilityContext: { requests: [], events: [], services: [], employees: [], bookingHours: [], shiftOverview: [], now: FIXED_NOW, timeZone: ZONE },
     onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null, onSimulateNewRequest: nothing,
-    nextAppointment: null, onOpenAppointment: nothing, onExportReport: nothing, conversations: [], onOpenConversations: nothing,
+    onOpenAppointment: nothing, conversations: [], onOpenConversations: nothing,
   }));
   assert.doesNotMatch(withoutLink, /View analytics/);
   // Analytics names the salon as text, offers the export for the chosen period, and nothing looks like a second control.

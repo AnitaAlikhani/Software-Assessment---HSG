@@ -72,5 +72,7 @@ test('the team list of a salon with one location shows no branch tab, no Locatio
   // The salon's name is not repeated in every row.
   assert.doesNotMatch(text, /Bella Hair Salon/);
   for (const person of initialEmployees) assert.ok(text.includes(person.name), person.name);
-  assert.match(html, /aria-label="Delete [^"]+"/);
+  // No bin in the rows: a person is deleted in their own form, which asks first. The name opens that form.
+  assert.doesNotMatch(html, /Delete/);
+  for (const person of initialEmployees) assert.ok(html.includes(`aria-label="Edit ${person.name}"`), person.name);
 });

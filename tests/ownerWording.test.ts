@@ -3,12 +3,12 @@ import test from 'node:test';
 import React from 'react';
 import { AiAssistantView, channelRows } from '../src/views/AiAssistantView';
 import { ConversationsView } from '../src/views/ConversationsView';
-import { ResourcesView } from '../src/views/ResourcesView';
 import { SettingsView } from '../src/views/SettingsView';
 import { initialAiSettings } from '../src/conversationData';
 import { useLiveWhatsApp } from '../src/liveWhatsApp';
-import { initialBookingHours, initialCompanySettings, initialResources } from '../src/mockData';
-import { demoStorageKey, useDemoState } from '../src/useDemoState';
+import * as startingSalon from '../src/mockData';
+import { initialBookingHours, initialCompanySettings } from '../src/mockData';
+import { demoStorageKey, forgetRetiredDemoState, RETIRED_DEMO_KEYS, useDemoState } from '../src/useDemoState';
 import { salonContext } from '../server/ai';
 import { ALWAYS_HAND_OVER } from '../server/salonRules';
 import type { Conversation } from '../src/types';
@@ -28,10 +28,10 @@ test('without live chats no channel is called active', () => {
     ['Website', 'off', 'Not active'],
     ['Telegram', 'off', 'Not connected'],
     ['WhatsApp', 'off', 'Not connected'],
-    ['Instagram', 'planned', 'Planned'],
-    ['Phone', 'planned', 'Planned'],
   ]);
-  // WhatsApp names the number from Company Settings and says what is missing, instead of "Connected".
+  // The list holds what exists: a channel that is only planned has no row.
+  assert.doesNotMatch(JSON.stringify(rows), /Instagram|Planned|missed call/i);
+  // WhatsApp names the number from Settings and says what is missing, instead of "Connected".
   assert.match(rows[2].detail, /Meta has to verify the business before your salon number \(\+41 71 222 33 44\) can be connected\./);
   assert.match(channelRows({ live: 'off' })[2].detail, /before a salon number can be connected/);
 });
@@ -54,8 +54,8 @@ test('channels are active only for what the live chats really show', () => {
 });
 
 test('the sample chats and requests use a channel that the Channels list can show as active', () => {
-  // WhatsApp stays "Not connected" until Meta has verified the business and Instagram is only planned,
-  // so nothing the salon starts with may claim to have come in there.
+  // WhatsApp stays "Not connected" until Meta has verified the business and Instagram is not offered
+  // at all, so nothing the salon starts with may claim to have come in there.
   const rows = channelRows({ live: 'on' });
   const active = rows.filter(row => row.state === 'active').map(row => row.channel);
   assert.deepEqual(active, ['Website']);
@@ -130,25 +130,43 @@ test('the AI receptionist page has no demo wording, no dead control and no switc
   assert.match(html, /href="https:\/\/t\.me\/slotbee_bella_bot"/);
   assert.match(html, /\(\+41 71 222 33 44\)/);
   assert.doesNotMatch(html, /chat=1|live=/);
+  // Three channels, each with its real state; nothing is listed as planned.
+  assert.equal(html.match(/<li /g)?.length, 3);
+  assert.doesNotMatch(readableText(html), /Instagram|Planned|missed call/i);
 });
 
-test('tone and handover rules are shown as what the live assistant is really told', () => {
+test('"How the AI answers" is one note in plain text, and says what the live assistant is really told', () => {
   const html = assistant({ live: 'off' });
   const prompt = salonContext();
-  // The rules on the page are the rules in the assistant's instructions ...
-  for (const rule of initialAiSettings.handoverRules.filter(item => item.enabled)) {
-    assert.ok(html.includes(`${rule.label}</li>`), rule.label);
-    assert.ok(prompt.includes(rule.label), rule.label);
-  }
-  // ... and the sentence below them sums up the topics the server always adds. If that list
+  // Tone and handover cannot be changed here, so they are no sections of their own and no list
+  // of ticks that reads like switched-on settings: one note holds both.
+  const note = /<section aria-labelledby="ai-answers-title"[^>]*>(.*?)<\/section>/.exec(html)?.[1] ?? '';
+  assert.match(note, /<h2 id="ai-answers-title"[^>]*>How the AI answers<\/h2>/);
+  assert.doesNotMatch(note, /<(ul|li|svg|button|input|select)\b/);
+  assert.doesNotMatch(html, />(Tone of voice|Handover rules)</);
+  const text = readableText(note).replace(/\s+/g, ' ');
+  // The rules in the note are the rules in the assistant's instructions, in the same order ...
+  const rules = initialAiSettings.handoverRules.filter(item => item.enabled).map(item => item.label);
+  assert.equal(rules.length, 4);
+  for (const rule of rules) assert.ok(prompt.includes(rule), rule);
+  assert.ok(text.includes(`The AI receptionist always hands these over to you: ${rules.join(', ').toLowerCase()}.`), text);
+  // ... and the sentence after them sums up the topics the server always adds. If that list
   // changes in server/salonRules.ts, change the sentence in AiAssistantView.tsx with it.
   assert.equal(ALWAYS_HAND_OVER.length, 3);
   assert.match(ALWAYS_HAND_OVER[0], /Health, allergies/);
   assert.match(ALWAYS_HAND_OVER[1], /do not answer/);
   assert.match(ALWAYS_HAND_OVER[2], /upset or ask to talk to a person/);
-  assert.match(html, /It also hands over health and allergy questions, anything it does not know, and customers who are upset or ask for a person\./);
+  assert.match(text, /It also hands over health and allergy questions, anything it does not know, and customers who are upset or ask for a person\./);
   assert.match(prompt, /warm and friendly/);
-  assert.match(html, /Warm and friendly, in the customer’s language and in a few short sentences\./);
+  assert.match(text, /Warm and friendly, in the customer’s language and in a few short sentences\./);
+
+  // With no rule of the owner's switched on, the note still names what is always handed over.
+  const none = render(React.createElement(AiAssistantView, {
+    settings: { ...initialAiSettings, handoverRules: initialAiSettings.handoverRules.map(rule => ({ ...rule, enabled: false })) },
+    onSave: nothing, channels: { live: 'off' },
+  }));
+  assert.match(none, /The AI receptionist always hands over health and allergy questions/);
+  assert.doesNotMatch(none, /hands these over to you|discounts/i);
 });
 
 // ---------- Conversations ----------
@@ -176,7 +194,9 @@ test('a chat is worded as a product', () => {
   // A customer the salon knows: the number from her record, then the channel she wrote on.
   assert.match(html, />\+41 79 555 01 13 · Website chat</);
   assert.doesNotMatch(html, /WhatsApp|Instagram/);
-  assert.match(html, /How Camille sees this chat/);
+  // Her own words stand in the bubble above the translation; there is no separate view of them.
+  assert.match(html, />Bonjour, avez-vous de la place vendredi \?<\/p><div[^>]*><\/div><p[^>]*>Hello, do you have room on Friday\?<\/p>/);
+  assert.doesNotMatch(html, /Customer view|sees this chat/);
   assert.doesNotMatch(html, /Sending is disabled|Preview/);
 });
 
@@ -210,14 +230,18 @@ test('a chat without a phone number shows its channel, never a stand-in label', 
   assert.match(inbox(chat({ id: 'live-41791234567', live: true, phone: '+41 ••• ••• 67', channel: 'WhatsApp' })), /\+41 ••• ••• 67 · WhatsApp/);
 });
 
-// ---------- Company Settings and the hidden Rooms & equipment page ----------
+// ---------- Settings, and the Rooms & equipment page that went ----------
 
-test('Company Settings has no demo wording and no field that changes nothing', () => {
-  const html = render(React.createElement(SettingsView, {
+test('Settings has no demo wording and no field that changes nothing', () => {
+  const settingsTab = (tab?: React.ComponentProps<typeof SettingsView>['tab']) => render(React.createElement(SettingsView, {
     settings: initialCompanySettings, bookingHours: initialBookingHours, onSaveSettings: nothing,
-    closedDates: [], absences: [], employees: [], onSaveClosedDates: nothing, onSaveAbsences: nothing, now: FIXED_NOW,
+    closedDates: [], onSaveClosedDates: nothing, now: FIXED_NOW, tab, bookingLink: 'https://slotbee.example/?booking=1',
   }));
-  assert.doesNotMatch(readableText(html), TELL_WORDS);
+  for (const tab of ['salon', 'hours', 'closed-dates', 'online-booking'] as const) {
+    assert.doesNotMatch(readableText(settingsTab(tab)), TELL_WORDS, tab);
+    assert.doesNotMatch(settingsTab(tab), /disabled=""/, tab);
+  }
+  const html = settingsTab();
   assert.match(html, /Select Save to apply the logo\./);
   // Industry, State/Province and the branch language were saved but read nowhere.
   assert.doesNotMatch(html, /Industry|State\/Province|Branch language/);
@@ -243,7 +267,7 @@ test('settings fields that nothing reads are gone, and a tab that stored them st
       React.createElement(AiAssistantView, { settings: aiSettings, onSave: nothing, channels: { live: 'off' } }),
       React.createElement(SettingsView, {
         settings: companySettings, bookingHours: initialBookingHours, onSaveSettings: nothing,
-        closedDates: [], absences: [], employees: [], onSaveClosedDates: nothing, onSaveAbsences: nothing, now: FIXED_NOW,
+        closedDates: [], onSaveClosedDates: nothing, now: FIXED_NOW,
       }));
   };
   const html = inBrowser({ sessionStorage: { getItem: (name: string) => stored[name] ?? null } }, () => render(React.createElement(StoredTab)));
@@ -256,14 +280,28 @@ test('settings fields that nothing reads are gone, and a tab that stored them st
   assert.doesNotMatch(html, />(Connect|Connected)</);
 });
 
-test('Rooms & equipment uses salon wording and has no options that do nothing', () => {
-  const html = render(React.createElement(ResourcesView, {
-    resources: initialResources, onAddResource: nothing, onUpdateResource: nothing, onDeleteResource: nothing,
-  }));
-  assert.match(html, />\s*Rooms &amp; equipment\s*</);
-  assert.doesNotMatch(readableText(html), TELL_WORDS);
-  assert.doesNotMatch(html, /inventory|booking automation|person|people|disabled=""/i);
-  // Seats are a property of rooms only.
-  const rooms = initialResources.filter(resource => resource.type === 'Room').length;
-  assert.equal(html.match(/Seats:/g)?.length ?? 0, rooms);
+test('Rooms & equipment is gone with its data, and a tab that stored its list still loads', () => {
+  // Nothing of the screen is left in the salon a workspace starts with.
+  assert.ok(!('initialResources' in startingSalon));
+  assert.doesNotMatch(JSON.stringify(startingSalon), /Styling Chair|Hair Steamer|Colour Studio|res-/);
+  assert.deepEqual(RETIRED_DEMO_KEYS, ['resources']);
+
+  // A tab that was open before still holds the list, next to everything the owner did.
+  const stored = new Map<string, string>([
+    [demoStorageKey('resources', '/'), JSON.stringify([{ id: 'res-styling-chair-1', name: 'Styling Chair 1', type: 'Chair', capacity: 1, color: '#FDE047' }])],
+    [demoStorageKey('companySettings', '/'), JSON.stringify({ ...initialCompanySettings, companyName: 'Coiffeur Keller' })],
+    [demoStorageKey('resources', '/previews/x/'), '[]'],
+  ]);
+  const storage = { getItem: (name: string) => stored.get(name) ?? null, removeItem: (name: string) => { stored.delete(name); } };
+  // The app takes the list out when it starts: only that one value, and only for the place the app is served from.
+  forgetRetiredDemoState(storage, '/');
+  assert.deepEqual(Array.from(stored.keys()), [demoStorageKey('companySettings', '/'), demoStorageKey('resources', '/previews/x/')]);
+  // What the owner saved is read as before.
+  let name = '';
+  const StoredTab = () => { name = useDemoState('companySettings', initialCompanySettings)[0].companyName; return null; };
+  inBrowser({ sessionStorage: storage }, () => render(React.createElement(StoredTab)));
+  assert.equal(name, 'Coiffeur Keller');
+  // Storage that is missing or blocked is no reason to fail.
+  forgetRetiredDemoState(null, '/');
+  forgetRetiredDemoState({ removeItem: () => { throw new Error('blocked'); } }, '/');
 });

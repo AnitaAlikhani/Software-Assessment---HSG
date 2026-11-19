@@ -14,13 +14,13 @@ export interface ChannelFacts {
   telegramBot?: string | null;
   /** True once a WhatsApp chat has arrived. */
   whatsappChats?: boolean;
-  /** Business phone from Company Settings: the number a WhatsApp connection would use. */
+  /** The salon's business phone from Settings: the number a WhatsApp connection would use. */
   businessPhone?: string;
 }
 
 export interface ChannelRow {
   channel: ChannelKind;
-  state: 'active' | 'off' | 'checking' | 'planned';
+  state: 'active' | 'off' | 'checking';
   stateLabel: string;
   detail: string;
   /** A public address of the channel itself. Never the website chat link: that one carries the access key. */
@@ -29,8 +29,9 @@ export interface ChannelRow {
 
 /**
  * The Channels list, built from what is true right now: the website chat and Telegram are on
- * when the live chats answer, WhatsApp only once a chat has really arrived, and what does not
- * exist yet is listed as planned. No row pretends to connect anything.
+ * when the live chats answer, and WhatsApp only once a chat has really arrived. A channel that
+ * does not exist yet is not listed: this page holds what is there. No row pretends to connect
+ * anything.
  */
 export function channelRows({ live, telegramBot, whatsappChats, businessPhone }: ChannelFacts): ChannelRow[] {
   const checking = live === 'checking';
@@ -56,8 +57,6 @@ export function channelRows({ live, telegramBot, whatsappChats, businessPhone }:
             channel: 'WhatsApp', state: 'off', stateLabel: 'Not connected',
             detail: `Meta has to verify the business before ${phone ? `your salon number (${phone})` : 'a salon number'} can be connected.`,
           },
-    { channel: 'Instagram', state: 'planned', stateLabel: 'Planned', detail: 'Answers to Instagram messages.' },
-    { channel: 'Phone', state: 'planned', stateLabel: 'Planned', detail: 'After a missed call, the caller gets a message with your booking link.' },
   ];
 }
 
@@ -65,8 +64,10 @@ const STATE_PILL: Record<ChannelRow['state'], string> = {
   active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   off: 'bg-white text-slate-600 border-slate-200',
   checking: 'bg-white text-slate-500 border-slate-200',
-  planned: 'bg-indigo-50 text-[#5551FF] border-indigo-100',
 };
+
+/** A rule's name inside a sentence: "Discounts and price changes" becomes "discounts and price changes". */
+const inSentence = (label: string): string => /^[A-Z][a-z]/.test(label) ? label[0].toLowerCase() + label.slice(1) : label;
 
 interface AiAssistantViewProps {
   settings: AiAssistantSettings;
@@ -144,9 +145,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
   const languages: ChatLanguage[] = ['DE', 'FR', 'IT', 'EN'];
   const rows = channelRows(channels);
-  const connectable = rows.filter((row) => row.state !== 'planned');
-  const planned = rows.filter((row) => row.state === 'planned');
-  const handover = form.handoverRules.filter((rule) => rule.enabled);
+  const handover = form.handoverRules.filter((rule) => rule.enabled).map((rule) => inSentence(rule.label));
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
@@ -253,36 +252,20 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
                 })}
               </div>
             </section>
-
-            {/* Tone and handover rules are facts about the assistant, shown as text. They become
-                controls once the live assistant reads the owner's choice; until then a switch
-                here would change nothing. */}
-            <section className="space-y-2">
-              <h2 className="text-sm font-bold text-slate-900">Tone of voice</h2>
-              <p className="text-sm text-slate-600">
-                {form.tone === 'formal' ? 'Polite and formal' : 'Warm and friendly'}, in the customer’s language and in a few short sentences.
-              </p>
-            </section>
           </div>
 
-          {/* Right column: what the assistant does by itself, and where customers reach it */}
+          {/* Right column: what the AI does by itself, and where customers reach it */}
           <div className="space-y-8 lg:border-l lg:border-slate-100 lg:pl-10">
-            <section className="space-y-3">
-              <h2 className="text-sm font-bold text-slate-900">Handover rules</h2>
-              {handover.length > 0 && (
-                <>
-                  <p className="text-xs text-slate-500">The AI receptionist always hands these over to you:</p>
-                  <ul className="space-y-2">
-                    {handover.map((rule) => (
-                      <li key={rule.id} className="flex items-start gap-2.5 text-sm text-slate-700 [overflow-wrap:anywhere]">
-                        <Check className="mt-0.5 w-4 h-4 shrink-0 text-[#5551FF]" aria-hidden="true" />
-                        {rule.label}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              <p className="text-xs text-slate-500">
+            {/* Tone and handover are facts about the AI, not settings: nothing in them can be
+                switched, so they are one note in plain text. They become controls once the live AI
+                reads the owner's choice; until then a switch here would change nothing. */}
+            <section aria-labelledby="ai-answers-title" className="space-y-2 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm text-slate-700 [overflow-wrap:anywhere]">
+              <h2 id="ai-answers-title" className="font-bold text-slate-900">How the AI answers</h2>
+              <p>
+                {form.tone === 'formal' ? 'Polite and formal' : 'Warm and friendly'}, in the customer’s language and in a few short sentences.
+              </p>
+              <p>
+                {handover.length > 0 && `The AI receptionist always hands these over to you: ${handover.join(', ')}. `}
                 {handover.length > 0 ? 'It also hands over' : 'The AI receptionist always hands over'} health and allergy questions, anything it does not know, and customers who are upset or ask for a person.
               </p>
             </section>
@@ -291,11 +274,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
               <h2 className="text-sm font-bold text-slate-900">Channels</h2>
               <p className="text-xs text-slate-500">Where customers reach your AI receptionist.</p>
               <ul className="space-y-3">
-                {connectable.map((row) => <ChannelCard key={row.channel} row={row} />)}
-              </ul>
-              <h3 className="pt-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Planned</h3>
-              <ul className="space-y-3">
-                {planned.map((row) => <ChannelCard key={row.channel} row={row} />)}
+                {rows.map((row) => <ChannelCard key={row.channel} row={row} />)}
               </ul>
             </section>
           </div>

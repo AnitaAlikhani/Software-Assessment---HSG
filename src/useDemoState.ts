@@ -11,6 +11,21 @@ export const demoStorageKey = (
   pathname = typeof window === 'undefined' ? '/' : window.location.pathname,
 ): string => `${DEMO_STORAGE_VERSION}:${pathname}:${key}`;
 
+/**
+ * State of screens that no longer exist ("Rooms & equipment" kept its list under `resources`).
+ * A tab that was open before the screen went still holds the value; nothing reads it any more.
+ */
+export const RETIRED_DEMO_KEYS = ['resources'];
+
+/** Takes what a removed screen left behind out of a tab's storage. Everything else stays as it is. */
+export function forgetRetiredDemoState(
+  storage: Pick<Storage, 'removeItem'> | null | undefined = typeof sessionStorage === 'undefined' ? null : sessionStorage,
+  pathname?: string,
+): void {
+  try { for (const key of RETIRED_DEMO_KEYS) storage?.removeItem(demoStorageKey(key, pathname)); }
+  catch { /* Storage can be blocked in privacy modes: then nothing was kept there either. */ }
+}
+
 /** A demo stays in this tab's session; another device never receives a booking. */
 export function useDemoState<T>(key: string, initial: T | (() => T)) {
   const storageKey = demoStorageKey(key);
