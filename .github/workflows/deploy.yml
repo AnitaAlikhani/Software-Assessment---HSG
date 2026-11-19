@@ -67,6 +67,17 @@ jobs:
           path: responsive-app
           persist-credentials: false
 
+      # Work in progress. If this branch is missing or does not build, only its preview is
+      # skipped: the main site and the other previews are published as usual.
+      - name: Check out launch preview
+        id: launch_checkout
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          ref: anita-launch
+          path: launch-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -160,6 +171,15 @@ jobs:
         working-directory: responsive-app
         run: npm run build -- --base=/Software-Assessment---HSG/previews/anita-fix-responsive/
 
+      - name: Build launch preview
+        id: launch_build
+        if: steps.launch_checkout.outcome == 'success'
+        continue-on-error: true
+        working-directory: launch-app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build -- --base=/Software-Assessment---HSG/previews/anita-launch/
+
       - name: Assemble main site and branch previews
         run: |
           mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
@@ -180,6 +200,14 @@ jobs:
           mkdir -p site/previews/anita-fix-responsive
           cp -a responsive-app/dist/. site/previews/anita-fix-responsive/
           git -C responsive-app rev-parse HEAD > site/previews/anita-fix-responsive/revision.txt
+
+          if [ "${{ steps.launch_build.outcome }}" = "success" ]; then
+            mkdir -p site/previews/anita-launch
+            cp -a launch-app/dist/. site/previews/anita-launch/
+            git -C launch-app rev-parse HEAD > site/previews/anita-launch/revision.txt
+          else
+            echo "::warning::The anita-launch preview was not built; the rest of the site is published as usual."
+          fi
 
       - name: Upload combined site
         uses: actions/upload-pages-artifact@v5
