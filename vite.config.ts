@@ -13,11 +13,12 @@ export default defineConfig(() => {
     },
     build: {
       rolldownOptions: {
-        // Two pages: the app, and the voice check for the team (voice-lab.html), which shares
-        // the app's styles but none of its screens.
+        // Three pages: the app, and two pages for the team that share the app's styles but none
+        // of its screens: the voice check (voice-lab.html) and the live call (voice-call.html).
         input: {
           main: path.resolve(__dirname, 'index.html'),
           'voice-lab': path.resolve(__dirname, 'voice-lab.html'),
+          'voice-call': path.resolve(__dirname, 'voice-call.html'),
         },
       },
     },
