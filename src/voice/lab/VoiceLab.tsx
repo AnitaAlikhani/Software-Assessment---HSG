@@ -2,13 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy, Download, Mic, RotateCcw, Square, X } from 'lucide-react';
 import { LogoMark } from '../../components/Logo';
 import { PRODUCT_NAME } from '../../brand';
+import { formatDate, zonedDateTime } from '../../format';
+import { readLiveKey } from '../../liveWhatsApp';
+import { getSalonNow } from '../../scheduling';
 import {
   browserSpeech, createTranscriber, installOnDevice, onDeviceState, speechSupport,
   type OnDeviceState, type SpeechEnvironment, type Transcriber, type TranscriberOptions,
 } from '../transcriber';
+import { AiReading } from './AiReading';
 import {
-  attemptFrom, buildReport, heardText, reportFileName, summarise, talkFrom,
-  type Attempt, type LabSettings, type Microphone, type Noise, type Recording, type TalkRecord, type Variety,
+  attemptFrom, buildReport, heardText, reportFileName, roundFromReport, summarise, talkFrom,
+  type Attempt, type LabSettings, type Microphone, type Noise, type Recording, type SavedRound, type TalkRecord, type Understanding, type Variety,
 } from './report';
 import type { KeyItem, SentenceScore } from './score';
 import { LAB_LANGUAGES, type LabLanguage } from './sentences';
@@ -307,6 +311,13 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
   const [talk, setTalk] = useState<TalkRecord | null>(null);
   const [device, setDevice] = useState<OnDeviceState | 'checking' | 'installing' | null>(null);
   const [exported, setExported] = useState<'copied' | 'downloaded' | 'manual' | null>(null);
+  /** The salon's day on which the round was spoken: "tomorrow" in a sentence is read from it. */
+  const [spokenOn, setSpokenOn] = useState(() => getSalonNow().date);
+  /** Set when the round on screen was opened from a file: when and in which browser it was spoken. */
+  const [origin, setOrigin] = useState<Pick<SavedRound, 'createdAt' | 'browser' | 'support'> | null>(null);
+  const [understanding, setUnderstanding] = useState<Understanding | null>(null);
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
+  const [liveKey] = useState(() => readLiveKey());
   const listening = useListening(found);
 
   const pack = LAB_LANGUAGES[settings.language];
@@ -330,7 +341,35 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
     setTalk(null);
     setIndex(0);
     setExported(null);
+    setOrigin(null);
+    setUnderstanding(null);
+    setFileProblem(null);
+    setSpokenOn(getSalonNow().date);
     setPhase('sentences');
+  };
+  /** Opens a round that was saved before, to look at it again or to let the AI reader read it. */
+  const openSaved = async (file: File | undefined) => {
+    if (!file) return;
+    let saved: SavedRound | null = null;
+    try {
+      saved = roundFromReport(JSON.parse(await file.text()), LAB_LANGUAGES);
+    } catch {
+      saved = null;
+    }
+    if (!saved) {
+      setFileProblem('This file is not a round of the voice check. Choose a file that was downloaded from this page.');
+      return;
+    }
+    setSettings(saved.settings);
+    setAttempts(saved.attempts);
+    setTalk(saved.talk);
+    setOrigin({ createdAt: saved.createdAt, browser: saved.browser, support: saved.support });
+    setSpokenOn(saved.spokenOn || zonedDateTime(new Date(saved.createdAt)).date);
+    setUnderstanding(null);
+    setExported(null);
+    setFileProblem(null);
+    setDevice(null);
+    setPhase('results');
   };
   const startSentence = () => listening.start(options, SENTENCE_LIMIT_MS, (recording) => {
     const attempt = attemptFrom(sentence, recording);
@@ -352,17 +391,20 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
   };
 
   const report = () => buildReport({
-    createdAt: new Date().toISOString(),
-    browser: {
+    // A round that was opened from a file keeps when and where it was spoken.
+    createdAt: origin?.createdAt ?? new Date().toISOString(),
+    spokenOn,
+    browser: origin?.browser ?? {
       userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
       languages: typeof navigator === 'undefined' ? [] : [...(navigator.languages ?? [])],
     },
-    support,
+    support: origin?.support ?? support,
     settings,
     sentences: pack.sentences,
     attempts,
     script: pack.talk,
     talk,
+    understanding,
   });
   const copyResults = async () => {
     try {
@@ -516,6 +558,19 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
             </div>
 
             <button type="button" className={primaryButton} onClick={begin} disabled={!support.recognition}>Start the check</button>
+
+            <div className="space-y-2 border-t border-slate-100 pt-5">
+              <label htmlFor="lab-file" className={fieldLabel}>Or open a round that was saved before</label>
+              <input
+                id="lab-file"
+                type="file"
+                accept=".json,application/json"
+                className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-11 file:rounded-xl file:border file:border-solid file:border-slate-200 file:bg-white file:px-4 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-50"
+                onChange={(event) => { void openSaved(event.target.files?.[0]); event.target.value = ''; }}
+              />
+              <p className="text-sm text-slate-500">A file that was downloaded from this page. Nobody has to speak again: the round is shown as it was, and the AI reader can be asked to read it.</p>
+              {fileProblem && <p role="alert" className="text-sm font-medium text-rose-700">{fileProblem}</p>}
+            </div>
           </section>
         )}
 
@@ -610,6 +665,7 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
           <>
             <section className={`${card} space-y-5`} aria-labelledby="results-title">
               <h2 id="results-title" className="text-lg font-bold text-slate-900">Results of this round</h2>
+              {origin && <p className="text-sm text-slate-600">Opened from a saved file. It was spoken on {formatDate(spokenOn, { weekday: 'long' })}.</p>}
               <dl className="grid gap-4 sm:grid-cols-3">
                 <div className="rounded-xl bg-slate-50 px-4 py-3">
                   <dt className="text-xs font-semibold text-slate-500">Details that arrived</dt>
@@ -630,7 +686,7 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
 
               <div className="space-y-3 rounded-xl border border-brand/20 bg-brand-soft px-4 py-4">
                 <p className="text-sm font-semibold text-slate-900">Send us this round</p>
-                <p className="text-sm text-slate-700">Copy the results and paste them into a message to the team, or download them as a file. Nothing has been sent anywhere yet.</p>
+                <p className="text-sm text-slate-700">Copy the results and paste them into a message to the team, or download them as a file. {understanding ? 'What the AI reader understood is part of them.' : 'Nothing has been sent anywhere yet.'}</p>
                 <div className="flex flex-wrap gap-3">
                   <button type="button" className={primaryButton} onClick={copyResults}><Copy className="h-4 w-4" aria-hidden="true" />Copy results</button>
                   <button type="button" className={quietButton} onClick={downloadResults}><Download className="h-4 w-4" aria-hidden="true" />Download file</button>
@@ -650,6 +706,13 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
               <button type="button" className={quietButton} onClick={() => setPhase('setup')}><RotateCcw className="h-4 w-4" aria-hidden="true" />Do another round</button>
               <p className="text-sm text-slate-500">A second round in another language, with noise around you or in another browser tells us the most. Starting a round clears this one, so copy or download it first.</p>
             </section>
+
+            <AiReading
+              round={{ pack, language: settings.language, attempts, talk, spokenOn }}
+              liveKey={liveKey}
+              value={understanding}
+              onChange={(value) => { setUnderstanding(value); setExported(null); }}
+            />
 
             <section className={`${card} space-y-4`} aria-labelledby="detail-title">
               <h2 id="detail-title" className="text-lg font-bold text-slate-900">Sentence by sentence</h2>

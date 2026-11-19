@@ -1,6 +1,9 @@
+import type { AssistantRequest } from '../../assistant/types';
 import type { HeardAlternative, SpeechSupport } from '../transcriber';
+import type { RouteProblem } from '../understand';
+import type { ReadingScore } from './expected';
 import { scoreSentence, type KeyItem, type LabSentence, type SentenceScore } from './score';
-import type { LabLanguage } from './sentences';
+import type { LabLanguage, LabLanguagePack } from './sentences';
 
 /**
  * What one round of the voice check produces: for every sentence what was heard, how many details
@@ -179,22 +182,76 @@ export function summarise(sentences: LabSentence[], attempts: Record<string, Att
   };
 }
 
+/** What the AI model made of one text, and how long the answer took. */
+export interface ReadingRecord {
+  /** The lines that were sent: one sentence, or the call up to this phrase. */
+  lines: string[];
+  alternatives: string[];
+  /** The checked reading. Null when the model noted nothing, or when there is a problem. */
+  request: AssistantRequest | null;
+  problem: RouteProblem | null;
+  /** From sending the question to having the answer, as the person at the screen waits. */
+  ms: number | null;
+  /** The part of that wait the model itself took, as the server measured it. */
+  modelMs: number | null;
+  /** Null where the text is not scored (a phone number, the confirming phrase, the call before its end). */
+  score: ReadingScore | null;
+}
+
+/** One round read by the AI model: every sentence on its own, and the call phrase by phrase. */
+export interface Understanding {
+  askedAt: string;
+  /** By the id of the sentence. Sentences with no finished text are not in it. */
+  sentences: Record<string, ReadingRecord>;
+  /** The call after each of its phrases. Only the last one is scored. */
+  call: ReadingRecord[];
+  summary: {
+    /** Details the model got right, over everything that is scored. */
+    right: number;
+    total: number;
+    /** How many texts were sent, and how many came back with a problem. */
+    asked: number;
+    problems: number;
+    medianMs: number | null;
+    medianModelMs: number | null;
+  };
+}
+
+export function summariseReadings(readings: ReadingRecord[]): Understanding['summary'] {
+  const scored = readings.filter(reading => reading.score !== null && reading.problem === null);
+  return {
+    right: scored.reduce((sum, reading) => sum + (reading.score?.right ?? 0), 0),
+    total: scored.reduce((sum, reading) => sum + (reading.score?.total ?? 0), 0),
+    asked: readings.length,
+    problems: readings.filter(reading => reading.problem !== null).length,
+    medianMs: median(readings.filter(reading => reading.problem === null).map(reading => reading.ms).filter(present)),
+    medianModelMs: median(readings.map(reading => reading.modelMs).filter(present)),
+  };
+}
+
 /** The file a person sends back. */
 export interface LabReport {
   kind: 'slotbee-voice-check';
-  /** 2: tries also hold the unfinished text, and the events say when Stop was pressed. */
-  version: 2;
+  /**
+   * 2: tries also hold the unfinished text, and the events say when Stop was pressed.
+   * 3: the day the round was spoken, and what the AI model understood when it was asked.
+   */
+  version: 3;
   createdAt: string;
+  /** The salon's day (YYYY-MM-DD) on which the round was spoken: "tomorrow" is read from it. */
+  spokenOn: string;
   browser: { userAgent: string; languages: string[] };
   support: SpeechSupport;
   settings: LabSettings;
   summary: LabSummary;
   sentences: { id: string; text: string; keys: string[]; attempts: Attempt[] }[];
   talk: (TalkRecord & { lines: string[]; keys: string[] }) | null;
+  understanding: Understanding | null;
 }
 
 export function buildReport(input: {
   createdAt: string;
+  spokenOn: string;
   browser: { userAgent: string; languages: string[] };
   support: SpeechSupport;
   settings: LabSettings;
@@ -202,11 +259,13 @@ export function buildReport(input: {
   attempts: Record<string, Attempt[]>;
   script: { lines: string[]; keys: KeyItem[] };
   talk: TalkRecord | null;
+  understanding?: Understanding | null;
 }): LabReport {
   return {
     kind: 'slotbee-voice-check',
-    version: 2,
+    version: 3,
     createdAt: input.createdAt,
+    spokenOn: input.spokenOn,
     browser: input.browser,
     support: input.support,
     settings: { ...input.settings, label: input.settings.label.trim().slice(0, 40) },
@@ -218,6 +277,88 @@ export function buildReport(input: {
       attempts: input.attempts[sentence.id] ?? [],
     })),
     talk: input.talk ? { ...input.talk, lines: input.script.lines, keys: input.script.keys.map(item => item.label) } : null,
+    understanding: input.understanding ?? null,
+  };
+}
+
+// ---------- opening a round that was saved before ----------
+
+/** A round as the page holds it. */
+export interface SavedRound {
+  createdAt: string;
+  /** Empty in files from before the day was written down: the page then takes it from createdAt. */
+  spokenOn: string;
+  browser: { userAgent: string; languages: string[] };
+  support: SpeechSupport;
+  settings: LabSettings;
+  attempts: Record<string, Attempt[]>;
+  talk: TalkRecord | null;
+}
+
+const text = (value: unknown): string => (typeof value === 'string' ? value : '');
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {});
+const oneOf = <Choice extends string>(value: unknown, choices: readonly Choice[], fallback: Choice): Choice =>
+  (choices as readonly unknown[]).includes(value) ? value as Choice : fallback;
+
+/** Only what a recording is made of is taken from a file, each part with the type it must have. */
+function savedRecording(value: unknown): Recording {
+  const raw = record(value);
+  const events = list(raw.events).map(record).filter(event => typeof event.ms === 'number' && typeof event.name === 'string')
+    .map(event => ({ ms: event.ms as number, name: event.name as string }));
+  return {
+    startedAt: text(raw.startedAt),
+    events,
+    // A sentence has one text; a call keeps how the engine cut it.
+    finals: list(raw.segments).map(record).filter(part => typeof part.text === 'string').map(part => ({ ms: Number(part.ms) || 0, text: part.text as string })),
+    alternatives: list(raw.alternatives).map(record).filter(option => typeof option.text === 'string').map(option => ({ text: option.text as string, confidence: Number(option.confidence) || 0 })),
+    interimCount: Number(raw.interimCount) || events.filter(event => event.name === 'interim').length,
+    unfinished: text(raw.unfinished),
+    errors: list(raw.errors).filter((code): code is string => typeof code === 'string'),
+    durationMs: Number(raw.durationMs) || 0,
+  };
+}
+
+/**
+ * Reads a results file back into a round, so it can be looked at again and read by the AI model
+ * without anybody speaking a second time. What was heard is taken from the file; the scores are
+ * worked out again with today's sentences. Returns null for anything that is no round of the check.
+ */
+export function roundFromReport(value: unknown, languages: Record<LabLanguage, LabLanguagePack>): SavedRound | null {
+  const raw = record(value);
+  if (raw.kind !== 'slotbee-voice-check' || typeof raw.createdAt !== 'string' || Number.isNaN(Date.parse(raw.createdAt))) return null;
+  const settings = record(raw.settings);
+  if (settings.language !== 'en' && settings.language !== 'de') return null;
+  const pack = languages[settings.language];
+  const saved = new Map(list(raw.sentences).map(record).map(entry => [text(entry.id), list(entry.attempts)] as const));
+  const attempts: Record<string, Attempt[]> = {};
+  for (const sentence of pack.sentences) {
+    const tries = (saved.get(sentence.id) ?? []).map((attempt) => {
+      const heard = text(record(attempt).heard);
+      return attemptFrom(sentence, { ...savedRecording(attempt), finals: heard ? [{ ms: 0, text: heard }] : [] });
+    });
+    if (tries.length > 0) attempts[sentence.id] = tries;
+  }
+  const call = raw.talk === null || raw.talk === undefined ? null : savedRecording(raw.talk);
+  const browser = record(raw.browser);
+  const support = record(raw.support);
+  return {
+    createdAt: raw.createdAt,
+    spokenOn: /^\d{4}-\d{2}-\d{2}$/.test(text(raw.spokenOn)) ? text(raw.spokenOn) : '',
+    browser: { userAgent: text(browser.userAgent), languages: list(browser.languages).filter((entry): entry is string => typeof entry === 'string') },
+    support: { recognition: support.recognition === true, onDevice: support.onDevice === true, boost: support.boost === true },
+    settings: {
+      label: text(settings.label).slice(0, 40),
+      language: settings.language,
+      locale: text(settings.locale) || pack.locales[0].code,
+      variety: oneOf(settings.variety, ['standard', 'dialect'] as const, 'standard'),
+      noise: oneOf(settings.noise, ['quiet', 'some', 'loud'] as const, 'quiet'),
+      microphone: oneOf(settings.microphone, ['built-in', 'headset', 'other'] as const, 'built-in'),
+      onDevice: settings.onDevice === true,
+      boost: settings.boost === true,
+    },
+    attempts,
+    talk: call ? talkFrom(pack.talk, call) : null,
   };
 }
 

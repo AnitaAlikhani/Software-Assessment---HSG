@@ -221,6 +221,7 @@ test('the file to send back holds the choices, the texts and the timings, and no
   const attempts = { 'de-10': [heardAs('de-10', 'Buchung bestätigen')] };
   const report = buildReport({
     createdAt: '2026-11-19T14:32:10.000Z',
+    spokenOn: '2026-11-19',
     browser: { userAgent: 'Mozilla/5.0 Chrome/157', languages: ['de-CH', 'en'] },
     support: { recognition: true, onDevice: true, boost: true },
     settings,
@@ -229,9 +230,11 @@ test('the file to send back holds the choices, the texts and the timings, and no
     script: pack.talk,
     talk: null,
   });
-  assert.deepEqual(Object.keys(report), ['kind', 'version', 'createdAt', 'browser', 'support', 'settings', 'summary', 'sentences', 'talk']);
+  assert.deepEqual(Object.keys(report), ['kind', 'version', 'createdAt', 'spokenOn', 'browser', 'support', 'settings', 'summary', 'sentences', 'talk', 'understanding']);
   assert.equal(report.kind, 'slotbee-voice-check');
-  assert.equal(report.version, 2);
+  assert.equal(report.version, 3);
+  assert.equal(report.spokenOn, '2026-11-19');
+  assert.equal(report.understanding, null);
   assert.equal(report.settings.label, 'A.B.');
   assert.deepEqual({ ...report.settings, label: '' }, { ...settings, label: '' });
   assert.equal(report.sentences.length, 12);
