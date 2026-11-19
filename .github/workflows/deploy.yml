@@ -78,6 +78,17 @@ jobs:
           path: launch-app
           persist-credentials: false
 
+      # The voice check for the team (voice-lab.html). Like the launch preview: if the branch is
+      # missing or does not build, only its preview is skipped.
+      - name: Check out voice preview
+        id: voice_checkout
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          ref: anita-voice
+          path: voice-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -180,6 +191,15 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build -- --base=/Software-Assessment---HSG/previews/anita-launch/
 
+      - name: Build voice preview
+        id: voice_build
+        if: steps.voice_checkout.outcome == 'success'
+        continue-on-error: true
+        working-directory: voice-app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build -- --base=/Software-Assessment---HSG/previews/anita-voice/
+
       - name: Assemble main site and branch previews
         run: |
           mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
@@ -207,6 +227,14 @@ jobs:
             git -C launch-app rev-parse HEAD > site/previews/anita-launch/revision.txt
           else
             echo "::warning::The anita-launch preview was not built; the rest of the site is published as usual."
+          fi
+
+          if [ "${{ steps.voice_build.outcome }}" = "success" ]; then
+            mkdir -p site/previews/anita-voice
+            cp -a voice-app/dist/. site/previews/anita-voice/
+            git -C voice-app rev-parse HEAD > site/previews/anita-voice/revision.txt
+          else
+            echo "::warning::The anita-voice preview was not built; the rest of the site is published as usual."
           fi
 
       - name: Upload combined site
