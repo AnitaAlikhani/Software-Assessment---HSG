@@ -7,8 +7,33 @@ import {
   Check,
 } from 'lucide-react';
 import { CompanySettingsData, BookingHoursDay, SettingsSubTab, ClosedDate, StaffAbsence, Employee } from '../types';
-import { formatDate, getSalonNow } from '../scheduling';
+import { getSalonNow, salonTimeZone } from '../scheduling';
 import { normalizeWebsiteUrl, validateLogoFile } from '../managementValidation';
+import { phoneAdvice } from '../bookingData';
+import { formatDateRange, formatPhone, formatTime, normalizePhone, timeZoneLabel } from '../format';
+import { CANTONS, COUNTRIES, SALON_TIME_ZONE, countryOf, regionToSave } from '../region';
+
+/** Opening and closing times are chosen on the half hour, the step appointments start on. */
+const HALF_HOURS = Array.from({ length: 48 }, (_, index) => formatTime(index * 30));
+const onHalfHour = (time: string): boolean => HALF_HOURS.includes(time);
+/**
+ * The times one field offers: the half hours, plus the field's own time when it is not one of
+ * them. A time saved earlier (09:07) then still shows and is kept until the owner picks another.
+ */
+const timeChoices = (time: string): string[] => onHalfHour(time) ? HALF_HOURS : [...HALF_HOURS, time].sort();
+/** Says so under a day whose times are not on the half hour, instead of changing them silently. Null for a day that needs no note. */
+const offHalfHourNote = (day: BookingHoursDay): string | null => {
+  const kept = [day.from, day.to].filter((time) => time && !onHalfHour(time));
+  if (kept.length === 0) return null;
+  return `${kept.join(' and ')} ${kept.length === 1 ? 'is' : 'are'} not on the half hour. ${kept.length === 1 ? 'It stays' : 'They stay'} as saved until you choose another time. Appointments start on the half hour.`;
+};
+
+/**
+ * The stored settings as the form shows them: the phone number written out, the time zone as a
+ * plain id. Comparing the form with this tells whether the owner changed something.
+ */
+const asShown = (settings: CompanySettingsData): CompanySettingsData =>
+  ({ ...settings, businessPhone: formatPhone(settings.businessPhone), timeZone: salonTimeZone(settings.timeZone) });
 
 interface SettingsViewProps {
   settings: CompanySettingsData;
@@ -19,16 +44,23 @@ interface SettingsViewProps {
   employees: Employee[];
   onSaveClosedDates: (dates: ClosedDate[]) => void;
   onSaveAbsences: (items: StaffAbsence[]) => void;
+  /** The moment "today" is taken from. Tests pass a fixed one; the app leaves it out and gets the current time. */
+  now?: Date;
+  /** The part of the settings the page opens on. Left out, it is Basic Information. */
+  initialTab?: SettingsSubTab;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings: initialSettings,
   bookingHours: initialBookingHours,
   onSaveSettings,
-  closedDates, absences, employees, onSaveClosedDates, onSaveAbsences,
+  closedDates, absences, employees, onSaveClosedDates, onSaveAbsences, now, initialTab = 'basic',
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsSubTab>('basic');
-  const [formData, setFormData] = useState<CompanySettingsData>(initialSettings);
+  const [activeTab, setActiveTab] = useState<SettingsSubTab>(initialTab);
+  // The form opens on the launch market's choices: a country and a time zone saved before the
+  // market was narrowed show as Switzerland and Swiss time, and count as a change still to save.
+  const [formData, setFormData] = useState<CompanySettingsData>(() =>
+    ({ ...asShown(initialSettings), country: countryOf(initialSettings.country), timeZone: SALON_TIME_ZONE }));
   const [hoursData, setHoursData] = useState<BookingHoursDay[]>(() => initialBookingHours.map((day) => ({ ...day })));
   const [closedDatesTab, setClosedDatesTab] = useState<'closed' | 'absences'>('closed');
   const [showHelp, setShowHelp] = useState(false);
@@ -43,10 +75,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [dateName, setDateName] = useState('');
   const [absenceEmployeeId, setAbsenceEmployeeId] = useState('');
-  const [rangeStart, setRangeStart] = useState(() => getSalonNow(initialSettings.timeZone).date);
-  const [rangeEnd, setRangeEnd] = useState(() => getSalonNow(initialSettings.timeZone).date);
+  const [rangeStart, setRangeStart] = useState(() => getSalonNow(initialSettings.timeZone, now).date);
+  const [rangeEnd, setRangeEnd] = useState(() => getSalonNow(initialSettings.timeZone, now).date);
   const dateInputClass = 'min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-none focus:ring-2 focus:ring-[#5551FF]/20';
-  const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(initialSettings) || JSON.stringify(hoursData) !== JSON.stringify(initialBookingHours);
+  const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(asShown(initialSettings)) || JSON.stringify(hoursData) !== JSON.stringify(initialBookingHours);
 
   // On phones the edit form sits below the list: bring it into view so the tap has a visible result.
   const focusDateForm = () => {
@@ -58,7 +90,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
   const resetDateForm = () => {
     setEditingDateId(null); setDateName(''); setAbsenceEmployeeId('');
-    const today = getSalonNow(formData.timeZone).date;
+    const today = getSalonNow(formData.timeZone, now).date;
     setRangeStart(today); setRangeEnd(today); setDateError('');
   };
 
@@ -126,18 +158,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSave = () => {
     if (!formData.companyName.trim()) { setSettingsError('Enter a company name.'); setActiveTab('basic'); return; }
+    const phoneIssue = formData.businessPhone.trim() ? phoneAdvice(formData.businessPhone) : null;
+    if (phoneIssue) { setSettingsError(`Business phone: ${phoneIssue} Or leave the field blank.`); setActiveTab('basic'); return; }
     const invalidDay = hoursData.find((day) => day.isOpen && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(day.from) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(day.to) || day.to <= day.from));
     if (invalidDay) { setSettingsError(`${invalidDay.day}: closing time must be after opening time on the same day.`); setActiveTab('hours'); return; }
     const links: Partial<CompanySettingsData> = {};
-    for (const [key, label, allowMissingScheme] of [['website', 'Website', false], ['legalNote', 'Legal note', false], ['facebook', 'Facebook', true], ['xProfile', 'X profile', true], ['instagram', 'Instagram', true]] as const) {
+    for (const [key, label, allowMissingScheme] of [['website', 'Website', false], ['legalNote', 'Legal notice', false], ['facebook', 'Facebook', true], ['xProfile', 'X profile', true], ['instagram', 'Instagram', true]] as const) {
       const url = normalizeWebsiteUrl(formData[key], allowMissingScheme);
       if (url === null) { setSettingsError(`${label}: enter a complete http:// or https:// link with a valid host, or leave it blank.`); setActiveTab('profile'); return; }
       links[key] = url;
     }
     if (formData.customTerms && !formData.termsText?.trim()) { setSettingsError('Enter your custom terms and privacy text, or turn off custom terms.'); setActiveTab('profile'); return; }
     setSettingsError('');
-    const normalizedSettings = { ...Object.fromEntries(Object.entries(formData).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])), ...links } as unknown as CompanySettingsData;
-    setFormData(normalizedSettings);
+    const normalizedSettings = {
+      ...Object.fromEntries(Object.entries(formData).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])),
+      ...links,
+      // The country, its canton (Liechtenstein has none) and the market's time zone.
+      ...regionToSave(formData.country, formData.canton),
+      // Stored once, in the international form; every screen writes it out the same way.
+      businessPhone: formData.businessPhone.trim() ? normalizePhone(formData.businessPhone) : '',
+    } as unknown as CompanySettingsData;
+    setFormData(asShown(normalizedSettings));
     onSaveSettings(normalizedSettings, hoursData);
     setShowSavedFeedback(true);
     setTimeout(() => setShowSavedFeedback(false), 2500);
@@ -153,7 +194,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <div className="flex items-center gap-3">
           <button
-            className="p-2 text-slate-400 hover:text-slate-600 rounded-full"
+            className="inline-flex h-11 w-11 items-center justify-center text-slate-400 hover:text-slate-600 rounded-full"
             title="Help"
             aria-label="Settings help"
             aria-expanded={showHelp}
@@ -188,7 +229,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="md:col-span-3 bg-white rounded-2xl border border-slate-200/80 p-2 shadow-xs space-y-1 text-xs font-semibold">
           <button
             onClick={() => setActiveTab('basic')}
-            className={`w-full text-left px-4 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 text-left px-4 py-2.5 rounded-xl transition-colors ${
               activeTab === 'basic'
                 ? 'bg-[#5551FF]/12 text-[#5551FF]'
                 : 'text-slate-600 hover:bg-slate-50'
@@ -199,7 +240,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={() => setActiveTab('hours')}
-            className={`w-full text-left px-4 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 text-left px-4 py-2.5 rounded-xl transition-colors ${
               activeTab === 'hours'
                 ? 'bg-[#5551FF]/12 text-[#5551FF]'
                 : 'text-slate-600 hover:bg-slate-50'
@@ -210,7 +251,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={() => setActiveTab('closed-dates')}
-            className={`w-full text-left px-4 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 text-left px-4 py-2.5 rounded-xl transition-colors ${
               activeTab === 'closed-dates'
                 ? 'bg-[#5551FF]/12 text-[#5551FF]'
                 : 'text-slate-600 hover:bg-slate-50'
@@ -221,7 +262,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={() => setActiveTab('profile')}
-            className={`w-full text-left px-4 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 text-left px-4 py-2.5 rounded-xl transition-colors ${
               activeTab === 'profile'
                 ? 'bg-[#5551FF]/12 text-[#5551FF]'
                 : 'text-slate-600 hover:bg-slate-50'
@@ -302,7 +343,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Country & State */}
+                  {/* Country & Canton. The canton follows the town in the address where the town alone does not say it ("Wil SG"). */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label htmlFor="company-country" className="font-semibold text-slate-700 block mb-1">
@@ -315,45 +356,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         }
                         className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       >
-                        <option value="Switzerland">Switzerland</option>
-                        <option value="Germany">Germany</option>
-                        <option value="Austria">Austria</option>
-                        <option value="France">France</option>
+                        {COUNTRIES.map((country) => <option key={country} value={country}>{country}</option>)}
                       </select>
                     </div>
+                    {/* Liechtenstein has no cantons: the field is left out there. */}
+                    {formData.country === 'Switzerland' && (
                     <div>
-                      <label htmlFor="company-state" className="font-semibold text-slate-700 block mb-1">
-                        State/Province
+                      <label htmlFor="company-canton" className="font-semibold text-slate-700 block mb-1">
+                        Canton
                       </label>
-                    <input id="company-state"
-                        type="text"
-                        value={formData.state}
+                    <select id="company-canton"
+                        value={formData.canton ?? ''}
                         onChange={(e) =>
-                          setFormData({ ...formData, state: e.target.value })
-                        }
-                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Industry & Phone */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="company-industry" className="font-semibold text-slate-700 block mb-1">
-                        Industry
-                      </label>
-                    <select id="company-industry"
-                        value={formData.industry}
-                        onChange={(e) =>
-                          setFormData({ ...formData, industry: e.target.value })
+                          setFormData({ ...formData, canton: e.target.value })
                         }
                         className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                       >
-                        <option value="Hair & Beauty">Hair & Beauty</option>
-                        <option value="Spa & Wellness">Spa & Wellness</option>
-                        <option value="Barbershop">Barbershop</option>
+                        <option value="">Choose a canton</option>
+                        {CANTONS.map((canton) => <option key={canton.code} value={canton.code}>{canton.name} ({canton.code})</option>)}
                       </select>
                     </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label htmlFor="company-businessPhone" className="font-semibold text-slate-700 block mb-1">
                         Business phone
@@ -361,6 +387,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <input id="company-businessPhone"
                         type="tel"
                         autoComplete="tel"
+                        placeholder="079 123 45 67"
                         value={formData.businessPhone}
                         onChange={(e) =>
                           setFormData({ ...formData, businessPhone: e.target.value })
@@ -370,60 +397,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Currency & Language */}
+                  {/* Time zone & Currency. Both follow from the country, so they are shown as text, not as fields. */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label htmlFor="company-currency" className="font-semibold text-slate-700 block mb-1">
-                        Currency
-                      </label>
-                    <input id="company-currency"
-                        type="text"
-                        disabled
-                        value={formData.currency}
-                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-400"
-                      />
+                      <p className="font-semibold text-slate-700 mb-1">Time zone</p>
+                      <p className="flex min-h-11 items-center text-sm text-slate-700">{timeZoneLabel(formData.timeZone)}</p>
                     </div>
                     <div>
-                      <label htmlFor="company-branchLanguage" className="font-semibold text-slate-700 block mb-1">
-                        Branch language setting
-                      </label>
-                    <select id="company-branchLanguage"
-                        value={formData.branchLanguage}
-                        onChange={(e) =>
-                          setFormData({ ...formData, branchLanguage: e.target.value })
-                        }
-                        className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
-                      >
-                        <option value="English">English</option>
-                        <option value="German">German</option>
-                        <option value="French">French</option>
-                        <option value="Italian">Italian</option>
-                      </select>
+                      <p className="font-semibold text-slate-700 mb-1">Currency</p>
+                      <p className="flex min-h-11 items-center text-sm text-slate-700">{formData.currency}</p>
                     </div>
-                  </div>
-
-                  {/* Time zone */}
-                  <div>
-                    <label htmlFor="company-timeZone" className="font-semibold text-slate-700 block mb-1">
-                      Time zone
-                    </label>
-                    <select id="company-timeZone"
-                      value={formData.timeZone}
-                      onChange={(e) =>
-                        setFormData({ ...formData, timeZone: e.target.value })
-                      }
-                      className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
-                    >
-                      <option value="Europe/Zurich (GMT+01:00)">
-                        Europe/Zurich (GMT+01:00)
-                      </option>
-                      <option value="Europe/Paris (GMT+01:00)">
-                        Europe/Paris (GMT+01:00)
-                      </option>
-                      <option value="Europe/London (GMT+00:00)">
-                        Europe/London (GMT+00:00)
-                      </option>
-                    </select>
                   </div>
                 </div>
 
@@ -440,7 +423,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <button type="button" onClick={() => logoInputRef.current?.click()} disabled={logoLoading} className="min-h-11 rounded-lg bg-indigo-50 px-3 font-semibold text-[#5551FF] disabled:opacity-50">{logoLoading ? 'Opening image…' : formData.logoDataUrl ? 'Change logo' : 'Upload logo'}</button>
                     {formData.logoDataUrl && <button type="button" onClick={() => { logoRequest.current += 1; setFormData((previous) => ({ ...previous, logoDataUrl: undefined })); setLogoLoading(false); setLogoError(''); }} className="min-h-11 rounded-lg px-3 font-semibold text-rose-600">Remove logo</button>}
                   </div>
-                  <p className="text-slate-500">PNG, JPEG or WebP, up to 500 KB. Select Save to apply the logo in this demo.</p>
+                  <p className="text-slate-500">PNG, JPEG or WebP, up to 500 KB. Select Save to apply the logo.</p>
                   {logoError && <p role="alert" className="text-rose-700">{logoError}</p>}
                 </div>
               </div>
@@ -483,11 +466,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                     {/* From - To Hours */}
                     {item.isOpen ? (
+                      // Lists of 24-hour times, not the browser's time field: that one follows the
+                      // device's language and shows "06:00 PM" on an English one.
                       <div className="grid w-full max-w-sm grid-cols-1 gap-3 min-[360px]:grid-cols-2">
                         <label className="min-w-0 space-y-1 text-slate-500"><span>From</span>
-                        <input type="time" value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
+                        <select value={item.from} aria-label={`${item.day} opening time`} onChange={(event) => handleTimeChange(index, 'from', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm text-slate-900 tabular-nums">
+                          {timeChoices(item.from).map((time) => <option key={time} value={time}>{time}</option>)}
+                        </select></label>
                         <label className="min-w-0 space-y-1 text-slate-500"><span>To</span>
-                        <input type="time" value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm" /></label>
+                        <select value={item.to} aria-label={`${item.day} closing time`} onChange={(event) => handleTimeChange(index, 'to', event.target.value)} className="block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm text-slate-900 tabular-nums">
+                          {timeChoices(item.to).map((time) => <option key={time} value={time}>{time}</option>)}
+                        </select></label>
+                        {offHalfHourNote(item) && <p className="text-amber-700 min-[360px]:col-span-2">{offHalfHourNote(item)}</p>}
                       </div>
                     ) : (
                       <span className="text-slate-400 text-xs italic">
@@ -506,19 +496,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-3">
                 <h2 className="text-base font-bold text-slate-900">Closed Dates and Absences</h2>
                 <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
-                  {(['closed', 'absences'] as const).map((tab) => <button key={tab} aria-pressed={closedDatesTab === tab} onClick={() => { setClosedDatesTab(tab); resetDateForm(); setDateFeedback(''); }} className={`px-3 py-1.5 rounded-lg ${closedDatesTab === tab ? 'bg-[#5551FF] text-white' : 'text-slate-600'}`}>{tab === 'closed' ? 'Closed Dates' : 'Absences'}</button>)}
+                  {(['closed', 'absences'] as const).map((tab) => <button key={tab} aria-pressed={closedDatesTab === tab} onClick={() => { setClosedDatesTab(tab); resetDateForm(); setDateFeedback(''); }} className={`min-h-11 px-3 py-1.5 rounded-lg ${closedDatesTab === tab ? 'bg-[#5551FF] text-white' : 'text-slate-600'}`}>{tab === 'closed' ? 'Closed Dates' : 'Absences'}</button>)}
                 </div>
               </div>
               <p className="text-xs text-slate-500">{closedDatesTab === 'closed' ? 'Close the whole salon for a holiday or another one-off event.' : 'Block booking for one employee while they are away.'} Both the first and last day are included. Changes save immediately; existing appointments are kept.</p>
               <div className="space-y-2">
                 {closedDatesTab === 'closed' ? closedDates.map((item) => <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                  <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
+                  <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-slate-500 mt-1 tabular-nums">{formatDateRange(item.start, item.end)}</p></div>
                   <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { setEditingDateId(item.id); setDateName(item.name); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); focusDateForm(); }}>Edit</button>
                   <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Closure removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                 </div>) : absences.map((item) => {
                   const employeeName = employees.find((employee) => employee.id === item.employeeId)?.name || 'Removed employee';
                   return <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                    <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{employeeName}{item.reason && `: ${item.reason}`}</p><p className="text-slate-500 mt-1">{formatDate(item.start)}{item.end !== item.start && ` to ${formatDate(item.end)}`}</p></div>
+                    <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{employeeName}{item.reason && `: ${item.reason}`}</p><p className="text-slate-500 mt-1 tabular-nums">{formatDateRange(item.start, item.end)}</p></div>
                     <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit absence for ${employeeName}`} onClick={() => { setEditingDateId(item.id); setDateName(item.reason || ''); setAbsenceEmployeeId(item.employeeId); setRangeStart(item.start); setRangeEnd(item.end); setDateError(''); setDateFeedback(''); focusDateForm(); }}>Edit</button>
                     <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete absence for ${employeeName}`} onClick={() => { onSaveAbsences(absences.filter((absence) => absence.id !== item.id)); if (editingDateId === item.id) resetDateForm(); setDateFeedback('Absence removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
                   </div>;
@@ -535,7 +525,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div><label htmlFor="closure-end" className="block mb-1 font-semibold text-slate-700">Last day</label><input id="closure-end" type="date" required min={rangeStart} value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} className={dateInputClass} /></div>
                 </div>
                 {dateError && <p role="alert" className="rounded-xl p-3 bg-rose-50 text-rose-700">{dateError}</p>}
-                <div className="flex gap-3"><button type="submit" disabled={closedDatesTab === 'absences' && employees.length === 0} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5551FF] text-white font-semibold disabled:opacity-50">{editingDateId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}Save {closedDatesTab === 'closed' ? 'closure' : 'absence'}</button>{editingDateId && <button type="button" onClick={resetDateForm} className="px-4 py-2 rounded-xl text-slate-600 bg-slate-100 font-semibold">Cancel</button>}</div>
+                <div className="flex gap-3"><button type="submit" disabled={closedDatesTab === 'absences' && employees.length === 0} className="inline-flex min-h-11 items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5551FF] text-white font-semibold disabled:opacity-50">{editingDateId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}Save {closedDatesTab === 'closed' ? 'closure' : 'absence'}</button>{editingDateId && <button type="button" onClick={resetDateForm} className="min-h-11 px-4 py-2 rounded-xl text-slate-600 bg-slate-100 font-semibold">Cancel</button>}</div>
               </form>
             </div>
           )}
@@ -621,7 +611,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div>
                   <label htmlFor="company-legalNote" className="font-semibold text-slate-700 block mb-1">
-                    Link to your legal note
+                    Link to your legal notice (imprint)
                   </label>
                     <input id="company-legalNote"
                     type="url"

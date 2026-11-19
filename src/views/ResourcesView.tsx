@@ -20,10 +20,15 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const [editingResource, setEditingResource] = useState<Resource | null>(null);
   const [formError, setFormError] = useState('');
   const [name, setName] = useState('');
-  const [type, setType] = useState<Resource['type']>('Room');
+  const [type, setType] = useState<Resource['type']>('Chair');
   const [capacity, setCapacity] = useState(1);
   const [selectedColor, setSelectedColor] = useState('#FDE047'); // yellow default
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // What a salon keeps here. A record with an older type keeps it and can still be edited.
+  const salonTypes: Resource['type'][] = ['Chair', 'Room', 'Equipment'];
+  const typeOptions = salonTypes.includes(type) ? salonTypes : [...salonTypes, type];
+  // Only a room seats several people; a chair or a steamer is always one.
+  const hasSeats = type === 'Room';
 
   useEffect(() => {
     if (!showModal) return;
@@ -52,7 +57,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   ];
 
   const openEditor = (resource: Resource | null = null) => {
-    setEditingResource(resource); setName(resource?.name ?? ''); setType(resource?.type ?? 'Room');
+    setEditingResource(resource); setName(resource?.name ?? ''); setType(resource?.type ?? 'Chair');
     setCapacity(resource?.capacity ?? 1); setSelectedColor(resource?.color ?? '#FDE047');
     setFormError(''); setShowModal(true);
   };
@@ -60,12 +65,12 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setFormError('Enter a resource name.'); return; }
-    if (!Number.isInteger(Number(capacity)) || Number(capacity) < 1) { setFormError('Capacity must be a whole number of at least 1.'); return; }
+    if (hasSeats && (!Number.isInteger(Number(capacity)) || Number(capacity) < 1)) { setFormError('Seats must be a whole number of at least 1.'); return; }
 
     const details: Omit<Resource, 'id'> = {
       name: name.trim(),
       type,
-      capacity: Number(capacity),
+      capacity: hasSeats ? Number(capacity) : 1,
       color: selectedColor,
       reserveEntireRoom: false,
       visibleOnline: false,
@@ -84,7 +89,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-          Resources
+          Rooms & equipment
         </h1>
 
         <button
@@ -95,7 +100,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
           <span>New Resource</span>
         </button>
       </div>
-      <p className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">Resources are an inventory-only demo. You can record and edit rooms, chairs and equipment. Capacity and resource availability do not control bookings, and resources are not shown on the customer booking page.</p>
+      <p className="text-sm text-slate-500">Keep track of your chairs, rooms and equipment.</p>
 
       {/* Content: Empty State vs Resource Cards */}
       {resources.length === 0 ? (
@@ -108,7 +113,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
               You don’t have any resources
             </h2>
             <p className="text-xs sm:text-sm text-slate-400">
-              Here you can add rooms, tables or rentals
+              Add your chairs, rooms and equipment here
             </p>
           </div>
 
@@ -148,8 +153,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
 
               <div className="text-xs text-slate-500 space-y-1">
                 <p>Type: <strong className="text-slate-700">{res.type}</strong></p>
-                <p>Capacity: <strong className="text-slate-700">{res.capacity} {res.capacity === 1 ? 'person' : 'people'}</strong></p>
-                <p>Inventory record · booking automation unavailable</p>
+                {res.type === 'Room' && <p>Seats: <strong className="text-slate-700">{res.capacity}</strong></p>}
               </div>
             </div>
           ))}
@@ -182,7 +186,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   id="resource-name"
                   type="text"
                   required
-                  placeholder="e.g. Table 4 or Chair 1"
+                  placeholder="e.g. Styling chair 3"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
@@ -199,35 +203,33 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                   onChange={(e) => setType(e.target.value as Resource['type'])}
                   className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden"
                 >
-                  <option value="Room">Room</option>
-                  <option value="Chair">Chair</option>
-                  <option value="Table">Table</option>
-                  <option value="Equipment">Equipment</option>
-                  <option value="Rental">Rental</option>
+                  {typeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
 
-              <div>
-                <label htmlFor="resource-capacity" className="font-semibold text-slate-700 block mb-1">
-                  Number of people
-                </label>
-                <input
-                  id="resource-capacity"
-                  type="number"
-                  inputMode="numeric"
-                  required
-                  min="1"
-                  step="1"
-                  value={capacity}
-                  onChange={(e) => setCapacity(Number(e.target.value))}
-                  className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden tabular-nums"
-                />
-              </div>
+              {hasSeats && (
+                <div>
+                  <label htmlFor="resource-capacity" className="font-semibold text-slate-700 block mb-1">
+                    Seats
+                  </label>
+                  <input
+                    id="resource-capacity"
+                    type="number"
+                    inputMode="numeric"
+                    required
+                    min="1"
+                    step="1"
+                    value={capacity}
+                    onChange={(e) => setCapacity(Number(e.target.value))}
+                    className="min-w-0 min-h-11 text-base sm:text-sm w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:border-[#5551FF] focus:outline-hidden tabular-nums"
+                  />
+                </div>
+              )}
 
               {/* Color Picker Swatches */}
               <div>
                 <label className="font-semibold text-slate-700 block mb-1.5">
-                  Display color
+                  Display colour
                 </label>
                 <div className="flex items-center gap-2 flex-wrap">
                   {colorPalette.map((col) => (
@@ -235,7 +237,7 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                       key={col.hex}
                       type="button"
                       onClick={() => setSelectedColor(col.hex)}
-                      aria-label={`${col.name} display color`}
+                      aria-label={`${col.name} display colour`}
                       aria-pressed={selectedColor === col.hex}
                       className="w-11 h-11 rounded-lg flex items-center justify-center transition-transform hover:scale-105 shadow-2xs relative border border-slate-200/50 focus-visible:outline-2 focus-visible:outline-[#5551FF]"
                       style={{ backgroundColor: col.hex }}
@@ -248,11 +250,6 @@ export const ResourcesView: React.FC<ResourcesViewProps> = ({
                 </div>
               </div>
 
-              <fieldset disabled aria-describedby="resource-automation-note" className="space-y-3 rounded-xl bg-slate-50 p-4 text-slate-500">
-                <legend className="font-semibold">Booking automation — unavailable in this demo</legend>
-                <p id="resource-automation-note">These options are not connected to scheduling. The capacity above is for inventory reference only.</p>
-                {['Reserve the entire room on first booking', 'Show in the customer booking page', 'Apply to all services', 'Use general booking hours'].map((label) => <label key={label} className="flex min-h-11 items-start gap-2.5 py-2"><input type="checkbox" checked={false} readOnly className="mt-0.5 h-5 w-5 shrink-0 rounded accent-[#5551FF]" /><span>{label}</span></label>)}
-              </fieldset>
               {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-rose-700">{formError}</p>}
 
               {/* Action Buttons */}

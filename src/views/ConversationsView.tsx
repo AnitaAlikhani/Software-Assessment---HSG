@@ -5,6 +5,7 @@ import {
   Bot,
   CalendarCheck,
   CheckCircle2,
+  Eye,
   Languages,
   Send,
   X,
@@ -12,14 +13,18 @@ import {
 import {
   AiAssistantSettings,
   AppointmentAction,
+  CalendarEvent,
   ChatMessage,
   Conversation,
   ConversationStatus,
 } from '../types';
-import { LANGUAGE_NAMES } from '../conversationData';
+import { conversationTimeLabel, LANGUAGE_NAMES } from '../conversationData';
 import { conversationForSelection, messageForOwner, ownerLanguageName } from '../conversationPresentation';
 import { useDemoState } from '../useDemoState';
 import type { LiveChannels } from '../liveWhatsApp';
+import { researchMode } from '../flags';
+import { ChannelBadge, channelLabel } from '../components/ChannelBadge';
+import { formatDate, formatPhone } from '../format';
 import { LiveTestStrip } from './LiveTestStrip';
 
 interface ConversationsViewProps {
@@ -38,10 +43,17 @@ interface ConversationsViewProps {
   ) => boolean;
   aiSettings: AiAssistantSettings;
   onOpenAiSettings: () => void;
-  /** Set while the live test runs: shows how testers can write to the AI. */
+  /** Study tool: with the research switch on, a strip shows how testers can write to the AI. */
   liveChannels?: LiveChannels | null;
   /** Confirms a booking request the AI collected in a live chat. */
   onConfirmBooking?: (id: string) => void;
+  /** The appointment a chat booked or is about, if it is in the calendar. */
+  appointmentFor?: (conversation: Conversation) => CalendarEvent | null;
+  onOpenAppointment?: (appointment: CalendarEvent) => void;
+  /** The salon's time zone: the times in the list are salon times. */
+  timeZone?: string;
+  /** Tests pass a fixed time. */
+  now?: Date;
 }
 
 type Filter = 'all' | 'needs' | 'languages' | 'ai';
@@ -63,22 +75,25 @@ const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }>
 /** Live chats can be in any language; show the language the AI detected. */
 const languageChip = (c: Conversation) => (c.live && c.languageLabel ? c.languageLabel : c.language);
 
-const CHANNEL_CHIP: Record<string, string> = {
-  Telegram: 'bg-sky-100 text-sky-700',
-  Website: 'bg-slate-100 text-slate-700',
-  WhatsApp: 'bg-[#25D366]/15 text-green-700',
-};
-
-/** "● Telegram": a real chat from the live test, with the channel it came from. */
-const LiveChip = ({ channel }: { channel: string }) => (
-  <span className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${CHANNEL_CHIP[channel] ?? CHANNEL_CHIP.WhatsApp}`}>
+/**
+ * Study tool: marks a real chat from a tester, so a moderator can tell it from the sample chats.
+ * Normal visitors see the channel mark on the avatar only.
+ */
+const LiveChip = () => (
+  <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700">
     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-    Live · {channel === 'Website' ? 'Web chat' : channel}
+    Live
   </span>
 );
 
-const bookingDate = (date: string) =>
-  new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+/**
+ * Under the name: the customer's number or handle where the salon has one, then the channel.
+ * A new website or Telegram chat has neither: then the channel stands alone, without a separator,
+ * and a stand-in label is never shown as a phone number. A number is written like every number;
+ * a masked one (WhatsApp) and a handle stay as they came.
+ */
+const contactLine = (c: Conversation) =>
+  [/\d/.test(c.phone) || c.phone.startsWith('@') ? formatPhone(c.phone) : '', channelLabel(c.channel)].filter(Boolean).join(' · ');
 
 export const ConversationsView: React.FC<ConversationsViewProps> = ({
   conversations,
@@ -93,6 +108,10 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOpenAiSettings,
   liveChannels,
   onConfirmBooking,
+  appointmentFor,
+  onOpenAppointment,
+  timeZone,
+  now = new Date(),
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
   const [drafts, setDrafts] = useDemoState<Record<string, string>>('conversationDrafts', {});
@@ -109,6 +128,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   const reviewPresentation = reviewConversation?.aiFollowUp
     ? messageForOwner(reviewConversation.aiFollowUp, reviewConversation.language, aiSettings)
     : null;
+  const research = researchMode();
 
   useEffect(() => {
     const dialog = reviewDialogRef.current;
@@ -154,6 +174,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   });
 
   const selected = conversationForSelection(conversations, selectedId);
+  const selectedAppointment = selected ? appointmentFor?.(selected) ?? null : null;
   const unavailableSelection = selectedId !== null && !selected;
   const selectedMessageCount = selected?.messages.length ?? 0;
 
@@ -288,7 +309,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             )}
             {m.untranslated && (
               <p className={`text-[10px] mt-1 italic ${subColor}`}>
-                Sent as written. Automatic translation is unavailable in this demo.
+                Not translated
               </p>
             )}
             {!m.untranslated && presentation.translationUnavailable && <p className={`text-[10px] mt-1 italic ${subColor}`}>{ownerLanguage} translation unavailable. Original message shown.</p>}
@@ -305,7 +326,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
         Conversations
       </h1>
 
-      {liveChannels && (
+      {research && liveChannels && (
         <LiveTestStrip
           channels={liveChannels}
           liveCount={conversations.filter(c => c.live).length}
@@ -357,10 +378,13 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     active ? 'bg-[#5551FF]/7' : 'hover:bg-slate-50'
                   }`}
                 >
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${c.avatarColor}`}
-                  >
-                    {c.initials}
+                  <div className="relative shrink-0 self-start">
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold ${c.avatarColor}`}
+                    >
+                      {c.initials}
+                    </div>
+                    <ChannelBadge channel={c.channel} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
@@ -373,9 +397,9 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                         >
                           {languageChip(c)}
                         </span>
-                        {c.live && <LiveChip channel={c.channel} />}
+                        {research && c.live && <LiveChip />}
                       </div>
-                      <span className="text-[11px] text-slate-400 shrink-0">{c.lastTime}</span>
+                      <span className="text-[11px] text-slate-400 shrink-0">{conversationTimeLabel(c, now, timeZone)}</span>
                     </div>
                     <p className="text-xs text-slate-500 truncate mt-0.5">{preview}</p>
                     <span
@@ -404,10 +428,13 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 All conversations
               </button>
               <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${selected.avatarColor}`}
-                >
-                  {selected.initials}
+                <div className="relative shrink-0">
+                  <div
+                    className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold ${selected.avatarColor}`}
+                  >
+                    {selected.initials}
+                  </div>
+                  <ChannelBadge channel={selected.channel} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -419,10 +446,10 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     >
                       {languageChip(selected)}
                     </span>
-                    {selected.live && <LiveChip channel={selected.channel} />}
+                    {research && selected.live && <LiveChip />}
                   </div>
                   <p className="text-xs text-slate-400 [overflow-wrap:anywhere]">
-                    {selected.phone} · {selected.channel}
+                    {contactLine(selected)}
                   </p>
                 </div>
               </div>
@@ -430,18 +457,28 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={onOpenAiSettings}
-                  title="Change in AI Assistant settings"
+                  title="Open AI receptionist settings"
                   className="flex min-h-11 min-w-0 items-center gap-1.5 px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/70 transition-colors"
                 >
                   <Bot className="w-4 h-4 shrink-0" />
-                  {selected.live ? `AI replies live in ${selected.channel === 'Website' ? 'the website chat' : selected.channel}` : aiSettings.askBeforeSending ? 'Review AI replies before sending' : 'Send demo AI replies without review'}
+                  {/* The approval setting acts when a chat is handed back to the AI; a live chat has no such waiting reply. */}
+                  {selected.takenOver ? 'AI paused in this chat' : !selected.live && aiSettings.askBeforeSending ? 'AI asks before sending' : 'AI replies automatically'}
                 </button>
                 {!selected.live && <button
                   onClick={() => setShowWhatsApp(true)}
                   className="flex min-h-11 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 shadow-2xs transition-colors"
                 >
-                  <span className={`w-4 h-4 rounded-full inline-block ${selected.channel === 'Instagram' ? 'bg-fuchsia-500' : 'bg-[#25D366]'}`} />
-                  Preview {selected.channel}
+                  <Eye className="w-4 h-4 shrink-0 text-slate-500" aria-hidden="true" />
+                  Customer view
+                </button>}
+                {/* The way from a chat to its booking; the appointment's details lead back with "Open conversation".
+                    A little narrower than its neighbour, so that the two share a row on a 375 px phone. */}
+                {selectedAppointment && onOpenAppointment && <button
+                  onClick={() => onOpenAppointment(selectedAppointment)}
+                  className="flex min-h-11 items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-[#5551FF] bg-white hover:bg-indigo-50 border border-slate-200 shadow-2xs transition-colors"
+                >
+                  <CalendarCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  View appointment
                 </button>}
               </div>
             </div>
@@ -451,9 +488,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               <div className="flex justify-center px-4 pt-3">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                   <Languages className="w-3.5 h-3.5 shrink-0" />
-                  {selected.live
-                    ? `AI translations: ${selected.languageLabel ?? LANGUAGE_NAMES[selected.language]} → ${ownerLanguage}`
-                    : `Demo translations: ${LANGUAGE_NAMES[selected.language]} → ${ownerLanguage}`}
+                  {`Translated from ${(selected.live && selected.languageLabel) || LANGUAGE_NAMES[selected.language]}`}
                 </span>
               </div>
             )}
@@ -463,7 +498,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   onClick={onOpenAiSettings}
                   className="min-h-11 text-xs font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-xl transition-colors"
                 >
-                  Translation is off. Turn it on in AI Assistant settings
+                  Translation is off. Turn it on in AI receptionist settings
                 </button>
               </div>
             )}
@@ -479,7 +514,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     {selected.bookingRequest.status === 'confirmed' ? 'Booked and in your calendar' : 'Booking request from the AI'}
                   </p>
                   <p className="text-xs text-slate-600">
-                    {selected.bookingRequest.service} · {bookingDate(selected.bookingRequest.date)} · {selected.bookingRequest.time} · {selected.bookingRequest.customerName}
+                    {selected.bookingRequest.service} · {formatDate(selected.bookingRequest.date)} · {selected.bookingRequest.time} · {selected.bookingRequest.customerName}
                   </p>
                   {selected.bookingRequest.status === 'requested' && (
                     <p className="text-[11px] text-slate-500 mt-0.5">Checked against opening hours. Confirming adds it to the calendar and tells the customer in their language.</p>
@@ -533,7 +568,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   <p className="text-xs text-slate-500">
                     {selected.live
                       ? 'The AI is paused for this chat. Type in your language; the customer gets it in theirs.'
-                      : 'The AI is paused for this chat. Suggested replies include a translation; typed replies are sent as written.'}
+                      : 'The AI is paused for this chat.'}
                   </p>
                 </div>
                 <button
@@ -590,13 +625,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                     setDrafts((previous) => ({ ...previous, [conversationId]: value }));
                   }}
                   disabled={locked}
-                  placeholder={
-                    locked
-                      ? 'Take over to reply'
-                      : selected.live
-                        ? 'Reply (AI translates it)'
-                        : 'Reply as owner (sent as written)'
-                  }
+                  placeholder={locked ? 'Take over to reply' : 'Write a reply…'}
                   className="min-w-0 flex-1 min-h-11 px-4 py-2.5 text-base sm:text-sm bg-slate-100 rounded-full border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden focus:ring-2 focus:ring-[#5551FF]/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 />
                 <button
@@ -611,12 +640,6 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               {!locked && selected.live && (
                 <p className="text-[10px] text-slate-400">
                   Your reply is translated into the customer’s language and sent {selected.channel === 'Website' ? 'to the website chat' : `on ${selected.channel}`}.
-                </p>
-              )}
-              {!locked && !selected.live && selected.language !== 'EN' && (
-                <p className="text-[10px] text-slate-400">
-                  Demo: suggested replies come with a ready translation. Free text is sent without
-                  a translation in this prototype.
                 </p>
               )}
             </div>
@@ -640,14 +663,14 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             <h2 id="ai-reply-review-title" className="text-lg font-bold text-slate-900">Review AI reply</h2>
             <button autoFocus type="button" aria-label="Close AI reply review" onClick={() => setReviewId(null)} className="flex size-11 shrink-0 items-center justify-center rounded-xl hover:bg-slate-100"><X className="size-5" /></button>
           </div>
-          <p className="mt-2 text-sm text-slate-600">Approve this scripted reply to {reviewConversation.customerName} in the demo. No external message will be sent.</p>
+          <p className="mt-2 text-sm text-slate-600">{`The AI wants to reply to ${reviewConversation.customerName} with this message.`}</p>
           <div className="mt-4 space-y-3 rounded-xl bg-slate-50 p-4 text-sm [overflow-wrap:anywhere]">
-            <div><p className="mb-1 text-xs font-semibold text-slate-500">Customer receives ({LANGUAGE_NAMES[reviewConversation.language]})</p><p>{reviewConversation.aiFollowUp.original}</p></div>
+            <div><p className="mb-1 text-xs font-semibold text-slate-500">{`Reply in ${LANGUAGE_NAMES[reviewConversation.language]}`}</p><p>{reviewConversation.aiFollowUp.original}</p></div>
             {reviewPresentation?.showOriginal && <div><p className="mb-1 text-xs font-semibold text-slate-500">{ownerLanguage} translation</p><p>{reviewPresentation.text}</p></div>}
             {reviewPresentation?.translationUnavailable && <p className="text-xs text-slate-500">{ownerLanguage} translation unavailable. Original reply shown.</p>}
-            {reviewConversation.aiFollowUp.appointmentAction && <p className="border-t border-slate-200 pt-3 text-xs text-slate-600">Appointment {reviewConversation.aiFollowUp.appointmentAction.type === 'book' ? 'booking' : 'change'}: {reviewConversation.aiFollowUp.appointmentAction.date} at {reviewConversation.aiFollowUp.appointmentAction.startTime}. Availability is checked before approval.</p>}
+            {reviewConversation.aiFollowUp.appointmentAction && <p className="border-t border-slate-200 pt-3 text-xs text-slate-600">Appointment {reviewConversation.aiFollowUp.appointmentAction.type === 'book' ? 'booking' : 'change'}: {formatDate(reviewConversation.aiFollowUp.appointmentAction.date)} at {reviewConversation.aiFollowUp.appointmentAction.startTime}. Availability is checked before approval.</p>}
           </div>
-          {!aiSettings.answerLanguages[reviewConversation.language] && <p className="mt-4 text-sm text-amber-700">Enable {LANGUAGE_NAMES[reviewConversation.language]} replies in AI Assistant settings before approving.</p>}
+          {!aiSettings.answerLanguages[reviewConversation.language] && <p className="mt-4 text-sm text-amber-700">Enable {LANGUAGE_NAMES[reviewConversation.language]} replies in AI receptionist settings before approving.</p>}
           {reviewError && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{reviewError}</p>}
           <div className="mt-5 flex flex-wrap justify-end gap-3">
             <button type="button" onClick={() => setReviewId(null)} className="min-h-11 rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
@@ -660,16 +683,16 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 else setReviewError(error);
               }}
               className="min-h-11 rounded-xl bg-[#5551FF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-            >Approve demo reply</button>
+            >Approve reply</button>
           </div>
         </dialog>
       )}
 
-      {/* Local channel preview, not an external messaging connection. */}
+      {/* The chat as the customer reads it: every message in their own language. Nothing can be typed here. */}
       {selected && (
         <dialog
           ref={whatsAppDialogRef}
-          aria-label={`${selected.channel} preview for ${selected.customerName}`}
+          aria-label={`Customer view of the chat with ${selected.customerName}`}
           onCancel={() => setShowWhatsApp(false)}
           onClose={() => setShowWhatsApp(false)}
           onClick={(event) => {
@@ -698,7 +721,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold truncate">{selected.customerName}</p>
-                <p className="text-[10px] text-white/60 truncate">{selected.phone}</p>
+                <p className="text-[10px] text-white/60 truncate">{contactLine(selected)}</p>
               </div>
               <button
                 onClick={() => setShowWhatsApp(false)}
@@ -710,7 +733,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2">
               <p className="text-center text-[10px] text-white/50 pb-1">
-                {selected.channel} preview · Demo messages only
+                {`How ${selected.customerName.split(' ')[0]} sees this chat`}
               </p>
               {selected.messages.map((m) => {
                 const mine = m.sender !== 'customer';
@@ -729,11 +752,6 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   </div>
                 );
               })}
-            </div>
-            <div className="shrink-0 px-3 py-3 bg-[#0b141a]">
-              <div className="rounded-full bg-[#202c33] px-4 py-2 text-xs text-white/40">
-                Preview only · Sending is disabled
-              </div>
             </div>
           </div>
         </dialog>

@@ -9,7 +9,8 @@ import {
   Check,
 } from 'lucide-react';
 import { Employee } from '../types';
-import { validateOptionalContact } from '../managementValidation';
+import { validateOptionalContact, validatePersonName } from '../managementValidation';
+import { formatPhone, normalizePhone } from '../format';
 
 interface EmployeesViewProps {
   employees: Employee[];
@@ -24,7 +25,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   onAddEmployee,
   onUpdateEmployee,
   onDeleteEmployee,
-  companyName = 'Bella Hair Salon',
+  companyName = '',
 }) => {
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -42,7 +43,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
   const openEditor = (employee: Employee | null = null) => {
     setEditingEmployee(employee); setFirstName(employee?.firstName ?? ''); setLastName(employee?.lastName ?? '');
-    setEmail(employee?.email ?? ''); setMobilePhone(employee?.phone ?? '');
+    setEmail(employee?.email ?? ''); setMobilePhone(formatPhone(employee?.phone ?? ''));
     setHidden(employee?.hidden ?? false); setCanBookOnline(employee?.canBookOnline ?? true);
     setFormError(''); setIsAddingMode(true);
   };
@@ -50,13 +51,14 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!firstName.trim() || !lastName.trim()) { setFormError('Enter the employee’s first and last names.'); return; }
-    const error = validateOptionalContact(email, mobilePhone);
+    const error = validatePersonName(`${firstName} ${lastName}`, 'the employee’s') ?? validateOptionalContact(email, mobilePhone);
     if (error) { setFormError(error); return; }
     const details: Omit<Employee, 'id' | 'initials' | 'name'> = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),
-      phone: mobilePhone.trim(),
+      // Stored once, in the international form; the list writes it out again.
+      phone: mobilePhone.trim() ? normalizePhone(mobilePhone) : '',
       status: editingEmployee?.status ?? 'Active',
       location: companyName,
       canBookOnline,
@@ -139,7 +141,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 <input
                   id="employee-email"
                   type="email"
-                  placeholder="jessica.schmid@bellahair.ch"
+                  placeholder="jessica.schmid@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border-b border-slate-300 focus:border-[#5551FF] focus:bg-white focus:outline-hidden text-base sm:text-sm transition-all rounded-t-lg"
@@ -153,7 +155,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 <input
                   id="employee-phone"
                   type="tel"
-                  placeholder="+41 78 555 12 34"
+                  placeholder="079 123 45 67"
                   value={mobilePhone}
                   onChange={(e) => setMobilePhone(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border-b border-slate-300 focus:border-[#5551FF] focus:bg-white focus:outline-hidden text-base sm:text-sm transition-all rounded-t-lg"
@@ -178,25 +180,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               </label>
             </div>
 
-            {/* Branches Section matching Figma */}
-            <div className="pt-4 border-t border-slate-100 space-y-3">
-              <label htmlFor="employee-branch" className="text-xs font-bold text-slate-700 block">Branches</label>
-              <select
-                id="employee-branch"
-                value={companyName}
-                disabled
-                className="min-w-0 min-h-11 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm text-slate-700 focus:outline-hidden"
-              >
-                <option value={companyName}>{companyName}</option>
-              </select>
-            </div>
-
-            {/* Branch Sub-settings */}
+            {/* A salon has one location here, so there is no branch to choose: only whether customers can book this person. */}
             <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60 space-y-3">
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                {companyName}
-              </p>
-
               <label className="relative flex min-h-11 items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -251,13 +236,6 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             </button>
           </div>
 
-          {/* Sub-header / Branch tab */}
-          <div className="border-b border-slate-200/80">
-            <span className="inline-block pb-2 text-xs font-bold text-[#5551FF] border-b-2 border-[#5551FF]">
-              {companyName}
-            </span>
-          </div>
-
           {/* Employees Table matching Figma */}
           {/* Phones: one card per employee so every field is readable without sideways scrolling */}
           <div className="space-y-2 md:hidden" aria-label="Employees">
@@ -270,6 +248,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   <div className="min-w-0 flex-1">
                     <button onClick={() => openEditor(emp)} aria-label={`Edit ${emp.name}`} title={`Edit ${emp.name}`} className="block min-h-11 w-full text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-[#5551FF]">{emp.name}</button>
                     <span className="mt-0.5 inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">{emp.status}</span>
+                    {emp.role && <span className="ml-1.5 mt-0.5 inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-[#5551FF] border border-indigo-100">{emp.role}</span>}
                   </div>
                   <button
                     onClick={() => onDeleteEmployee(emp.id)}
@@ -281,8 +260,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 </div>
                 <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
                   <dt className="text-slate-400">Email</dt><dd className="min-w-0 text-slate-600">{emp.email || '—'}</dd>
-                  <dt className="text-slate-400">Phone</dt><dd className="min-w-0 font-mono text-[11px] text-slate-600">{emp.phone || '—'}</dd>
-                  <dt className="text-slate-400">Location</dt><dd className="min-w-0 text-slate-500">{companyName}</dd>
+                  <dt className="text-slate-400">Phone</dt><dd className="min-w-0 tabular-nums text-slate-600">{emp.phone ? formatPhone(emp.phone) : '—'}</dd>
                 </dl>
               </div>
             ))}
@@ -297,10 +275,10 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               {/* Table Header */}
               <div className="grid grid-cols-12 border-b border-slate-100 text-xs font-semibold text-slate-400 py-3.5 pr-4 bg-slate-50">
                 <div className="col-span-3 sticky left-0 z-10 bg-slate-50 -my-3.5 py-3.5 pl-4 pr-3">Name</div>
-                <div className="col-span-3">Email</div>
+                <div className="col-span-4">Email</div>
                 <div className="col-span-2 text-center">Account</div>
                 <div className="col-span-2">Phone</div>
-                <div className="col-span-2 text-right">Location</div>
+                <div className="col-span-1"><span className="sr-only">Actions</span></div>
               </div>
 
               {/* Table Rows */}
@@ -318,10 +296,11 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                       <button onClick={() => openEditor(emp)} aria-label={`Edit ${emp.name}`} title={`Edit ${emp.name}`} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline">
                         {emp.name}
                       </button>
+                      {emp.role && <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-[#5551FF] border border-indigo-100">{emp.role}</span>}
                     </div>
 
                     {/* Email */}
-                    <div className="col-span-3 text-slate-600 truncate pr-2" title={emp.email}>
+                    <div className="col-span-4 text-slate-600 truncate pr-2" title={emp.email}>
                       {emp.email || '—'}
                     </div>
 
@@ -333,13 +312,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                     </div>
 
                     {/* Phone */}
-                    <div className="col-span-2 text-slate-600 font-mono text-[11px] truncate" title={emp.phone}>
-                      {emp.phone || '—'}
+                    <div className="col-span-2 text-slate-600 tabular-nums truncate pr-2" title={formatPhone(emp.phone)}>
+                      {emp.phone ? formatPhone(emp.phone) : '—'}
                     </div>
 
-                    {/* Location & Delete */}
-                    <div className="col-span-2 flex items-center justify-end gap-3 text-slate-500">
-                      <span className="truncate" title={companyName}>{companyName}</span>
+                    {/* Delete */}
+                    <div className="col-span-1 flex items-center justify-end text-slate-500">
                       <button
                         onClick={() => onDeleteEmployee(emp.id)}
                         className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg focus-visible:outline-2 focus-visible:outline-[#5551FF]"
@@ -351,6 +329,10 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   </div>
                 ))}
               </div>
+              {/* A workspace without a team says so on wide screens too, as the phone list does. */}
+              {employees.length === 0 && (
+                <p className="py-10 text-center text-xs text-slate-400">No employees yet. Add the first team member above.</p>
+              )}
             </div>
           </div>
         </div>

@@ -10,7 +10,8 @@ import {
   type AvailabilityContext,
 } from '../src/availability.ts';
 import type { AppointmentRequest, CalendarEvent, Employee, ServiceItem } from '../src/types.ts';
-import { createDemoShifts, initialShiftOverview } from '../src/mockData.ts';
+import { createDemoShifts } from '../src/demoSeed.ts';
+import { initialBookingHours } from '../src/mockData.ts';
 import { addDays } from '../src/scheduling.ts';
 
 const DATE = '2026-10-08';
@@ -317,24 +318,41 @@ test('next-date search reaches day 90 and never exceeds its 90-day window', () =
   assert.equal(getNextAvailableDate(c, 'haircut', DATE), null);
 });
 
-test('demo shifts roll forward with the salon date while preserving history and days off', () => {
+test('the shift plan follows the salon date: eight weeks of history, ninety days ahead, days off kept', () => {
   const now = new Date('2027-01-03T23:30:00Z'); // Monday 4 January in Zurich.
-  const original = JSON.stringify(initialShiftOverview);
   const shifts = createDemoShifts('Europe/Zurich', now);
-  assert.deepEqual(shifts[0].shifts['2027-01-04'], { start: '09:00', end: '18:00' });
-  assert.equal(shifts[1].shifts['2027-01-04'], null);
-  assert.deepEqual(shifts[1].shifts['2027-01-06'], { start: '10:00', end: '18:00' });
-  assert.equal(shifts[0].shifts['2027-01-09'], null);
-  assert.deepEqual(shifts[1].shifts['2027-01-09'], { start: '10:00', end: '18:00' });
-  assert.ok(Object.hasOwn(shifts[0].shifts, addDays('2027-01-04', 89)));
-  assert.ok(!Object.hasOwn(shifts[0].shifts, addDays('2027-01-04', 90)));
-  assert.deepEqual(shifts[0].shifts['2026-10-01'], initialShiftOverview[0].shifts['2026-10-01']);
-  shifts[0].shifts['2026-10-01']!.start = '12:00';
-  assert.equal(JSON.stringify(initialShiftOverview), original);
-  delete shifts[0].shifts['2027-01-04'];
+  const [anna, selina, luca] = shifts;
+  assert.deepEqual(shifts.map((entry) => entry.employeeId), ['emp-1', 'emp-2', 'emp-3']);
+  assert.equal(anna.shifts['2027-01-04'], null); // the salon is closed on Mondays
+  assert.deepEqual(anna.shifts['2027-01-05'], { start: '08:30', end: '17:00' });
+  assert.equal(selina.shifts['2027-01-05'], null); // her day off
+  assert.deepEqual(selina.shifts['2027-01-06'], { start: '10:00', end: '18:30' });
+  assert.deepEqual(luca.shifts['2027-01-09'], { start: '09:00', end: '16:00' });
+  assert.equal(anna.shifts['2027-01-10'], null); // Sunday
+  // From eight weeks before this week's Monday, so past appointments have a shift, to 90 days ahead.
+  assert.ok(Object.hasOwn(anna.shifts, '2026-11-09'));
+  assert.ok(!Object.hasOwn(anna.shifts, '2026-11-08'));
+  assert.ok(Object.hasOwn(anna.shifts, addDays('2027-01-04', 89)));
+  assert.ok(!Object.hasOwn(anna.shifts, addDays('2027-01-04', 90)));
+  // Every shift lies inside the opening hours of its day: nobody is rostered while the salon is closed.
+  for (const entry of shifts) {
+    for (const [date, shift] of Object.entries(entry.shifts)) {
+      if (!shift) continue;
+      const weekday = new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+      const hours = initialBookingHours.find((day) => day.day === weekday)!;
+      assert.ok(hours.isOpen && hours.from <= shift.start && shift.end <= hours.to, `${entry.employeeName} ${date}`);
+    }
+  }
+  // The same clock gives equal data in separate objects.
+  const again = createDemoShifts('Europe/Zurich', now);
+  assert.deepEqual(again, shifts);
+  again[0].shifts['2027-01-05']!.start = '12:00';
+  assert.equal(shifts[0].shifts['2027-01-05']!.start, '08:30');
+  // A date without a shift entry never falls back to the opening hours.
+  delete shifts[0].shifts['2027-01-05'];
   const c = context();
   c.now = now;
-  c.bookingHours = [{ day: 'Monday', isOpen: true, from: '09:00', to: '18:00' }];
+  c.bookingHours = [{ day: 'Tuesday', isOpen: true, from: '09:00', to: '18:00' }];
   c.shiftOverview = shifts;
-  assert.deepEqual(getAvailableSlots(c, selection({ date: '2027-01-04' })), []);
+  assert.deepEqual(getAvailableSlots(c, selection({ date: '2027-01-05' })), []);
 });

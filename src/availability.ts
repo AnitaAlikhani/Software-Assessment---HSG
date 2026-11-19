@@ -194,6 +194,31 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
 export const getAvailableSlots = (context: AvailabilityContext, selection: AvailabilitySelection): string[] =>
   getAvailability(context, selection).slots;
 
+/**
+ * The first active employee who offers the service and is free at that time. Used when a chat
+ * booking names no stylist: the owner's rules apply, so services that are not offered online count.
+ */
+export const firstFreeEmployee = (
+  context: AvailabilityContext, serviceId: string, date: string, startTime: string, excludeEventId?: string,
+): Employee | null => context.employees.find((employee) => getAvailableSlots(context, {
+  date, serviceId, employeeId: employee.id, mode: 'owner', excludeEventId,
+}).includes(startTime)) ?? null;
+
+/**
+ * True when the time is not completely inside the salon's regular hours of that weekday.
+ * The owner may still book it on purpose (outsideHoursApproved); this says whether that is the case.
+ */
+export const isOutsideOpeningHours = (
+  bookingHours: BookingHoursDay[], date: string, startTime: string, endTime: string,
+): boolean => {
+  const day = parseDate(date);
+  const interval = parseInterval(startTime, endTime);
+  if (!day || !interval) return false;
+  const hours = bookingHours.find((item) => item.day === weekdays[day.getUTCDay()]);
+  const open = hours?.isOpen ? parseInterval(hours.from, hours.to) : null;
+  return !open || interval.start < open.start || interval.end > open.end;
+};
+
 /** All owner and scripted-chat calendar writes use the same physical booking rules. */
 export const validateCalendarEvent = (
   context: AvailabilityContext,

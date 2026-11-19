@@ -2,22 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from '../src/appointmentActions';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, formatDate, startOfWeek } from '../src/scheduling';
-import { initialAppointmentRequests, initialCalendarEvents, initialServices } from '../src/mockData';
+import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
+import { isOutsideOpeningHours } from '../src/availability';
 import { createDemoConversations, DEFAULT_DEMO_CONVERSATION_ID, upcomingWeekday } from '../src/conversationData';
-import { demoConversations, FIXED_NOW } from './fixedClock';
+import { demoConversations, demoEvents, demoRequests, FIXED_NOW } from './fixedClock';
+
+// A request for Thursday 1 October 2026, the week before the fixed clock.
+const octoberRequest = { ...demoRequests[0], date: '2026-10-01', dateStr: 'Thu, 01.10.2026' };
 
 test('accepting an October 1 request preserves the full date and requested time', () => {
-  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], timeStr: '16:00 - 16:30' }, initialServices);
+  const event = appointmentFromRequest({ ...octoberRequest, timeStr: '16:00 - 16:30' }, initialServices);
   assert.equal(event.date, '2026-10-01');
-  assert.equal(event.dateDisplay, 'Thu 01/10');
+  assert.equal(event.dateDisplay, 'Thu 01.10.');
   assert.equal(event.day, 'thu');
   assert.equal(event.startTime, '16:00');
   assert.equal(event.endTime, '16:30');
-  assert.notEqual(event.date, initialCalendarEvents.find((item) => item.day === 'thu')!.date);
+  assert.notEqual(event.date, demoEvents.find((item) => item.id === 'cal-2')!.date); // another Thursday
 });
 
 test('appointments use the selected service duration, including 90-minute services', () => {
-  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 16:30' }, initialServices);
+  const event = appointmentFromRequest({ ...octoberRequest, serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 16:30' }, initialServices);
   assert.equal(event.endTime, '17:30');
   for (const hour of ['09:00', '10:00', '11:00', '13:30', '14:00', '16:00']) {
     const [h, m] = hour.split(':').map(Number);
@@ -28,7 +32,7 @@ test('appointments use the selected service duration, including 90-minute servic
 
 test('accepted requests retain their service identity after a service is renamed', () => {
   const services = initialServices.map((service) => service.id === 'srv-3' ? { ...service, name: 'Full Colour' } : service);
-  const event = appointmentFromRequest({ ...initialAppointmentRequests[0], serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 17:30' }, services);
+  const event = appointmentFromRequest({ ...octoberRequest, serviceId: 'srv-3', serviceName: 'Colouring', timeStr: '16:00 - 17:30' }, services);
   assert.equal(event.serviceId, 'srv-3');
   assert.equal(event.serviceName, 'Full Colour');
   assert.equal(event.endTime, '17:30');
@@ -38,34 +42,38 @@ test('owner and AI booking confirmations reference one stable appointment', () =
   const camille = demoConversations.find((item) => item.id === 'conv-camille')!;
   const ownerAction = camille.quickReplies!.find((reply) => reply.appointmentAction)!.appointmentAction!;
   const aiAction = camille.aiFollowUp!.appointmentAction!;
-  const ownerBooking = appointmentFromConversationAction(ownerAction, camille, initialCalendarEvents, initialServices, false)!;
+  const ownerBooking = appointmentFromConversationAction(ownerAction, camille, demoEvents, initialServices, initialEmployees, false)!;
   // The sample chats are built for Monday 5 October 2026 (tests/fixedClock.ts): "Friday" is the 9th.
   assert.equal(ownerBooking.date, '2026-10-09');
   assert.equal(ownerBooking.startTime, '11:00');
   assert.equal(ownerBooking.endTime, '12:30');
-  const events = upsertAppointment(initialCalendarEvents, ownerBooking);
-  const aiBooking = appointmentFromConversationAction(aiAction, camille, events, initialServices, true)!;
+  const events = upsertAppointment(demoEvents, ownerBooking);
+  const aiBooking = appointmentFromConversationAction(aiAction, camille, events, initialServices, initialEmployees, true)!;
   const confirmed = upsertAppointment(events, aiBooking);
   assert.equal(confirmed.filter((item) => item.id === ownerAction.appointmentId).length, 1);
-  assert.equal(confirmed.length, initialCalendarEvents.length + 1);
+  assert.equal(confirmed.length, demoEvents.length + 1);
 });
 
 test('rescheduling Giulia moves her existing appointment without adding another', () => {
   const giulia = demoConversations.find((item) => item.id === 'conv-giulia')!;
   const action = giulia.quickReplies![0].appointmentAction!;
-  const original = initialCalendarEvents.find((item) => item.id === giulia.appointmentId)!;
-  const moved = appointmentFromConversationAction(action, giulia, initialCalendarEvents, initialServices, false)!;
-  const events = upsertAppointment(initialCalendarEvents, moved);
+  const original = demoEvents.find((item) => item.id === giulia.appointmentId)!;
+  const moved = appointmentFromConversationAction(action, giulia, demoEvents, initialServices, initialEmployees, false)!;
+  const events = upsertAppointment(demoEvents, moved);
   assert.equal(moved.id, original.id);
   assert.equal(moved.date, '2026-10-10'); // "Saturday" as seen from Monday 5 October 2026
   assert.equal(moved.day, 'sat');
-  assert.equal(moved.outsideHoursApproved, true);
+  // The salon is open on Saturdays, so the move needs no approval outside opening hours.
+  assert.equal(moved.outsideHoursApproved, false);
+  assert.equal(isOutsideOpeningHours(initialBookingHours, moved.date, moved.startTime, moved.endTime), false);
+  assert.equal(moved.customerId, original.customerId);
+  assert.equal(moved.employeeId, original.employeeId);
   assert.equal(moved.startTime, '10:00');
   assert.equal(moved.endTime, '10:30');
   assert.equal(moved.staffName, original.staffName);
-  assert.equal(events.length, initialCalendarEvents.length);
+  assert.equal(events.length, demoEvents.length);
   assert.equal(events.filter((item) => item.id === original.id && item.date === original.date).length, 0);
-  assert.equal(appointmentFromConversationAction(action, giulia, [], initialServices, false), null);
+  assert.equal(appointmentFromConversationAction(action, giulia, [], initialServices, initialEmployees, false), null);
 });
 
 test('offers do not make bookings before confirmation', () => {
@@ -77,8 +85,9 @@ test('offers do not make bookings before confirmation', () => {
 });
 
 test('date helpers preserve calendar dates across week, year and DST boundaries', () => {
-  assert.equal(formatDate('2026-10-01'), '1 October 2026');
-  assert.equal(formatCalendarDate('2026-10-01'), 'Thu 01/10');
+  // The two names the screens import from scheduling.ts give the Swiss forms (tests/format.test.ts has the rest).
+  assert.equal(formatDate('2026-10-01'), 'Thu, 01.10.2026');
+  assert.equal(formatCalendarDate('2026-10-01'), 'Thu 01.10.');
   assert.equal(dayKeyForDate('2026-10-01'), 'thu');
   assert.equal(startOfWeek('2026-10-01'), '2026-09-28');
   assert.equal(addDays('2026-10-01', 7), '2026-10-08');

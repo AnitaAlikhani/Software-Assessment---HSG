@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseRoute, routeHash } from '../src/navigation';
 import { mostRecentAiAppointment, nextUpcomingAppointment } from '../src/dashboard';
-import { initialAppointmentRequests, initialCalendarEvents, initialServices } from '../src/mockData';
+import { initialServices } from '../src/mockData';
+import { demoEvents, demoRequests } from './fixedClock';
 import { appointmentFromRequest, upsertAppointment } from '../src/appointmentActions';
 
 test('search and notification routes retain exact record IDs across navigation', () => {
@@ -21,7 +22,7 @@ test('unknown routes fall back and unrelated selection IDs are ignored', () => {
 });
 
 test('next appointment is derived from the earliest upcoming calendar record', () => {
-  const base = initialCalendarEvents[0];
+  const base = demoEvents[0];
   const events = [
     { ...base, id: 'later', date: '2026-10-15', startTime: '09:00' },
     { ...base, id: 'past', date: '2026-10-14', startTime: '10:00' },
@@ -35,14 +36,14 @@ test('next appointment is derived from the earliest upcoming calendar record', (
 });
 
 test('next appointment uses salon timezone across midnight and does not mutate calendar order', () => {
-  const events = [{ ...initialCalendarEvents[0], id: 'tomorrow', date: '2026-10-15', startTime: '00:30' }];
+  const events = [{ ...demoEvents[0], id: 'tomorrow', date: '2026-10-15', startTime: '00:30' }];
   assert.equal(nextUpcomingAppointment(events, new Date('2026-10-14T22:45:00Z')), null);
   assert.equal(events[0].id, 'tomorrow');
 });
 
 test('accepting an AI request replaces the previous AI booking notification target', () => {
-  const accepted = appointmentFromRequest(initialAppointmentRequests[0], initialServices);
-  const calendar = upsertAppointment(initialCalendarEvents, accepted);
+  const accepted = appointmentFromRequest(demoRequests[0], initialServices);
+  const calendar = upsertAppointment(demoEvents, accepted);
   assert.equal(mostRecentAiAppointment(calendar)?.id, accepted.id);
   assert.notEqual(mostRecentAiAppointment(calendar.filter(event => event.id !== accepted.id))?.id, accepted.id);
 });

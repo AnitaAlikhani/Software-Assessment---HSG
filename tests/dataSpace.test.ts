@@ -1,42 +1,22 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { dataSpace, usesLiveData } from '../server/environment';
-import { claimMessage, deleteConversation, keyPrefix, listConversations, loadConversation, saveConversation } from '../server/store';
+import {
+  claimMessage, DELETE_SCRIPT, deleteConversation, deletedSince, deleteOwnChat, keyPrefix, listConversations, loadConversation, loadForUpdate,
+  NO_DELETION_SEEN, releaseMessage, SAVE_SCRIPT, saveConversation,
+} from '../server/store';
 import { GET as spaceRoute } from '../api/space';
 import { GET as telegramSetup } from '../api/telegram/setup';
 import { GET as conversationsRoute } from '../api/whatsapp/conversations';
 import { GET as whatsappVerification } from '../api/whatsapp/webhook';
 import type { LiveConversation } from '../server/whatsappCore';
+import { Command, deployedWith, FakeStore } from './fakeStore';
+import { FIXED_NOW } from './fixedClock';
 
 const WORK_BRANCH_PREVIEW = { VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'launch' };
-const SETTINGS = ['VERCEL_ENV', 'VERCEL_GIT_COMMIT_REF', 'LIVE_DATA_SPACE', 'LIVE_ACCESS_KEY', 'TELEGRAM_BOT_TOKEN',
-  'WHATSAPP_VERIFY_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN'];
-type Command = (string | number)[];
-
-/**
- * Runs `work` as if the site were deployed with exactly these settings. Storage is replaced by a
- * recorder and every other network call fails, so nothing leaves the test. Everything is put back afterwards.
- */
-async function deployedWith(settings: Record<string, string>, work: () => Promise<unknown>): Promise<Command[]> {
-  const before = new Map(SETTINGS.map(name => [name, process.env[name]]));
-  const realFetch = globalThis.fetch;
-  const commands: Command[] = [];
-  for (const name of SETTINGS) delete process.env[name];
-  Object.assign(process.env, { KV_REST_API_URL: 'https://storage.invalid', KV_REST_API_TOKEN: 'test-token' }, settings);
-  globalThis.fetch = (async (input: unknown, init?: { body?: unknown }) => {
-    if (String(input) !== 'https://storage.invalid') throw new Error(`unexpected network call to ${String(input)}`);
-    const command = JSON.parse(String(init?.body)) as Command;
-    commands.push(command);
-    const result = command[0] === 'SMEMBERS' ? ['4179'] : command[0] === 'MGET' ? [null] : command[0] === 'GET' ? null : 'OK';
-    return new Response(JSON.stringify({ result }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }) as typeof fetch;
-  try { await work(); }
-  finally {
-    globalThis.fetch = realFetch;
-    for (const [name, value] of before) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
-  }
-  return commands;
-}
+const NOW = FIXED_NOW.getTime();
+const FOURTEEN_DAYS = 14 * 24 * 60 * 60;
 
 test('only a Vercel preview of a work branch is moved away from the live chats', () => {
   // The live site, however it is deployed, and every copy we know nothing about keep the live chats.
@@ -70,39 +50,70 @@ test('the live site keeps its old key names and the preview space never shares t
 });
 
 const chat = { waId: '4179' } as LiveConversation;
+// What the storage holds for it: the chat, and the time it is deleted unless something happens in it.
+const stored = JSON.stringify({ ...chat, keptUntil: NOW + FOURTEEN_DAYS * 1000 });
+/** Key names that must not show a customer id or a message id carry a hash of it instead. */
+const hashed = (text: string) => createHash('sha256').update(text).digest('hex');
 const everyStoreAction = async () => {
-  await saveConversation(chat);
+  await saveConversation(chat, NO_DELETION_SEEN, NOW);
   await loadConversation('4179');
+  await loadForUpdate('4179');
+  await deletedSince('4179', NO_DELETION_SEEN);
   await listConversations();
   await claimMessage('wamid.1');
+  await releaseMessage('wamid.1');
+  await deleteOwnChat('4179');
   await deleteConversation('4179');
 };
+/** A deletion leaves a marker with a new random value each time. Checks that it is one, and puts a fixed word in its place. */
+const withoutRandomValues = (commands: Command[]) => {
+  const values = commands.filter(command => command[1] === DELETE_SCRIPT).map(command => String(command[6]));
+  for (const value of values) assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.equal(new Set(values).size, values.length);
+  return commands.map(command => command[1] === DELETE_SCRIPT ? command.map((part, index) => index === 6 ? 'RANDOM' : part) : command);
+};
 
-test('on the live site every storage command uses exactly the keys it used before', async () => {
+test('on the live site every chat is stored under the key it always had, and no other key names a customer', async () => {
   const liveSites: Record<string, string>[] = [
     {}, { VERCEL_ENV: 'production' }, { VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'nil-live-whatsapp' }, { VERCEL_ENV: 'preview' },
   ];
+  const marker = `slotbee:live:gone:${hashed('4179')}`;
+  const claim = `slotbee:live:msg:${hashed('wamid.1')}`;
   for (const settings of liveSites) {
-    assert.deepEqual(await deployedWith(settings, everyStoreAction), [
-      ['SET', 'slotbee:live:chat:4179', JSON.stringify(chat), 'EX', 2592000],
-      ['SADD', 'slotbee:live:index', '4179'],
-      ['EXPIRE', 'slotbee:live:index', 2592000],
-      ['GET', 'slotbee:live:chat:4179'],
+    assert.deepEqual(withoutRandomValues(await deployedWith(settings, everyStoreAction, { store: new FakeStore(NOW) })), [
+      // Saving: the chat under its own key, with its 14 days, unless it was deleted meanwhile. The
+      // key name and the stored text are the ones every chat saved before this version has, so
+      // those stay reachable. No list of chats is written.
+      ['EVAL', SAVE_SCRIPT, 2, 'slotbee:live:chat:4179', marker, 'none', stored, FOURTEEN_DAYS],
+      // Once an hour a save looks whether the earlier version's list still holds ids to take out.
       ['SMEMBERS', 'slotbee:live:index'],
+      // Reading one chat to show it, and reading it with its deletion marker to change it.
+      ['GET', 'slotbee:live:chat:4179'],
+      ['MGET', 'slotbee:live:chat:4179', marker],
+      ['GET', marker],
+      // Listing all chats: by their key names, and a poll never writes.
+      ['SCAN', '0', 'MATCH', 'slotbee:live:chat:*', 'COUNT', 1000],
       ['MGET', 'slotbee:live:chat:4179'],
-      ['SET', 'slotbee:live:msg:wamid.1', '1', 'NX', 'EX', 172800],
-      ['DEL', 'slotbee:live:chat:4179'],
-      ['SREM', 'slotbee:live:index', '4179'],
+      // A message id can give the customer away, so a claim is named after a hash of it.
+      ['SET', claim, '1', 'NX', 'EX', 172800],
+      ['DEL', claim],
+      // A customer deleting their own chat touches that chat only: it leaves the marker for ten
+      // minutes and takes the id off the earlier version's list ...
+      ['EVAL', DELETE_SCRIPT, 3, 'slotbee:live:chat:4179', marker, 'slotbee:live:index', 'RANDOM', 600, '4179'],
+      // ... the owner's delete also clears the old single-key storage, as before.
+      ['EVAL', DELETE_SCRIPT, 3, 'slotbee:live:chat:4179', marker, 'slotbee:live:index', 'RANDOM', 600, '4179'],
       ['DEL', 'slotbee:live-whatsapp'],
     ]);
   }
 });
 
 test('a preview of a work branch never touches a key of the live site', async () => {
-  const commands = await deployedWith(WORK_BRANCH_PREVIEW, everyStoreAction);
-  assert.deepEqual(commands.map(command => command[0]), ['SET', 'SADD', 'EXPIRE', 'GET', 'SMEMBERS', 'MGET', 'SET', 'DEL', 'SREM']);
+  const commands = await deployedWith(WORK_BRANCH_PREVIEW, everyStoreAction, { store: new FakeStore(NOW) });
+  assert.deepEqual(commands.map(command => command[0]),
+    ['EVAL', 'SMEMBERS', 'GET', 'MGET', 'GET', 'SCAN', 'MGET', 'SET', 'DEL', 'EVAL', 'EVAL']);
+  // Every key, and the pattern the listing searches with.
   const keys = commands.flatMap(command => command.slice(1).filter((part): part is string => typeof part === 'string' && part.startsWith('slotbee:')));
-  assert.equal(keys.length, 9);
+  assert.equal(keys.length, 17);
   for (const key of keys) assert.ok(key.startsWith('slotbee:preview:live:'), key);
 });
 
@@ -133,16 +144,23 @@ test('every copy can say which chats it uses, and a preview does not advertise t
   const space = (key: string) => spaceRoute(new Request(`https://copy.invalid/api/space?key=${key}`));
   const inbox = () => conversationsRoute(new Request('https://copy.invalid/api/whatsapp/conversations', { headers: { 'x-live-key': 'right-key' } }));
 
+  // The preview's own storage holds one chat.
+  const previewStore = new FakeStore(NOW);
+  const previewChat: LiveConversation = { waId: '4179', channel: 'WhatsApp', customerName: 'Sofia Rossi', language: 'IT', status: 'ai-handled', takenOver: false, messages: [], updatedAt: NOW };
+  await deployedWith(WORK_BRANCH_PREVIEW, () => saveConversation(previewChat, NO_DELETION_SEEN, NOW), { store: previewStore });
+  // The live site's storage is the same database: a live chat with the same customer must not show up in the preview.
+  await deployedWith({}, () => saveConversation({ ...previewChat, customerName: 'A live customer' }, NO_DELETION_SEEN, NOW), { store: previewStore });
   const previewCommands = await deployedWith({ ...WORK_BRANCH_PREVIEW, LIVE_ACCESS_KEY: 'right-key', TELEGRAM_BOT_TOKEN: 'bot-token' }, async () => {
     assert.equal((await space('wrong-key')).status, 401);
     assert.deepEqual(await (await space('right-key')).json(),
       { dataSpace: 'preview', usesLiveChats: false, vercelEnvironment: 'preview', branch: 'launch' });
     // With a bot token set, asking Telegram for the bot name would be a network call, which fails this test.
-    const body = (await (await inbox()).json()) as { enabled: boolean; channels: { telegram: string | null } };
+    const body = (await (await inbox()).json()) as { enabled: boolean; conversations: { customerName: string }[]; channels: { telegram: string | null } };
     assert.equal(body.enabled, true);
+    assert.deepEqual(body.conversations.map(item => item.customerName), ['Sofia Rossi']);
     assert.equal(body.channels.telegram, null);
-  });
-  assert.deepEqual(previewCommands, [['SMEMBERS', 'slotbee:preview:live:index'], ['MGET', 'slotbee:preview:live:chat:4179']]);
+  }, { store: previewStore });
+  assert.deepEqual(previewCommands, [['SCAN', '0', 'MATCH', 'slotbee:preview:live:chat:*', 'COUNT', 1000], ['MGET', 'slotbee:preview:live:chat:4179']]);
 
   await deployedWith({ LIVE_ACCESS_KEY: 'right-key' }, async () => {
     assert.deepEqual(await (await space('right-key')).json(),

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ExternalLink, LoaderCircle, Mail, X } from 'lucide-react';
 import { WAITLIST_FORM_URL } from '../config';
+import { researchMode } from '../flags';
+import { PILOT_BANNER_DISMISSED_KEY } from '../researchTools';
 
 interface PilotInterestProps {
   isOpen: boolean;
@@ -8,9 +10,16 @@ interface PilotInterestProps {
   onClose: () => void;
 }
 
-export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, onClose }) => {
+/**
+ * The pilot banner and its interest form are a study instrument, not part of the product:
+ * a normal visitor never sees them. A study link (?research=1) brings them back.
+ */
+export const PilotInterest: React.FC<PilotInterestProps> = (props) =>
+  researchMode() ? <PilotInterestTools {...props} /> : null;
+
+const PilotInterestTools: React.FC<PilotInterestProps> = ({ isOpen, onOpen, onClose }) => {
   const [isVisible, setIsVisible] = useState(() => {
-    try { return sessionStorage.getItem('bella-interest-dismissed') !== 'true'; } catch { return true; }
+    try { return sessionStorage.getItem(PILOT_BANNER_DISMISSED_KEY) !== 'true'; } catch { return true; }
   });
   const [formOpened, setFormOpened] = useState(false);
   const [formLoaded, setFormLoaded] = useState(false);
@@ -69,7 +78,7 @@ export const PilotInterest: React.FC<PilotInterestProps> = ({ isOpen, onOpen, on
                 type="button"
                 onClick={() => {
                   setIsVisible(false);
-                  try { sessionStorage.setItem('bella-interest-dismissed', 'true'); } catch { /* The banner can still be dismissed when storage is unavailable. */ }
+                  try { sessionStorage.setItem(PILOT_BANNER_DISMISSED_KEY, 'true'); } catch { /* The banner can still be dismissed when storage is unavailable. */ }
                   requestAnimationFrame(() => {
                     const target = document.querySelector<HTMLElement>('#main-content h1') ?? document.getElementById('main-content');
                     if (target) { target.tabIndex = -1; target.focus({ preventScroll: true }); }

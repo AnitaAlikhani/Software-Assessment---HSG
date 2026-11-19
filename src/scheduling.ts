@@ -1,26 +1,19 @@
 import type { BookingHoursDay, CalendarEvent } from './types.js';
+import { DEFAULT_TIME_ZONE, openingHoursDay, timeZoneId, zonedDateTime } from './format.js';
 
-// Date-only values are parsed and formatted in UTC so browser time zones cannot
+// How dates are written is decided in format.ts. The two names below stay here for the many
+// files that import them from this module: "Thu, 19.11.2026" and the short "Thu 19.11.".
+export { formatDate, formatDateShort as formatCalendarDate } from './format.js';
+
+// Date-only values are parsed in UTC so browser time zones cannot
 // move an appointment onto the previous or following day.
 const parseDate = (date: string) => new Date(`${date}T00:00:00.000Z`);
 const dayKeys: CalendarEvent['day'][] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
-export const DEFAULT_SALON_TIME_ZONE = 'Europe/Zurich';
+export const DEFAULT_SALON_TIME_ZONE = DEFAULT_TIME_ZONE;
 
-export const salonTimeZone = (timeZone = DEFAULT_SALON_TIME_ZONE): string => {
-  const zone = timeZone.trim().split(/\s+/)[0] || DEFAULT_SALON_TIME_ZONE;
-  try {
-    new Intl.DateTimeFormat('en-GB', { timeZone: zone });
-    return zone;
-  } catch {
-    return DEFAULT_SALON_TIME_ZONE;
-  }
-};
-
-/** Show the offset for the displayed date, including winter/summer changes. */
-export const calendarTimeZoneOffset = (date: string, timeZone = DEFAULT_SALON_TIME_ZONE): string =>
-  new Intl.DateTimeFormat('en-GB', { timeZone: salonTimeZone(timeZone), timeZoneName: 'shortOffset' })
-    .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')?.value ?? '';
+/** The salon's time zone as a plain id ("Europe/Zurich"), whatever a stored setting looks like. */
+export const salonTimeZone = (timeZone = DEFAULT_SALON_TIME_ZONE): string => timeZoneId(timeZone);
 
 /** Include the whole opening window and any existing appointments outside it. */
 export const calendarHours = (dates: string[], bookingHours: BookingHoursDay[], events: CalendarEvent[]): string[] => {
@@ -36,7 +29,7 @@ export const calendarHours = (dates: string[], bookingHours: BookingHoursDay[], 
     if (start !== null && end !== null && end > start) intervals.push({ start, end });
   };
   for (const date of dates) {
-    const weekday = parseDate(date).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+    const weekday = openingHoursDay(date);
     const opening = bookingHours.find(day => day.day === weekday && day.isOpen);
     if (opening) include(opening.from, opening.to);
   }
@@ -48,41 +41,17 @@ export const calendarHours = (dates: string[], bookingHours: BookingHoursDay[], 
   return Array.from({ length: Math.max(1, last - first) }, (_, index) => `${String(first + index).padStart(2, '0')}:00`);
 };
 
-/** Calendar date and clock time at the salon, independent of the browser zone. */
-export const getSalonNow = (timeZone = DEFAULT_SALON_TIME_ZONE, now = new Date()): { date: string; time: string } => {
-  // Older settings include a display suffix, such as "(GMT+01:00)".
-  const zone = timeZone.trim().split(/\s+/)[0] || DEFAULT_SALON_TIME_ZONE;
-  let formatter: Intl.DateTimeFormat;
-  try {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  } catch {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: DEFAULT_SALON_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  }
-  const parts = Object.fromEntries(formatter.formatToParts(now).map(({ type, value }) => [type, value]));
-  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
-};
+/**
+ * Calendar date and clock time at the salon, independent of the browser zone. A setting saved
+ * earlier may carry a display suffix ("(GMT+01:00)"), and a name that is no zone counts as Zurich.
+ */
+export const getSalonNow = (timeZone = DEFAULT_SALON_TIME_ZONE, now = new Date()): { date: string; time: string } =>
+  zonedDateTime(now, timeZone);
 
 export const addMinutes = (time: string, minutes: number): string => {
   const [hours, mins] = time.split(':').map(Number);
   const total = ((hours * 60 + mins + minutes) % 1440 + 1440) % 1440;
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-};
-
-export const formatDate = (date: string): string =>
-  parseDate(date).toLocaleDateString('en-GB', {
-    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
-  });
-
-export const formatCalendarDate = (date: string): string => {
-  const value = parseDate(date);
-  const weekday = value.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
-  return `${weekday} ${String(value.getUTCDate()).padStart(2, '0')}/${String(value.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
 export const dayKeyForDate = (date: string): CalendarEvent['day'] => dayKeys[parseDate(date).getUTCDay()];

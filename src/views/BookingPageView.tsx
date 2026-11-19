@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Copy, ExternalLink, CalendarDays, Clock, ArrowRight, Pencil, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, ArrowLeft, CheckCircle2, Copy, ExternalLink, CalendarDays, Clock, ArrowRight, Pencil, X } from 'lucide-react';
 import type { AppointmentRequest, CompanySettingsData, ServiceItem } from '../types';
-import { addMinutes, formatDate, salonTimeZone } from '../scheduling';
+import { addDays, addMinutes, formatDate, salonTimeZone } from '../scheduling';
+import { formatDayMonth, formatMoney, formatPhone, formatStoredTimeRange, formatTimeRange, weekdayName } from '../format';
 import {
   AvailabilityContext,
   getAvailableSlots,
@@ -11,22 +12,36 @@ import {
   isEmployeeAssignedToService,
   validateBookingRequest,
 } from '../availability';
+import { bookingDays, closedReason, openingHoursLines } from '../bookingDays';
 import { normalizePhone, validateContact } from '../bookingData';
+import { PoweredBy } from '../components/Logo';
+import { SalonTimeNote } from '../components/SalonTimeNote';
+import { salonAddress } from '../region';
 
 export interface BookingDraft {
   serviceId: string;
   employeeId: string;
   date: string;
+  /**
+   * True once the customer has picked a day (or a time on it). Until then the page shows the
+   * first day with a free time for the chosen service, so nobody starts on "no times".
+   */
+  dateChosen?: boolean;
   startTime: string;
   name: string;
   phone: string;
   editingRequestId?: string;
 }
 
-export const createBookingDraft = (services: ServiceItem[], timeZone = 'Europe/Zurich'): BookingDraft => ({
-  serviceId: services.find((service) => service.onlineBooking)?.id ?? '',
+/** The service a new visitor most likely wants: bookable online and offered by the most specialists. */
+const defaultService = (services: ServiceItem[]): ServiceItem | undefined =>
+  services.filter((service) => service.onlineBooking).reduce<ServiceItem | undefined>((best, service) =>
+    !best || (service.assignedEmployeeIds?.length ?? 0) > (best.assignedEmployeeIds?.length ?? 0) ? service : best, undefined);
+
+export const createBookingDraft = (services: ServiceItem[], timeZone = 'Europe/Zurich', now = new Date()): BookingDraft => ({
+  serviceId: defaultService(services)?.id ?? '',
   employeeId: '',
-  date: getSalonNow(timeZone).date,
+  date: getSalonNow(timeZone, now).date,
   startTime: '',
   name: '',
   phone: '',
@@ -61,23 +76,42 @@ export const bookingProfileUrl = (value: string): string | null => {
   } catch { return null; }
 };
 
+/** How many of the coming days the date step shows as buttons. Later dates use the date field. */
+const DAYS_SHOWN = 14;
+/** Shifts are planned this far ahead, so later dates cannot have a time. */
+const DAYS_BOOKABLE = 90;
+
+/**
+ * The owner's "Open booking page" marks this browser tab. Only a tab with the mark gets a way
+ * back to the dashboard on the public page: the link a customer receives never shows one.
+ */
+const FROM_DASHBOARD = 'slotbee-booking-from-dashboard';
+const openedFromDashboard = (): boolean => {
+  try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(FROM_DASHBOARD) === '1'; } catch { return false; }
+};
+const rememberDashboard = () => {
+  try { sessionStorage.setItem(FROM_DASHBOARD, '1'); } catch { /* without storage the public page just shows no way back */ }
+};
+
 export const BookingPageView: React.FC<BookingPageViewProps> = ({
-  services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences,
+  services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, now,
   companySettings, draft, setDraft, submittedRequest, setSubmittedRequest,
   onNewBookingRequest, onUpdateBookingRequest, onCancelBookingRequest, onViewRequest,
   publicMode = false,
 }) => {
   const timeZone = salonTimeZone(companySettings.timeZone);
-  const [clock, setClock] = useState(() => new Date());
+  const [clock, setClock] = useState(() => now ?? new Date());
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [confirmCancellation, setConfirmCancellation] = useState(false);
+  const [fromDashboard] = useState(openedFromDashboard);
   const errorRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const cancellationRef = useRef<HTMLParagraphElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
+  const copyTimer = useRef<number | null>(null);
   const submitting = useRef(false);
   const today = getSalonNow(timeZone, clock).date;
   const context: AvailabilityContext = {
@@ -91,23 +125,43 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     : [];
   // A chosen specialist remains chosen when their availability changes. Never substitute another person.
   const selectedEmployee = eligibleEmployees.find((employee) => employee.id === draft.employeeId);
+  // What the availability below depends on. The clock ticks every 30 seconds, so typing a name
+  // does not recompute two weeks of slots on every key.
+  const availabilityInputs = [services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, timeZone, clock, selectedService?.id];
+  // The day the customer picked stays. Before that, the page opens on the first day that has a
+  // free time for the chosen service, and follows the service when the customer changes it.
+  const dateFixed = Boolean(draft.dateChosen || draft.startTime || draft.editingRequestId);
+  const earliestDate = useMemo(
+    () => !dateFixed && selectedService ? getNextAvailableDate(context, selectedService.id, today) : null,
+    [...availabilityInputs, dateFixed],
+  );
+  const date = dateFixed ? draft.date : earliestDate ?? (draft.date > today ? draft.date : today);
+  const comingDays = useMemo(
+    () => selectedService ? bookingDays(context, selectedService.id, today, DAYS_SHOWN, draft.editingRequestId) : [],
+    [...availabilityInputs, draft.editingRequestId],
+  );
   const slotsFor = (employeeId: string) => selectedService ? getAvailableSlots(context, {
-    date: draft.date, serviceId: selectedService.id, employeeId, excludeRequestId: draft.editingRequestId,
+    date, serviceId: selectedService.id, employeeId, excludeRequestId: draft.editingRequestId,
   }) : [];
   const availableSlots = selectedEmployee ? slotsFor(selectedEmployee.id) : [];
   const selectedStartTime = availableSlots.includes(draft.startTime) ? draft.startTime : '';
   const anyAvailableEmployee = eligibleEmployees.some((employee) => slotsFor(employee.id).length > 0);
+  const dateClosed = date && date >= today ? closedReason({ bookingHours, closedDates }, date) : null;
   const liveRequest = submittedRequest
     ? requests.find((request) => request.id === submittedRequest.id) ?? submittedRequest
     : null;
   const isEditing = Boolean(draft.editingRequestId && liveRequest?.status === 'pending');
   const showForm = !liveRequest || isEditing;
-  const bookingUrl = new URL(window.location.pathname, window.location.origin);
+  // No browser while the page is rendered by a test.
+  const page = typeof window === 'undefined' ? { pathname: '/', origin: 'http://localhost' } : window.location;
+  const bookingUrl = new URL(page.pathname, page.origin);
   bookingUrl.searchParams.set('booking', '1');
-  const address = [companySettings.street, [companySettings.postalCode, companySettings.city].filter(Boolean).join(' '), companySettings.country].filter(Boolean).join(', ');
-  const currencyCode = companySettings.currency?.match(/\b([A-Z]{3})\s*$/)?.[1] ?? 'CHF';
-  const formatPrice = (price: number) => `${currencyCode} ${price.toFixed(2)}`;
-  const appointmentChosen = Boolean(selectedService && selectedEmployee && draft.date && selectedStartTime);
+  const salon = companySettings.companyName || 'The salon';
+  const address = salonAddress(companySettings);
+  // A date inside a sentence carries its weekday in full: "Tuesday, 06.10.2026".
+  const longDate = (value: string) => formatDate(value, { weekday: 'long' });
+  const appointmentChosen = Boolean(selectedService && selectedEmployee && date && selectedStartTime);
+  const openingLines = openingHoursLines(bookingHours);
   const profileLinks = [
     { label: 'Website', value: companySettings.website },
     { label: 'Facebook', value: companySettings.facebook },
@@ -116,6 +170,8 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   ].map(link => ({ ...link, href: bookingProfileUrl(link.value) })).filter(link => link.href !== null);
   const legalUrl = bookingProfileUrl(companySettings.legalNote);
   const logoUrl = companySettings.logoDataUrl?.match(/^data:image\/(?:png|jpeg|gif|webp);base64,/) ? companySettings.logoDataUrl : null;
+  // The public page has no dashboard header above it, so the salon's name is its main heading.
+  const SalonName = publicMode ? 'h1' : 'h2';
 
   useEffect(() => {
     const refresh = () => setClock(new Date());
@@ -124,9 +180,11 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
   }, []);
 
+  useEffect(() => () => { if (copyTimer.current !== null) window.clearTimeout(copyTimer.current); }, []);
+
   useEffect(() => {
     if (showForm && !availableServices.some((service) => service.id === draft.serviceId)) {
-      setDraft((previous) => ({ ...previous, serviceId: availableServices[0]?.id ?? '', employeeId: '', startTime: '' }));
+      setDraft((previous) => ({ ...previous, serviceId: defaultService(services)?.id ?? '', employeeId: '', startTime: '' }));
       if (draft.serviceId) setNotice('Your previous service is no longer available. Please review the service and choose a specialist and time.');
     }
   }, [services, draft.serviceId, showForm, setDraft]);
@@ -152,6 +210,10 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     setFormError('');
     setNotice('');
   };
+  const pickDate = (value: string) => {
+    // An emptied date field hands the choice back to the page: it shows the first free day again.
+    updateDraft(value === date ? { date: value, dateChosen: Boolean(value) } : { date: value, dateChosen: Boolean(value), startTime: '' });
+  };
   const fail = (message: string) => {
     setFormError(message);
     requestAnimationFrame(() => errorRef.current?.focus());
@@ -163,7 +225,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     const contactError = validateContact(draft.name, draft.phone);
     if (contactError) { fail(contactError); return; }
     if (!selectedService) { fail('Please choose an available service.'); return; }
-    if (!draft.date) { fail('Please choose an appointment date.'); return; }
+    if (!date) { fail('Please choose an appointment date.'); return; }
     if (!selectedEmployee) { fail('Please choose a specialist for this appointment.'); return; }
     if (!selectedStartTime) { fail('Please choose an available time for this specialist.'); return; }
     const currentTime = new Date();
@@ -175,8 +237,8 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
       customerName: draft.name.trim(),
       customerPhone: normalizePhone(draft.phone),
       serviceName: selectedService.name,
-      date: draft.date,
-      dateStr: formatDate(draft.date),
+      date,
+      dateStr: formatDate(date),
       timeStr: `${selectedStartTime} - ${addMinutes(selectedStartTime, selectedService.durationMinutes)}`,
       timeAgo: 'Just now',
       staffName: selectedEmployee.name,
@@ -199,24 +261,27 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   const findNextDate = () => {
     if (!selectedService) return;
     const freshContext = { ...context, now: new Date(), requests: requests.filter((request) => request.id !== draft.editingRequestId) };
-    const nextDate = getNextAvailableDate(freshContext, selectedService.id, draft.date || today, draft.employeeId || undefined);
+    const nextDate = getNextAvailableDate(freshContext, selectedService.id, date || today, draft.employeeId || undefined);
     if (!nextDate) {
       setNotice(draft.employeeId
-        ? 'No available date was found for this specialist in the next 90 days. Choose a different specialist or contact the salon.'
-        : 'No available date was found in the next 90 days. Choose another service or contact the salon.');
+        ? `No available date was found for this specialist in the next ${DAYS_BOOKABLE} days. Choose a different specialist or contact the salon.`
+        : `No available date was found in the next ${DAYS_BOOKABLE} days. Choose another service or contact the salon.`);
       return;
     }
     setClock(freshContext.now);
-    updateDraft({ date: nextDate, startTime: '' });
-    setNotice(`Next available date${selectedEmployee ? ` with ${selectedEmployee.name}` : ''}: ${formatDate(nextDate)}. ${selectedEmployee ? 'Choose a time below.' : 'Choose an available specialist below.'}`);
+    updateDraft({ date: nextDate, dateChosen: true, startTime: '' });
+    setNotice(`Next available date${selectedEmployee ? ` with ${selectedEmployee.name}` : ''}: ${longDate(nextDate)}. ${selectedEmployee ? 'Choose a time below.' : 'Choose an available specialist below.'}`);
     dateRef.current?.focus();
   };
 
   const handleCopy = async () => {
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
       await navigator.clipboard.writeText(bookingUrl.href);
       setCopyState('copied');
+      // "Copied" answers one tap. It must not stay as if the button were a switch.
+      copyTimer.current = window.setTimeout(() => setCopyState('idle'), 2000);
     } catch {
       setCopyState('failed');
     }
@@ -240,8 +305,8 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     if (!liveRequest || liveRequest.status !== 'pending') return;
     setDraft({
       serviceId: liveRequest.serviceId ?? '', employeeId: liveRequest.employeeId ?? '',
-      date: liveRequest.date, startTime: liveRequest.timeStr.split(' - ')[0],
-      name: liveRequest.customerName, phone: liveRequest.customerPhone ?? '', editingRequestId: liveRequest.id,
+      date: liveRequest.date, dateChosen: true, startTime: liveRequest.timeStr.split(' - ')[0],
+      name: liveRequest.customerName, phone: formatPhone(liveRequest.customerPhone ?? ''), editingRequestId: liveRequest.id,
     });
     setFormError('');
     setNotice('Your current request stays reserved while you edit. It changes only when you save.');
@@ -267,19 +332,36 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
     requestAnimationFrame(() => cancelButtonRef.current?.focus());
   };
 
+  // While a request waits, the page says what is true wherever it was opened: an appointment was
+  // asked for and is not confirmed. It does not say that the salon has the request or will answer:
+  // a request made on another device does not reach the salon yet.
   const statusHeading = liveRequest?.status === 'accepted' ? 'Appointment confirmed'
     : liveRequest?.status === 'rejected' ? 'Request declined'
-      : liveRequest?.status === 'cancelled' ? 'Request cancelled' : 'Booking request received';
+      : liveRequest?.status === 'cancelled' ? 'Request cancelled' : 'Appointment requested';
+  const statusText = liveRequest?.status === 'accepted' ? `${salon} has confirmed your appointment. See you then!`
+    : liveRequest?.status === 'rejected' ? `Sorry, ${salon} cannot offer this time. Please choose another one.`
+      : liveRequest?.status === 'cancelled' ? 'Your request has been cancelled. The time is free again.'
+        : `Thank you! Your appointment is not confirmed yet: ${salon} must accept your request first.`;
+  // One line under the day buttons says what is special about the day shown.
+  const dateNote = !date || date < today ? null
+    : dateClosed ? `${dateClosed} Please choose another day.`
+      : selectedService && eligibleEmployees.length > 0 && !anyAvailableEmployee ? `${longDate(date)}: no free times for ${selectedService.name}. Please choose another day.`
+        : !dateFixed && selectedService && date !== today ? `First day with free times for ${selectedService.name}: ${longDate(date)}.`
+          : null;
 
   return (
     <div className="mx-auto min-w-0 max-w-4xl space-y-5 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-200 [overflow-wrap:anywhere]">
-      {publicMode && <a href={window.location.pathname} className="inline-flex min-h-11 items-center text-sm font-semibold text-indigo-700 hover:underline">Back to owner preview</a>}
+      {publicMode && fromDashboard && (
+        <a href={`${page.pathname}#/booking-page`} className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-indigo-700 hover:underline">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to dashboard
+        </a>
+      )}
       {!publicMode && (
         <div className="space-y-4 rounded-2xl bg-gradient-to-r from-[#5551FF] to-indigo-600 p-5 text-white shadow-lg shadow-indigo-500/10 sm:p-6">
           <div>
-            <span className="text-xs font-bold uppercase tracking-widest text-indigo-200">Customer booking preview</span>
-            <h1 className="mt-1 text-xl font-bold sm:text-2xl">Your online booking page</h1>
-            <p className="mt-1 text-sm text-indigo-100">Try the customer journey, then review the request in Home.</p>
+            <span className="text-xs font-bold uppercase tracking-widest text-indigo-200">Preview</span>
+            <h1 className="mt-1 text-xl font-bold focus:outline-hidden sm:text-2xl">Your booking page</h1>
+            <p className="mt-1 text-sm text-indigo-100">This is what your customers see. Try it: a request you send here appears in Home.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <input aria-label="Customer booking link" readOnly value={bookingUrl.href} onFocus={(event) => event.target.select()} className="min-h-11 w-full min-w-0 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-base text-white sm:w-auto sm:flex-1 sm:text-xs" />
@@ -287,7 +369,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               {copyState === 'copied' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
               {copyState === 'copied' ? 'Copied' : 'Copy link'}
             </button>
-            <a href={bookingUrl.href} className={`${buttonClass} flex items-center gap-2 bg-white text-indigo-700 hover:bg-indigo-50`}>
+            <a href={bookingUrl.href} onClick={rememberDashboard} className={`${buttonClass} flex items-center gap-2 bg-white text-indigo-700 hover:bg-indigo-50`}>
               Open booking page <ExternalLink className="h-4 w-4" aria-hidden="true" />
             </a>
           </div>
@@ -295,24 +377,35 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
         </div>
       )}
 
-      <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-relaxed text-indigo-900">
-        Interactive demo: requests and changes stay in this browser tab, including after refresh. No external messages are sent. Other tabs or devices do not receive your bookings.
-      </p>
-
       <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs sm:p-8">
-        <div className="mb-6 flex items-center gap-3 border-b border-slate-100 pb-5">
-          {logoUrl ? <img src={logoUrl} alt={`${companySettings.companyName || 'Salon'} logo`} className="h-12 w-12 shrink-0 rounded-xl object-contain" /> : <div aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5551FF] text-lg font-bold text-white">{(companySettings.companyName || 'Salon').slice(0, 1)}</div>}
-          <div className="min-w-0">
-            <h2 className="text-lg font-bold text-slate-900">{companySettings.companyName || 'Salon'}</h2>
-            {address && <p className="mt-0.5 text-xs text-slate-500">{address}</p>}
-            {companySettings.businessPhone && <a className="inline-flex min-h-11 items-center text-xs text-indigo-600 underline-offset-2 hover:underline" href={`tel:${normalizePhone(companySettings.businessPhone)}`}>{companySettings.businessPhone}</a>}
+        <div className="mb-6 border-b border-slate-100 pb-5">
+          <div className="flex items-center gap-3">
+            {logoUrl ? <img src={logoUrl} alt={`${companySettings.companyName || 'Salon'} logo`} className="h-12 w-12 shrink-0 rounded-xl object-contain" /> : <div aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#5551FF] text-lg font-bold text-white">{(companySettings.companyName || 'Salon').slice(0, 1)}</div>}
+            <div className="min-w-0">
+              <SalonName className="text-lg font-bold text-slate-900">{companySettings.companyName || 'Salon'}</SalonName>
+              {address && <p className="mt-0.5 text-xs text-slate-500">{address}</p>}
+              {companySettings.businessPhone && <a className="inline-flex min-h-11 items-center text-xs text-indigo-600 underline-offset-2 hover:underline" href={`tel:${normalizePhone(companySettings.businessPhone)}`}>{formatPhone(companySettings.businessPhone)}</a>}
+            </div>
           </div>
+          {openingLines.length > 0 && (
+            <section aria-label="Opening hours" className="mt-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Opening hours</h3>
+              <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm text-slate-700">
+                {openingLines.map((line) => (
+                  <React.Fragment key={line.days}>
+                    <dt>{line.days}</dt>
+                    <dd className="tabular-nums">{line.hours}</dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+            </section>
+          )}
         </div>
 
         {(companySettings.description.trim() || profileLinks.length > 0) && <section aria-label="About the salon" className="mb-6 space-y-3 border-b border-slate-100 pb-5">
           {companySettings.description.trim() && <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{companySettings.description}</p>}
           {profileLinks.length > 0 && <nav aria-label="Salon links" className="flex flex-wrap gap-x-4 gap-y-1">
-            {profileLinks.map(link => <a key={link.label} href={link.href!} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:underline">{link.label}<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>)}
+            {profileLinks.map(link => <a key={link.label} href={link.href!} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 min-w-11 items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:underline">{link.label}<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>)}
           </nav>}
         </section>}
 
@@ -323,13 +416,13 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             <div className="text-center">
               <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${liveRequest.status === 'rejected' || liveRequest.status === 'cancelled' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-100 text-emerald-600'}`}><CheckCircle2 className="h-8 w-8" aria-hidden="true" /></div>
               <h2 id="booking-status-heading" ref={headingRef} tabIndex={-1} className="text-xl font-bold text-slate-900 focus:outline-hidden">{statusHeading}</h2>
-              <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{liveRequest.status === 'pending' ? 'Your request is awaiting approval in this demo. This is not a confirmed appointment yet.' : liveRequest.status === 'accepted' ? 'The salon has accepted this appointment in the demo calendar.' : liveRequest.status === 'cancelled' ? 'This request is no longer pending. Its time is available for booking again.' : 'The salon has declined this request in the demo. You can choose another time.'}</p>
+              <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{statusText}</p>
             </div>
             <dl className="mx-auto grid min-w-0 max-w-xl grid-cols-1 gap-4 rounded-xl bg-slate-50 p-5 text-sm sm:grid-cols-2 [&>div]:min-w-0">
               <div><dt className="text-xs text-slate-500">Service</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.serviceName}</dd></div>
               <div><dt className="text-xs text-slate-500">Specialist</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.staffName}</dd></div>
-              <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-900">{formatDate(liveRequest.date)}<br />{liveRequest.timeStr}</dd></div>
-              <div><dt className="text-xs text-slate-500">Contact</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.customerName}<br />{liveRequest.customerPhone}</dd></div>
+              <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-900">{formatDate(liveRequest.date)}<br />{formatStoredTimeRange(liveRequest.timeStr)}</dd></div>
+              <div><dt className="text-xs text-slate-500">Contact</dt><dd className="mt-1 font-semibold text-slate-900">{liveRequest.customerName}<br />{formatPhone(liveRequest.customerPhone ?? '')}</dd></div>
             </dl>
             {liveRequest.status === 'pending' && !confirmCancellation && (
               <div className="flex flex-wrap justify-center gap-2">
@@ -340,7 +433,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
             {confirmCancellation && liveRequest.status === 'pending' && (
               <div className="mx-auto max-w-xl rounded-xl border border-rose-200 bg-rose-50 p-4" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); keepRequest(); } }}>
                 <p ref={cancellationRef} tabIndex={-1} className="text-sm font-semibold text-rose-900 focus:outline-hidden">Cancel this booking request?</p>
-                <p className="mt-1 text-xs text-rose-700">Your reserved time will become available to other bookings in this demo.</p>
+                <p className="mt-1 text-xs text-rose-700">Your time slot will be released.</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={cancelRequest} className={`${buttonClass} bg-rose-600 text-white hover:bg-rose-700`}>Yes, cancel request</button>
                   <button type="button" onClick={keepRequest} className={`${buttonClass} bg-white text-slate-700 hover:bg-slate-100`}>Keep request</button>
@@ -360,7 +453,9 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Edit your request' : 'Request an appointment'}</h2>
                 {isEditing && <button type="button" className={`${buttonClass} flex items-center gap-1.5 text-slate-600 hover:bg-slate-50`} onClick={() => { updateDraft({ editingRequestId: undefined }); }}><X className="h-4 w-4" aria-hidden="true" />Cancel editing</button>}
               </div>
-              <p className="mt-1 text-xs text-slate-500">Choose a service, date and specialist. All appointment times are in {timeZone}.</p>
+              <p className="mt-1 text-xs text-slate-500">Choose a service, a date and a specialist.</p>
+              {/* The owner's preview sits inside the app, which carries this note itself. */}
+              {publicMode && <SalonTimeNote timeZone={timeZone} className="mt-2 text-xs" />}
             </div>
 
             {notice && <p role="status" className="rounded-xl bg-indigo-50 p-3 text-sm text-indigo-800">{notice}</p>}
@@ -376,7 +471,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                       const keepEmployee = employees.find((employee) => employee.id === draft.employeeId);
                       updateDraft({ serviceId: service.id, startTime: '', employeeId: keepEmployee && isBookableEmployee(keepEmployee) && isEmployeeAssignedToService(service, keepEmployee) ? keepEmployee.id : '' });
                     }} className={cardClass(selectedService?.id === service.id)}>
-                      <span className="flex items-start justify-between gap-3"><span className="min-w-0 text-sm font-bold text-slate-900">{service.name}</span><span className="shrink-0 whitespace-nowrap text-xs font-bold text-indigo-600">{formatPrice(service.priceCHF)}</span></span>
+                      <span className="flex items-start justify-between gap-3"><span className="min-w-0 text-sm font-bold text-slate-900">{service.name}</span><span className="shrink-0 whitespace-nowrap text-xs font-bold text-indigo-600">{formatMoney(service.priceCHF)}</span></span>
                       <span className="mt-1 block text-xs text-slate-500">{service.durationMinutes} minutes</span>
                       {service.description?.trim() && <span className="mt-2 block whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{service.description}</span>}
                     </button>
@@ -384,18 +479,38 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                 </div>
               </fieldset>
 
-              <div>
-                <label className={stepClass} htmlFor="booking-date">2. Choose date</label>
-                <div className="flex flex-wrap items-center gap-3">
-                  <input id="booking-date" ref={dateRef} type="date" required min={today} value={draft.date} aria-describedby="booking-date-help" onChange={(event) => {
-                    if (event.target.value === draft.date) return;
-                    updateDraft({ date: event.target.value, startTime: '' });
-                  }} className={`${inputClass} max-w-64`} />
+              <fieldset className="min-w-0">
+                <legend className={stepClass}>2. Choose date</legend>
+                {/* Days without a time stay visible but cannot be picked, so the first tap already lands on a day with times. */}
+                <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-7 sm:gap-2">
+                  {comingDays.map((day) => {
+                    const selected = day.date === date;
+                    const free = day.state === 'free';
+                    return (
+                      <button key={day.date} type="button" disabled={!free} aria-pressed={selected} onClick={() => pickDate(day.date)}
+                        aria-label={`${longDate(day.date)}${day.state === 'closed' ? ', closed' : day.state === 'full' ? ', fully booked' : day.state === 'none' ? ', no times' : ''}`}
+                        className={`flex min-h-16 min-w-0 flex-col items-center justify-center rounded-xl border py-1.5 text-center whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${selected && free ? 'border-indigo-600 bg-indigo-600 text-white' : selected ? 'border-indigo-300 bg-slate-100 text-slate-500' : free ? 'border-slate-200 bg-white text-slate-800 hover:border-indigo-300' : 'border-transparent bg-slate-100 text-slate-500'}`}>
+                        <span className="block text-[11px] font-semibold">{day.date === today ? 'Today' : weekdayName(day.date, 'short')}</span>
+                        <span className="block text-[13px] font-bold leading-tight tabular-nums min-[360px]:text-sm sm:text-base">{formatDayMonth(day.date)}</span>
+                        {(day.state === 'closed' || day.state === 'full') && <span className="block text-[11px]">{day.state === 'closed' ? 'Closed' : 'Full'}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {dateNote && <p role="status" className="mt-3 text-sm text-slate-600">{dateNote}</p>}
+                <div className="mt-4 flex flex-wrap items-end gap-3">
+                  <div className="w-full max-w-64">
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-date">Other date</label>
+                    <input id="booking-date" ref={dateRef} type="date" required min={today} max={addDays(today, DAYS_BOOKABLE - 1)} value={date} aria-describedby="booking-date-help" onChange={(event) => {
+                      if (event.target.value === date) return;
+                      pickDate(event.target.value);
+                    }} className={inputClass} />
+                  </div>
                   <button type="button" onClick={findNextDate} disabled={!selectedService} className={`${buttonClass} flex items-center gap-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50`}><CalendarDays className="h-4 w-4" aria-hidden="true" />Find next available date</button>
                 </div>
                 <p id="booking-date-help" className="mt-2 text-xs text-slate-500">{draft.employeeId ? 'Date search keeps your chosen specialist. Choose another specialist below to check their dates.' : 'Date search finds the next day with availability for this service.'}</p>
-                {draft.date && draft.date < today && <p role="alert" className="mt-2 text-sm text-rose-600">This date has passed. Choose today or a future date.</p>}
-              </div>
+                {date && date < today && <p role="alert" className="mt-2 text-sm text-rose-600">This date has passed. Choose today or a future date.</p>}
+              </fieldset>
 
               <fieldset className="min-w-0">
                 <legend className={stepClass}>3. Choose specialist</legend>
@@ -414,7 +529,7 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
                       })}
                     </div>
                     {draft.employeeId && !selectedEmployee && <p role="status" className="mt-3 text-sm text-amber-800">Your chosen specialist is no longer available for this service. Please choose another specialist.</p>}
-                    {!anyAvailableEmployee && <p className="mt-3 text-xs text-slate-500">No specialist has a time on this date. Use Find next available date, or choose a different service.</p>}
+                    {!anyAvailableEmployee && <p className="mt-3 text-xs text-slate-500">{dateClosed ? `${dateClosed} Choose another date above.` : 'No specialist has a time on this date. Use Find next available date, or choose a different service.'}</p>}
                   </>
                 )}
               </fieldset>
@@ -422,29 +537,31 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
               <fieldset className="min-w-0">
                 <legend className={stepClass}>4. Choose time</legend>
                 {!selectedEmployee ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Choose a specialist to see their available times.</p> : availableSlots.length === 0 ? (
-                  <div role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><strong>{selectedEmployee.name}</strong> has no available times on {draft.date ? formatDate(draft.date) : 'this date'}. Find their next available date, or choose a different specialist above.</div>
-                ) : <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                  {availableSlots.map((slot) => <button key={slot} type="button" aria-pressed={selectedStartTime === slot} onClick={() => updateDraft({ startTime: slot })} className={`${slotButtonClass} border text-center text-xs tabular-nums whitespace-nowrap ${selectedStartTime === slot ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50'}`}>{slot} - {addMinutes(slot, selectedService?.durationMinutes ?? 30)}</button>)}
-                </div>}
+                  <div role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900"><strong>{selectedEmployee.name}</strong> has no available times on {date ? longDate(date) : 'this date'}. Find their next available date, or choose a different specialist above.</div>
+                ) : <><p className="mb-3 text-sm text-slate-600">Free times with {selectedEmployee.name} on {longDate(date)}:</p><div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {/* Picking a time settles the day as well: the page must not move it afterwards. */}
+                  {availableSlots.map((slot) => <button key={slot} type="button" aria-pressed={selectedStartTime === slot} onClick={() => updateDraft({ startTime: slot, date, dateChosen: true })} className={`${slotButtonClass} border text-center text-xs tabular-nums whitespace-nowrap ${selectedStartTime === slot ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-indigo-50'}`}>{formatTimeRange(slot, addMinutes(slot, selectedService?.durationMinutes ?? 30))}</button>)}
+                </div></>}
                 {draft.startTime && !selectedStartTime && selectedEmployee && <p role="status" className="mt-2 text-sm text-amber-800">Your previously selected time is no longer available. Please choose another time.</p>}
               </fieldset>
 
               <fieldset className="min-w-0">
                 <legend className={stepClass}>5. Contact details</legend>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-name">Full name <span aria-hidden="true">*</span></label><input id="booking-name" type="text" autoComplete="name" required maxLength={120} value={draft.name} placeholder="e.g. Sandra Meier" onChange={(event) => updateDraft({ name: event.target.value })} className={inputClass} /></div>
-                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-phone">Phone number <span aria-hidden="true">*</span></label><input id="booking-phone" type="tel" autoComplete="tel" inputMode="tel" required maxLength={40} value={draft.phone} placeholder="+41 79 123 45 67" aria-describedby="booking-phone-help" onChange={(event) => updateDraft({ phone: event.target.value })} className={inputClass} /><p id="booking-phone-help" className="mt-1.5 text-xs text-slate-500">Use a country code, for example +41. No call or message is sent by this demo.</p></div>
+                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-name">Full name <span aria-hidden="true">*</span></label><input id="booking-name" type="text" autoComplete="name" required value={draft.name} placeholder="e.g. Sandra Meier" onChange={(event) => updateDraft({ name: event.target.value })} className={inputClass} /></div>
+                  <div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="booking-phone">Phone number <span aria-hidden="true">*</span></label><input id="booking-phone" type="tel" autoComplete="tel" inputMode="tel" required value={draft.phone} placeholder="079 123 45 67" aria-describedby="booking-phone-help" onChange={(event) => updateDraft({ phone: event.target.value })} className={inputClass} /><p id="booking-phone-help" className="mt-1.5 text-xs text-slate-500">A Swiss number as you usually write it, or any other number with its country code (for example +49). The salon uses your number for questions about this appointment.</p></div>
                 </div>
-                <p className="mt-3 text-xs text-slate-500">Both fields are required. This request comes from the web booking page.</p>
+                <p className="mt-3 text-xs text-slate-500">Both fields are required.</p>
               </fieldset>
 
               <section aria-labelledby="booking-review-heading" className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
                 <h3 id="booking-review-heading" className="mb-4 text-sm font-bold text-slate-900">Review your request</h3>
                 <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 [&>div]:min-w-0">
-                  <div><dt className="text-xs text-slate-500">Service and price</dt><dd className="mt-1 font-semibold text-slate-800">{selectedService ? `${selectedService.name} · ${selectedService.durationMinutes} min · ${formatPrice(selectedService.priceCHF)}` : 'Choose a service'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">Service and price</dt><dd className="mt-1 font-semibold text-slate-800">{selectedService ? `${selectedService.name} · ${selectedService.durationMinutes} min · ${formatMoney(selectedService.priceCHF)}` : 'Choose a service'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Specialist</dt><dd className="mt-1 font-semibold text-slate-800">{selectedEmployee?.name ?? 'Choose a specialist'}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-800">{draft.date ? formatDate(draft.date) : 'Choose a date'}{selectedStartTime && selectedService ? `, ${selectedStartTime} - ${addMinutes(selectedStartTime, selectedService.durationMinutes)}` : ', choose a time'}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Contact</dt><dd className="mt-1 break-words font-semibold text-slate-800">{draft.name.trim() || 'Enter your name'}<br />{draft.phone.trim() || 'Enter your phone number'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">Date and time</dt><dd className="mt-1 font-semibold text-slate-800">{date ? formatDate(date) : 'Choose a date'}{selectedStartTime && selectedService ? `, ${formatTimeRange(selectedStartTime, addMinutes(selectedStartTime, selectedService.durationMinutes))}` : ', choose a time'}</dd></div>
+                  {/* A number that can be read as one is shown back the way it will be stored and displayed. */}
+                  <div><dt className="text-xs text-slate-500">Contact</dt><dd className="mt-1 break-words font-semibold text-slate-800">{draft.name.trim() || 'Enter your name'}<br />{formatPhone(draft.phone) || 'Enter your phone number'}</dd></div>
                 </dl>
                 <p className="mt-4 flex items-start gap-2 border-t border-indigo-100 pt-3 text-xs leading-relaxed text-slate-600"><Clock className="h-4 w-4 shrink-0" aria-hidden="true" />The salon must accept your request before the appointment is confirmed. No payment is taken.</p>
               </section>
@@ -461,6 +578,8 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
           {companySettings.customTerms && companySettings.termsText?.trim() && <details className="rounded-xl border border-slate-200 p-3"><summary className="min-h-11 cursor-pointer content-center font-semibold text-slate-700">Booking terms</summary><p className="mt-2 whitespace-pre-wrap">{companySettings.termsText}</p></details>}
         </footer>}
       </div>
+      {/* The page is the salon's; the product is named once, at its foot. */}
+      <PoweredBy />
     </div>
   );
 };

@@ -33,28 +33,33 @@ export interface ChatMessage {
   original: string;
   /** The same message in the owner's language (English). */
   translation: string;
-  /** Optional reviewed German translation for scripted demo messages. */
+  /** The same message in German, stored with the message so later renames cannot lose it. */
   translationDe?: string;
   time: string;
+  /** When the message was sent (ISO). `time` is the label shown for it. */
+  sentAt?: string;
   /** True when the demo could not translate the owner's free-typed reply. */
   untranslated?: boolean;
 }
 
+/**
+ * A calendar change that a chat message carries. Service and stylist are stored by id; their
+ * names are looked up when the booking is made, so a rename never breaks a chat.
+ */
 export type AppointmentAction =
   | {
       type: 'book';
       appointmentId: string;
       date: string;
       startTime: string;
-      serviceName: string;
-      staffName: string;
+      serviceId: string;
+      employeeId: string;
     }
   | {
       type: 'reschedule';
       appointmentId: string;
       date: string;
       startTime: string;
-      outsideHoursApproved?: boolean;
     };
 
 export interface QuickReply {
@@ -62,25 +67,39 @@ export interface QuickReply {
   en: string;
   /** What the customer receives (their language). */
   local: string;
+  /** The same reply in German, for an owner who reads German. */
+  de?: string;
   appointmentAction?: AppointmentAction;
 }
 
 export interface Conversation {
   id: string;
   customerName: string;
+  /** The customer record this chat belongs to, once one exists. */
+  customerId?: string;
   initials: string;
   avatarColor: string;
   language: ChatLanguage;
+  /**
+   * The customer's number where the salon knows it: WhatsApp brings one (shown masked), a sample
+   * chat takes it from the customer record. Empty for a new website or Telegram chat.
+   */
   phone: string;
+  /**
+   * Live chats come in as 'WhatsApp', 'Website' or 'Telegram'; the sample chats are 'Website'.
+   * 'Instagram' is planned: nothing creates such a chat, only a tab stored earlier can hold one.
+   */
   channel: 'WhatsApp' | 'Instagram' | 'Website' | 'Telegram';
   status: ConversationStatus;
   attentionReason?: string;
   takenOver?: boolean;
   appointmentId?: string;
   lastTime: string;
+  /** When the newest message was sent (ISO). `lastTime` is the label shown for it. */
+  lastMessageAt?: string;
   messages: ChatMessage[];
   /** What the AI sends when the owner chooses "Let AI continue". */
-  aiFollowUp?: Pick<ChatMessage, 'original' | 'translation'> & {
+  aiFollowUp?: Pick<ChatMessage, 'original' | 'translation' | 'translationDe'> & {
     appointmentAction?: AppointmentAction;
   };
   quickReplies?: QuickReply[];
@@ -89,7 +108,15 @@ export interface Conversation {
   /** Language the AI detected in a live chat, e.g. "Spanish". */
   languageLabel?: string;
   /** A booking request the AI collected in a live chat, for the owner to confirm. */
-  bookingRequest?: { service: string; date: string; time: string; customerName: string; status: 'requested' | 'confirmed' };
+  bookingRequest?: {
+    service: string;
+    /** Id of that service in the salon's list. Missing on chats stored before ids were sent. */
+    serviceId?: string;
+    date: string;
+    time: string;
+    customerName: string;
+    status: 'requested' | 'confirmed';
+  };
 }
 
 export interface HandoverRule {
@@ -105,8 +132,6 @@ export interface AiAssistantSettings {
   answerLanguages: Record<ChatLanguage, boolean>;
   tone: 'friendly' | 'formal';
   handoverRules: HandoverRule[];
-  whatsappConnected: boolean;
-  instagramConnected: boolean;
 }
 
 export interface AppointmentRequest {
@@ -115,13 +140,17 @@ export interface AppointmentRequest {
   employeeId?: string;
   customerName: string;
   customerId?: string;
+  /** In the international form, "+41791234567". Shown through formatPhone. */
   customerPhone?: string;
   serviceName: string;
   date: string; // YYYY-MM-DD, shared by requests and calendar entries
-  dateStr: string; // e.g. "1 October 2026"
-  timeStr: string; // e.g. "10:00 - 10:30"
-  timeAgo: string; // e.g. "10 minutes ago"
+  dateStr: string; // "Thu, 01.10.2026". Kept for stored requests; screens write the date from `date` (src/format.ts)
+  timeStr: string; // start and end as data, always "10:00 - 10:30": the slot rules read it. Screens show "10:00–10:30"
+  timeAgo: string; // e.g. "10 minutes ago"; only shown when createdAt is missing
+  /** When the request came in (ISO). */
+  createdAt?: string;
   staffName?: string;
+  /** Requests come in over the web ('Web'). The other values only occur in a tab stored earlier. */
   channel?: 'WhatsApp' | 'Instagram' | 'Web';
   /** Whether AI performed the booking, independently of the contact channel. */
   isAiBooked?: boolean;
@@ -135,11 +164,15 @@ export interface CalendarEvent {
   customerName: string;
   customerId?: string;
   customerPhone?: string;
+  /** The chat this appointment was booked in, if any. */
+  conversationId?: string;
+  /** When the appointment was booked (ISO). */
+  createdAt?: string;
   serviceName: string;
   staffName: string;
   date: string; // YYYY-MM-DD, never inferred from the visible calendar week
   day: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
-  dateDisplay: string; // "Wed 07/10"
+  dateDisplay: string; // "Wed 07.10.". Kept for stored appointments; screens write the date from `date`
   startTime: string; // "10:00"
   endTime: string; // "10:30"
   colorTheme: 'yellow' | 'green' | 'purple' | 'blue';
@@ -166,15 +199,26 @@ export interface ShiftEntry {
   };
 }
 
+/**
+ * A person in the customer list. Visits and appointments are not stored here: they are counted
+ * from the calendar (src/customerStats.ts), so the list can never disagree with it.
+ */
 export interface Customer {
   id: string;
   name: string;
   initials: string;
   email: string;
+  /**
+   * Stored once, in the international form ("+41791234567"), and shown everywhere through
+   * formatPhone ("+41 79 123 45 67"). Empty when the salon has no number, for example for
+   * someone who booked in the website chat.
+   */
   phone: string;
   language: 'EN' | 'FR' | 'DE' | 'IT';
-  lastBooking: string;
-  bookingsCount: number;
+  /** How this person reached the salon when they came in through a chat. */
+  channel?: Conversation['channel'];
+  /** Their chat, so "Open conversation" finds it without comparing names. */
+  conversationId?: string;
 }
 
 export interface Resource {
@@ -201,6 +245,8 @@ export interface Employee {
   location: string;
   canBookOnline: boolean;
   hidden: boolean;
+  /** 'Owner' for the person who runs the salon account. */
+  role?: string;
 }
 
 export interface ServiceItem {
@@ -223,12 +269,13 @@ export interface CompanySettingsData {
   street: string;
   postalCode: string;
   city: string;
+  /** Two-letter code of the Swiss canton ("SG"). Empty or missing for a salon in Liechtenstein. */
+  canton?: string;
+  /** The launch market: "Switzerland" or "Liechtenstein". */
   country: string;
-  state: string;
-  industry: string;
   businessPhone: string;
   currency: string;
-  branchLanguage: string;
+  /** The id of the time zone, without an offset: "Europe/Zurich". Settings saved earlier may carry a suffix. */
   timeZone: string;
   description: string;
   website: string;

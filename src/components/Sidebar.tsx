@@ -5,7 +5,6 @@ import {
   Store,
   CalendarDays,
   Users,
-  Box,
   UserCheck,
   Scissors,
   BarChart3,
@@ -15,6 +14,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { NavigationTab } from '../types';
+import { researchMode } from '../flags';
+import { Logo } from './Logo';
 
 interface SidebarProps {
   companyName: string;
@@ -24,6 +25,7 @@ interface SidebarProps {
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   pendingRequestsCount: number;
+  /** Study tool: opens the pilot interest form. Its button is shown with the research switch only. */
   onOpenPilotInterest: () => void;
 }
 
@@ -42,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const closeRef = useRef(onCloseMobile);
   closeRef.current = onCloseMobile;
   const [isDesktop, setIsDesktop] = useState(false);
+  const research = researchMode();
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 1024px)');
@@ -122,31 +125,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
             : 'invisible -translate-x-full [transition:translate_300ms_ease-in-out,visibility_0s_linear_300ms]'
         }`}
       >
-        {/* Salon identity. Home is the single dashboard navigation item. */}
-        <div className="flex shrink-0 items-center justify-between mb-8">
-          <div className="min-w-0 flex items-center gap-3 px-2 py-2.5">
-            <span aria-hidden="true" className="w-8 h-8 rounded-xl bg-[#5551FF] text-white flex items-center justify-center font-bold text-sm shrink-0">{companyName.trim().charAt(0).toUpperCase() || 'S'}</span>
-            <p className="min-w-0 break-words font-semibold text-sm text-slate-900 leading-snug">{companyName}</p>
+        {/* The product on top, the salon as the workspace under it. Home is the single dashboard navigation item. */}
+        <div className="mb-6 shrink-0">
+          <div className="flex min-h-11 items-center justify-between">
+            <Logo className="px-2" />
+
+            {/* Mobile Close Button */}
+            <button
+              ref={closeButtonRef}
+              onClick={onCloseMobile}
+              className="lg:hidden ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 rounded-lg"
+              aria-label="Close sidebar"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* Mobile Close Button */}
+          {/* The workspace card looks like something to press, so it is: it opens the salon's settings.
+              Name, letter and place come from Company Settings. */}
           <button
-            ref={closeButtonRef}
-            onClick={onCloseMobile}
-            className="lg:hidden ml-2 flex h-11 w-11 shrink-0 items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 rounded-lg"
-            aria-label="Close sidebar"
+            type="button"
+            onClick={() => handleNav('settings')}
+            title="Open Company Settings"
+            className="mt-3 flex min-h-11 w-full items-center gap-3 rounded-xl border border-slate-200/70 bg-white/70 px-2.5 py-2 text-left transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
           >
-            <X className="w-5 h-5" />
+            <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#5551FF]/10 text-sm font-bold text-[#5551FF]">
+              {companyName.trim().charAt(0).toUpperCase() || 'S'}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block break-words text-sm font-semibold leading-snug text-slate-900">{companyName}</span>
+              {companyLocation && <span className="block truncate text-[11px] text-slate-500">{companyLocation}</span>}
+            </span>
+            <span className="sr-only">Open Company Settings</span>
           </button>
         </div>
 
-        {/* Navigation list */}
+        {/* Navigation list. On phones and tablets it is a drawer, so every row is 44 px high there. */}
         <nav className="flex-1 space-y-1 pr-1 text-sm font-medium text-slate-500">
           {/* Home */}
           <button
             onClick={() => handleNav('home')}
             aria-current={currentTab === 'home' ? 'page' : undefined}
-            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 lg:min-h-0 flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'home'
                 ? 'bg-[#5551FF]/10 text-[#5551FF] font-semibold'
                 : 'hover:bg-slate-100 text-slate-600'
@@ -172,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => handleNav('calendar')}
             aria-current={currentTab === 'calendar' ? 'page' : undefined}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'calendar'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                 : 'hover:bg-slate-100 text-slate-600'
@@ -186,7 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => handleNav('conversations')}
             aria-current={currentTab === 'conversations' ? 'page' : undefined}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'conversations'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                 : 'hover:bg-slate-100 text-slate-600'
@@ -200,7 +220,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => handleNav('booking-page')}
             aria-current={currentTab === 'booking-page' ? 'page' : undefined}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'booking-page'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                 : 'hover:bg-slate-100 text-slate-600'
@@ -214,7 +234,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => handleNav('shift-plan')}
             aria-current={currentTab === 'shift-plan' ? 'page' : undefined}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
+            className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors ${
               currentTab === 'shift-plan'
                 ? 'bg-[#5551FF] text-white font-semibold shadow-xs'
                 : 'hover:bg-slate-100 text-slate-600'
@@ -235,7 +255,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={() => handleNav('customers')}
                 aria-current={currentTab === 'customers' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'customers'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
@@ -246,22 +266,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
 
               <button
-                onClick={() => handleNav('resources')}
-                aria-current={currentTab === 'resources' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
-                  currentTab === 'resources'
-                    ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
-                    : 'hover:bg-slate-100 text-slate-600'
-                }`}
-              >
-                <Box className="w-4 h-4 shrink-0" />
-                <span>Resources</span>
-              </button>
-
-              <button
                 onClick={() => handleNav('employees')}
                 aria-current={currentTab === 'employees' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'employees'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
@@ -274,7 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={() => handleNav('services')}
                 aria-current={currentTab === 'services' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'services'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
@@ -287,7 +294,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={() => handleNav('analytics')}
                 aria-current={currentTab === 'analytics' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'analytics'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
@@ -310,20 +317,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={() => handleNav('ai-assistant')}
                 aria-current={currentTab === 'ai-assistant' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'ai-assistant'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
                 }`}
               >
                 <Sparkles className="w-4 h-4 shrink-0" />
-                <span>AI Assistant</span>
+                {/* The settings of the AI that answers customers. "Assistant" in the header is the owner's own helper. */}
+                <span>AI receptionist</span>
               </button>
 
               <button
                 onClick={() => handleNav('settings')}
                 aria-current={currentTab === 'settings' ? 'page' : undefined}
-                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
+                className={`w-full min-h-11 lg:min-h-0 flex items-center gap-3 px-3.5 py-2 rounded-xl transition-colors ${
                   currentTab === 'settings'
                     ? 'bg-[#5551FF]/12 text-[#5551FF] font-semibold'
                     : 'hover:bg-slate-100 text-slate-600'
@@ -336,27 +344,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </nav>
 
-        {/* Persistent pilot interest button. */}
-        <div className="mt-auto shrink-0 border-t border-slate-200/60 pt-4">
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-controls="pilot-interest-dialog"
-            onClick={() => { onCloseMobile(); onOpenPilotInterest(); }}
-            className="mb-4 flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
-          >
-            Register interest
-          </button>
-          <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg bg-white/70 border border-slate-200/50">
-            <div className="w-7 h-7 rounded-lg bg-[#5551FF]/10 text-[#5551FF] flex items-center justify-center font-bold text-xs">
-              B
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-slate-800 truncate">{companyName}</p>
-              <p className="text-[11px] text-slate-400 truncate">{companyLocation}</p>
-            </div>
+        {/* Study tool: the pilot interest button stays out of the product and returns with the research switch. */}
+        {research && (
+          <div className="mt-auto shrink-0 border-t border-slate-200/60 pt-4">
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls="pilot-interest-dialog"
+              onClick={() => { onCloseMobile(); onOpenPilotInterest(); }}
+              className="flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]"
+            >
+              Register interest
+            </button>
           </div>
-        </div>
+        )}
       </aside>
     </>
   );

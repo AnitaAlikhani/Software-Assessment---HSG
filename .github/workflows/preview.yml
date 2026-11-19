@@ -1,0 +1,24 @@
+name: Refresh github.io preview
+
+# After every push to a work branch, ask the Pages workflow on main to rebuild the site.
+# That workflow publishes this branch at
+#   https://anitaalikhani.github.io/Software-Assessment---HSG/previews/<branch>/
+# (the branch has to be listed in .github/workflows/deploy.yml on main).
+on:
+  push:
+    branches: [anita-launch]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start the Pages workflow on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main

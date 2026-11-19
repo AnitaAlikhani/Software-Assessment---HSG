@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { formatClock } from '../src/format.js';
 import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types.js';
 
 /** One WhatsApp chat as the server keeps it. The phone number never leaves the server. */
@@ -20,10 +21,17 @@ export interface LiveConversation {
   updatedAt: number;
   /** A complete booking request the AI collected, waiting for the owner, or already confirmed. */
   bookingRequest?: LiveBookingRequest;
+  /**
+   * WhatsApp only: the fixed first text (who answers, what is stored) has really been sent to this
+   * customer. Set after the send succeeded, never before, so a failed send is tried again.
+   */
+  noticeSent?: boolean;
 }
 
 export interface LiveBookingRequest {
   service: string;
+  /** Id of the service in the salon's list. Missing on requests stored before ids were kept. */
+  serviceId?: string;
   date: string;
   time: string;
   customerName: string;
@@ -88,8 +96,8 @@ export function parseWebhook(body: unknown): IncomingMessage[] {
   return result;
 }
 
-const timeLabel = (ms: number) =>
-  new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' });
+/** The time under a message, on the salon's clock and in 24 hours: "14:05". */
+const timeLabel = (ms: number) => formatClock(ms, 'Europe/Zurich');
 
 export interface Translated {
   original: string;
@@ -147,7 +155,11 @@ const initials = (name: string) =>
 
 export const liveId = (waId: string) => `live-${waId}`;
 
-/** What the website receives. The customer's number is shortened, so it is never shown in full. */
+/**
+ * What the website receives. A WhatsApp number is shortened, so it is never shown in full.
+ * Website and Telegram chats have no number: the field stays empty rather than carrying a label,
+ * because whatever stands here could end up in a customer record.
+ */
 export function toPublicConversation(conversation: LiveConversation): Conversation & { live: true; languageLabel?: string } {
   const channel = conversation.channel ?? 'WhatsApp';
   return {
@@ -158,12 +170,14 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
     avatarColor: 'bg-green-100 text-green-700',
     language: conversation.language,
     languageLabel: conversation.languageLabel,
-    phone: channel === 'Website' ? 'Test visitor' : channel === 'Telegram' ? 'Telegram user' : `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}`,
+    phone: channel === 'WhatsApp' ? `+${conversation.waId.slice(0, 2)} ••• ••• ${conversation.waId.slice(-2)}` : '',
     channel,
     status: conversation.status,
     attentionReason: conversation.attentionReason,
     takenOver: conversation.takenOver,
     lastTime: conversation.messages.at(-1)?.time ?? '',
+    // The list works its label out from this, so a chat from another day shows the day, not only a clock time.
+    lastMessageAt: new Date(conversation.updatedAt).toISOString(),
     messages: conversation.messages,
     bookingRequest: conversation.bookingRequest,
   };

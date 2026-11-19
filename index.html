@@ -3,19 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Bella Salon & Booking Manager</title>
-    <meta name="description" content="Modern booking, shift planning, calendar scheduling, customer management, and analytics dashboard for Bella Hair Salon." />
-    <meta property="og:title" content="Bella Salon & Booking Manager" />
-    <meta property="og:description" content="Modern booking, shift planning, calendar scheduling, customer management, and analytics dashboard for Bella Hair Salon." />
+    <!-- The app sets the title of each screen once it runs (src/pageHead.ts). This one is for link previews and search results. -->
+    <title>SlotBee – AI receptionist and booking manager for salons</title>
+    <meta name="description" content="AI receptionist and booking manager for salons. SlotBee answers customer messages, takes booking requests and keeps calendar, team and customers in one place." />
+    <meta name="application-name" content="SlotBee" />
+    <meta name="apple-mobile-web-app-title" content="SlotBee" />
+    <meta name="theme-color" content="#5551FF" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Chat apps and social networks need the full address of the picture; they do not resolve a relative one.
+         There is no og:url on purpose: this one file also serves a salon's booking page and chat, and a fixed
+         address would make a shared booking link open the owner's app on networks that follow og:url. -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SlotBee" />
+    <meta property="og:title" content="SlotBee – AI receptionist and booking manager for salons" />
+    <meta property="og:description" content="AI receptionist and booking manager for salons. SlotBee answers customer messages, takes booking requests and keeps calendar, team and customers in one place." />
+    <meta property="og:image" content="https://slotbee.vercel.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="SlotBee: AI receptionist and booking manager for salons" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <meta name="twitter:image" content="https://slotbee.vercel.app/og-image.png" />
+    <!-- The typeface comes from this site (public/fonts). Fetching it early avoids a flash of the fallback font. -->
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   </head>
-  <body class="bg-[#F8F9FD] text-slate-800 antialiased font-['Plus_Jakarta_Sans',sans-serif]">
+  <body class="bg-[#F8F9FD] text-slate-800 antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

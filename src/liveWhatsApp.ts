@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { researchMode } from './flags';
 import type { Conversation } from './types';
 
 const KEY_STORAGE = 'slotbee-live-key';
@@ -26,16 +27,37 @@ type LiveAction =
   | { type: 'let-ai-continue'; conversationId: string }
   | { type: 'confirm-booking'; conversationId: string };
 
-/** How testers can reach the live AI: the Telegram bot (if connected) and the website chat. */
+/** How people can reach the live AI: the Telegram bot (if connected) and the website chat. */
 export interface LiveChannels {
   telegram: string | null;
+  /** Carries the access key, so it is shown with the study tools only, never as a customer link. */
   websiteChatUrl: string;
 }
 
-export function useLiveWhatsApp() {
-  const [key] = useState(readLiveKey);
+/**
+ * The website-chat link the owner copies for testers. With the study tools on it switches them
+ * on for the tester as well ("research=1"): otherwise a study participant would read the salon's
+ * wording instead of the notice that this is a study.
+ */
+export const websiteChatUrl = (origin: string, key: string, study = researchMode()): string =>
+  `${origin}/?chat=1&live=${encodeURIComponent(key)}${study ? '&research=1' : ''}`;
+
+/**
+ * What this browser knows about the live chats: still asking the server, reached them ("on"),
+ * or not available here ("off": no access key, no server, or no storage).
+ */
+export type LiveStatus = 'checking' | 'on' | 'off';
+
+/**
+ * `active` is false on the public booking page: a customer's browser never asks the server for
+ * the salon's chats and never keeps an access key, whatever its address or its storage holds.
+ */
+export function useLiveWhatsApp(active = true) {
+  const [key] = useState(() => (active ? readLiveKey() : null));
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [enabled, setEnabled] = useState(false);
+  // Without a key there is nothing to ask the server, so the answer is known at once.
+  const [checked, setChecked] = useState(!key);
   const [telegram, setTelegram] = useState<string | null>(null);
   const stopped = useRef(false);
 
@@ -47,7 +69,7 @@ export function useLiveWhatsApp() {
       try {
         const response = await fetch('/api/whatsapp/conversations', { headers: { 'x-live-key': key }, cache: 'no-store' });
         // 404 on GitHub Pages / local dev (no server), 401 with a wrong key: stay a demo.
-        if (!response.ok) { setEnabled(false); return; }
+        if (!response.ok) { setEnabled(false); setChecked(true); return; }
         const data = (await response.json()) as { enabled: boolean; conversations: Conversation[]; channels?: { telegram?: string | null } };
         setEnabled(data.enabled);
         setConversations(data.conversations ?? []);
@@ -55,6 +77,7 @@ export function useLiveWhatsApp() {
       } catch {
         // Network hiccup: try again on the next tick.
       }
+      setChecked(true);
       if (!stopped.current) timer = setTimeout(poll, POLL_MS);
     };
     poll();
@@ -79,13 +102,15 @@ export function useLiveWhatsApp() {
 
   return {
     enabled,
+    status: (!checked ? 'checking' : enabled ? 'on' : 'off') as LiveStatus,
+    telegram: enabled ? telegram : null,
     conversations: enabled ? conversations : [],
     reply: (conversationId: string, text: string) => act({ type: 'reply', conversationId, text }),
     takeOver: (conversationId: string) => act({ type: 'take-over', conversationId }),
     letAiContinue: (conversationId: string) => act({ type: 'let-ai-continue', conversationId }),
     confirmBooking: (conversationId: string) => act({ type: 'confirm-booking', conversationId }),
     channels: enabled && key
-      ? { telegram, websiteChatUrl: `${window.location.origin}/?chat=1&live=${encodeURIComponent(key)}` } as LiveChannels
+      ? { telegram, websiteChatUrl: websiteChatUrl(window.location.origin, key) } as LiveChannels
       : null,
   };
 }

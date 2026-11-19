@@ -17,6 +17,11 @@ const paymentMethods = [
   { value: 'cash' as const, label: 'Cash', Icon: Banknote },
 ];
 
+/**
+ * Not shown anywhere at the moment. This dialog only simulates a payment, and a product must not
+ * offer a checkout that takes no money and records no sale. The header button and the dialog were
+ * taken out of the app; the component stays here for the day payments are recorded for real.
+ */
 export const POSModal: React.FC<POSModalProps> = ({
   isOpen,
   onClose,

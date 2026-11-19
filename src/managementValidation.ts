@@ -1,8 +1,21 @@
-import { normalizePhone } from './bookingData';
+import { MAX_NAME_LENGTH, nameProblem, phoneAdvice } from './bookingData';
 
 export function validateOptionalContact(email: string, phone: string): string | null {
   if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'Enter a valid email address or leave it blank.';
-  if (phone.trim() && !/^\+?[0-9]{7,15}$/.test(normalizePhone(phone))) return 'Enter a phone number with 7 to 15 digits or leave it blank.';
+  const advice = phone.trim() ? phoneAdvice(phone) : null;
+  if (advice) return `Enter a valid phone number or leave it blank. ${advice}`;
+  return null;
+}
+
+/**
+ * Checks a person's name in the owner's forms (a customer, an employee): at least two letters,
+ * and not longer than a form takes. `who` names the person in the message: "the customer’s".
+ */
+export function validatePersonName(name: string, who: string): string | null {
+  const issue = nameProblem(name);
+  if (issue === 'empty') return `Enter ${who} name.`;
+  if (issue === 'letters') return `Enter ${who} name: it needs at least two letters.`;
+  if (issue === 'long') return `This name is too long (${[...name.trim()].length} characters). Use ${MAX_NAME_LENGTH} characters or fewer.`;
   return null;
 }
 

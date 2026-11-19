@@ -1,17 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Search, Menu, Calculator, Bell, ChevronDown, CheckCircle2, MessageSquare,
+  Search, Menu, Bell, ChevronDown, CheckCircle2, MessageSquare,
   Settings as SettingsIcon,
 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import type { Customer, AppointmentRequest, CalendarEvent } from '../types';
 import {
-  getHeaderNotifications, getHeaderSearchResults, isHeaderNotificationUnread, notificationReadTokens,
+  getHeaderNotifications, getHeaderSearchResults, headerSearchDetail, isHeaderNotificationUnread, notificationReadTokens,
   type HeaderNotification, type HeaderSearchResult,
 } from '../headerModels';
+import { RotateCcw, User } from 'lucide-react';
+import { researchMode } from '../flags';
+import { browserStorages, clearDemoWorkspace } from '../researchTools';
+import { Logo } from './Logo';
 
 interface HeaderProps {
   companyName?: string;
   companyLocation?: string;
+  /** The signed-in person, as shown on the account button and in its menu. */
+  ownerName?: string;
+  ownerRole?: string;
   onOpenMobileMenu: () => void;
   isMobileMenuOpen: boolean;
   searchQuery: string;
@@ -22,7 +30,6 @@ interface HeaderProps {
   onSelectCustomer?: (customer: Customer) => void;
   onSelectRequest?: (request: AppointmentRequest) => void;
   onSelectAppointment: (appointment: CalendarEvent) => void;
-  onOpenPOSModal?: () => void;
   needsAttentionCount: number;
   needsAttentionNames: string[];
   needsAttentionRevision?: string;
@@ -30,9 +37,55 @@ interface HeaderProps {
   latestAiBooking: CalendarEvent | null;
   onOpenConversations: () => void;
   onOpenSettings: () => void;
+  /** Opens the owner assistant (src/components/AssistantPanel.tsx). */
+  onOpenAssistant?: () => void;
 }
 
 type Dropdown = 'search' | 'notifications' | 'profile' | null;
+
+interface AccountMenuProps {
+  ownerName: string;
+  ownerRole: string;
+  companyName: string;
+  companyLocation: string;
+  onOpenSettings: () => void;
+}
+
+/**
+ * Opens under the account button: who is signed in and the way to the salon's settings.
+ * Entries are added only when their pages exist. With the research switch on it also holds
+ * the study tools: the notice that this is a sample workspace and the way back to its start.
+ */
+export const AccountMenu: React.FC<AccountMenuProps> = ({ ownerName, ownerRole, companyName, companyLocation, onOpenSettings }) => {
+  const research = researchMode();
+  const resetDemoData = () => {
+    if (!window.confirm('Reset the demo data in this browser? Bookings, customers and chats go back to their starting state.')) return;
+    clearDemoWorkspace(browserStorages());
+    // Reload at once, before any state is written back to storage.
+    window.location.reload();
+  };
+  return (
+    <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute left-4 right-4 top-full mt-2 max-h-[calc(100dvh-8rem)] overflow-y-auto sm:left-auto sm:right-0 sm:w-64 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
+      <div className="px-3 py-2 border-b border-slate-100">
+        <h2 id="header-account-title" className="font-semibold text-slate-800">{ownerName || 'Account'}</h2>
+        <p className="text-[11px] text-slate-400 mt-0.5">{[ownerRole, companyName, companyLocation].filter(Boolean).join(' · ')}</p>
+      </div>
+      <button type="button" onClick={onOpenSettings}
+        className="w-full flex min-h-11 items-center gap-2 px-3 py-2.5 mt-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
+        <SettingsIcon className="w-3.5 h-3.5" aria-hidden="true" />Company Settings
+      </button>
+      {research && (
+        <div className="mt-1 border-t border-slate-100 pt-1">
+          <p className="px-3 py-2 text-[11px] leading-relaxed text-slate-500">Demo workspace with sample data. Changes stay in this browser tab.</p>
+          <button type="button" onClick={resetDemoData}
+            className="w-full flex min-h-11 items-center gap-2 px-3 py-2.5 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
+            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />Reset demo data
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const useMediaQuery = (query: string) => {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -47,17 +100,19 @@ const useMediaQuery = (query: string) => {
 };
 
 export const Header: React.FC<HeaderProps> = ({
-  companyName = '', companyLocation = '',
+  companyName = '', companyLocation = '', ownerName = '', ownerRole = '',
   onOpenMobileMenu, isMobileMenuOpen, searchQuery, onSearchChange, customers, appointmentRequests,
-  calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment, onOpenPOSModal,
+  calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment,
   needsAttentionCount, needsAttentionNames, needsAttentionRevision, needsAttentionUpdates, latestAiBooking,
   onOpenConversations, onOpenSettings,
+  onOpenAssistant,
 }) => {
   const [openDropdown, setOpenDropdown] = useState<Dropdown>(null);
   // Below 480px the search gets its own row under the icons, so it is rendered after them in the DOM
   // (keyboard order = visual order); from 480px it sits between the menu button and the icons.
   const narrowHeader = useMediaQuery('(max-width: 479px)');
-  const compactSearch = useMediaQuery('(min-width: 480px) and (max-width: 700px)');
+  // Up to 736px the field shares its row with the product mark and is too short for the long hint.
+  const compactSearch = useMediaQuery('(min-width: 480px) and (max-width: 736px)');
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [readRevisions, setReadRevisions] = useState<Record<string, string[]>>({});
   const searchRef = useRef<HTMLDivElement>(null);
@@ -73,6 +128,9 @@ export const Header: React.FC<HeaderProps> = ({
   const notifications = getHeaderNotifications(appointmentRequests, needsAttentionCount,
     needsAttentionNames, latestAiBooking, needsAttentionRevision, needsAttentionUpdates);
   const unreadCount = notifications.filter((item) => isHeaderNotificationUnread(item, readRevisions)).length;
+  const ownerInitials = ownerName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('');
+  // Study tool: with the research switch on, one notice says that this is a sample workspace.
+  const research = researchMode();
 
   useEffect(() => {
     if (!openDropdown) return;
@@ -190,9 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
               {searchResults.map((result, index) => {
                 const title = result.kind === 'customer' ? result.record.name : result.record.customerName;
                 const category = result.kind === 'customer' ? 'Customer' : result.kind === 'request' ? 'Pending request' : 'Confirmed appointment';
-                const detail = result.kind === 'customer' ? `${result.record.phone} · ${result.record.email}`
-                  : result.kind === 'request' ? `${result.record.serviceName} · ${result.record.dateStr} · ${result.record.timeStr}`
-                  : `${result.record.serviceName} · ${result.record.dateDisplay} · ${result.record.startTime}`;
+                const detail = headerSearchDetail(result);
                 return (
                   <button type="button" role="option" tabIndex={-1} aria-selected={activeIndex === index}
                     id={`header-search-option-${index}`} key={`${result.kind}:${result.record.id}`}
@@ -202,7 +258,7 @@ export const Header: React.FC<HeaderProps> = ({
                     className={`w-full px-3 py-2.5 text-left rounded-xl transition-colors text-xs ${activeIndex === index ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'}`}>
                     <span className="block break-words text-[10px] font-semibold text-slate-400">{category}</span>
                     <span className="block mt-0.5 break-words font-semibold text-slate-800">{title}</span>
-                    <span className="block mt-0.5 text-[11px] text-slate-500 break-words">{detail}</span>
+                    {detail && <span className="block mt-0.5 text-[11px] text-slate-500 break-words">{detail}</span>}
                   </button>
                 );
               })}
@@ -222,20 +278,32 @@ export const Header: React.FC<HeaderProps> = ({
           aria-label="Open navigation menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-sidebar">
           <Menu className="w-5 h-5" aria-hidden="true" />
         </button>
+        {/* Phones and tablets show no sidebar, so the product's mark stands here. Its written name
+            appears where the row has room for it: beside the icons on wider phones and beside the
+            search field on wider tablets. On a study link the notice below takes this place. */}
+        {!research && <Logo size="compact" className="-ml-2 lg:hidden" nameClassName="hidden min-[390px]:max-[480px]:inline min-[800px]:inline" />}
+        {research && (
+          <span title="Changes stay in this browser tab"
+            className="hidden min-[360px]:inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 whitespace-nowrap">
+            Demo<span className="hidden lg:inline">&nbsp;workspace</span><span className="hidden xl:inline">&nbsp;· sample data</span>
+          </span>
+        )}
       </div>
 
       {!narrowHeader && searchField}
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {onOpenAssistant && (
+          <button id="assistant-trigger" type="button" onClick={onOpenAssistant}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors"
+            title="Assistant" aria-label="Open assistant" aria-haspopup="dialog">
+            <Sparkles className="w-4 h-4" aria-hidden="true" />
+          </button>
+        )}
         <button type="button" onClick={onOpenConversations}
           className="relative flex h-11 w-11 items-center justify-center rounded-xl text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors"
           title="Conversations" aria-label={`Conversations${needsAttentionCount > 0 ? `, ${needsAttentionCount} need attention` : ''}`}>
           <MessageSquare className="w-4 h-4" aria-hidden="true" />
           {needsAttentionCount > 0 && <span aria-hidden="true" className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white tabular-nums">{needsAttentionCount}</span>}
-        </button>
-        <button type="button" onClick={onOpenPOSModal}
-          className="relative flex h-11 w-11 items-center justify-center rounded-xl text-amber-600 bg-amber-50/80 hover:bg-amber-100/90 transition-colors border border-amber-200/60"
-          title="Quick Cash Register / POS Checkout" aria-label="POS Register">
-          <Calculator className="w-4 h-4" aria-hidden="true" />
         </button>
 
         <div ref={notificationsRef} className="static sm:relative" onBlur={(event) => closeWhenFocusLeaves(event, 'notifications')}>
@@ -286,48 +354,20 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => setOpenDropdown((current) => current === 'profile' ? null : 'profile')}
             aria-label="Account and salon settings" aria-expanded={openDropdown === 'profile'} aria-controls="header-account"
             className="flex min-h-11 min-w-11 items-center justify-center gap-2.5 p-1 rounded-xl hover:bg-slate-100 transition-colors">
-            <div aria-hidden="true" className="relative w-8 h-8 rounded-full overflow-hidden ring-1 ring-slate-200 bg-gradient-to-tr from-amber-200 via-rose-200 to-indigo-200 flex items-center justify-center shadow-xs">
-              <svg viewBox="0 0 36 36" className="w-full h-full" fill="none">
-                <circle cx="18" cy="18" r="18" fill="#F4ECE6" />
-                {/* Hair */}
-                <path
-                  d="M9 19c0-6 3.5-12 9-12s9 6 9 12c-2-2-4-2.5-6-2.5-3 0-5 1-7 2-2 1-3 1.5-5 .5z"
-                  fill="#4A3427"
-                />
-                {/* Face */}
-                <circle cx="18" cy="17" r="7.5" fill="#FDD7BA" />
-                {/* Hair bangs */}
-                <path
-                  d="M12 14c2-3 5-4 8-3.5 2 .3 4 2 4.5 3.5-2-.5-4-.8-6-.5-2.5.4-4.5 1-6.5.5z"
-                  fill="#4A3427"
-                />
-                {/* Body / Blazer */}
-                <path
-                  d="M10 32c1-6 4-8 8-8s7 2 8 8"
-                  fill="#5551FF"
-                />
-                {/* Inner shirt */}
-                <path d="M15 25h6l-3 4-3-4z" fill="#FFFFFF" />
-              </svg>
-            </div>
-            <div aria-hidden="true" className="hidden sm:flex flex-col text-left">
-              <span className="text-xs font-semibold text-slate-800 leading-tight">Anna</span>
-              <span className="text-[11px] text-slate-400 font-medium leading-tight">Admin</span>
-            </div>
+            <span aria-hidden="true" className="flex w-8 h-8 shrink-0 items-center justify-center rounded-full bg-[#5551FF]/10 text-[11px] font-bold text-[#5551FF] ring-1 ring-[#5551FF]/20">
+              {ownerInitials || <User className="w-4 h-4" />}
+            </span>
+            {ownerName && (
+              <div aria-hidden="true" className="hidden sm:flex flex-col text-left">
+                <span className="text-xs font-semibold text-slate-800 leading-tight">{ownerName.trim().split(/\s+/)[0]}</span>
+                {ownerRole && <span className="text-[11px] text-slate-400 font-medium leading-tight">{ownerRole}</span>}
+              </div>
+            )}
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:block" aria-hidden="true" />
           </button>
           {openDropdown === 'profile' && (
-            <div id="header-account" role="region" aria-labelledby="header-account-title" className="absolute left-4 right-4 top-full mt-2 max-h-[calc(100dvh-8rem)] overflow-y-auto sm:left-auto sm:right-0 sm:w-64 sm:max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 text-xs animate-in fade-in zoom-in-95">
-              <div className="px-3 py-2 border-b border-slate-100">
-                <h2 id="header-account-title" className="font-semibold text-slate-800">Anna Weber</h2>
-                <p className="text-[11px] text-slate-400 mt-0.5">{[companyName, companyLocation].filter(Boolean).join(' · ')}</p>
-              </div>
-              <button type="button" onClick={() => { setOpenDropdown(null); onOpenSettings(); }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 mt-1 rounded-lg hover:bg-slate-50 text-slate-600 transition-colors">
-                <SettingsIcon className="w-3.5 h-3.5" aria-hidden="true" />Company settings
-              </button>
-              <p className="px-3 py-2 text-[11px] leading-relaxed text-slate-400">Bookings and booking settings stay in this tab after refresh. Conversations and checkout are simulated.</p>
-            </div>
+            <AccountMenu ownerName={ownerName} ownerRole={ownerRole} companyName={companyName} companyLocation={companyLocation}
+              onOpenSettings={() => { setOpenDropdown(null); onOpenSettings(); }} />
           )}
         </div>
       </div>

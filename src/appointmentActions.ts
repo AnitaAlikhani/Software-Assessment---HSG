@@ -1,5 +1,16 @@
-import type { AppointmentAction, AppointmentRequest, CalendarEvent, Conversation, ServiceItem } from './types';
+import type { AppointmentAction, AppointmentRequest, CalendarEvent, Conversation, Employee, ServiceItem } from './types';
 import { addMinutes, dayKeyForDate, formatCalendarDate } from './scheduling';
+
+/**
+ * The appointment a chat booked or is about, while it is in the calendar: the one the chat names,
+ * else the newest one that was booked in it (new bookings are added at the top of the list).
+ * Null when there is none, or when it has been cancelled since.
+ */
+export const appointmentForConversation = (
+  conversation: Pick<Conversation, 'id' | 'appointmentId'>, events: CalendarEvent[],
+): CalendarEvent | null =>
+  events.find((event) => conversation.appointmentId !== undefined && event.id === conversation.appointmentId)
+  ?? events.find((event) => event.conversationId === conversation.id) ?? null;
 
 /** Reuse stable IDs so confirming or moving the same appointment cannot duplicate it. */
 export function upsertAppointment(events: CalendarEvent[], appointment: CalendarEvent): CalendarEvent[] {
@@ -9,11 +20,15 @@ export function upsertAppointment(events: CalendarEvent[], appointment: Calendar
     : [appointment, ...events];
 }
 
-export function appointmentFromRequest(request: AppointmentRequest, services: ServiceItem[]): CalendarEvent {
+export function appointmentFromRequest(request: AppointmentRequest, services: ServiceItem[], employees: Employee[] = []): CalendarEvent {
   const startTime = request.timeStr.split(/\s*-\s*/)[0];
   const service = request.serviceId !== undefined
     ? services.find((item) => item.id === request.serviceId)
     : services.find((item) => item.name === request.serviceName);
+  // The stylist's current name, in case they were renamed after the request came in.
+  const employee = request.employeeId !== undefined
+    ? employees.find((item) => item.id === request.employeeId)
+    : employees.find((item) => item.name === request.staffName);
   const duration = service?.durationMinutes ?? 30;
   return {
     id: `cal-${request.id}`,
@@ -23,7 +38,7 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
     customerPhone: request.customerPhone,
     customerId: request.customerId,
     serviceName: service?.name ?? request.serviceName,
-    staffName: request.staffName || 'Eloise Denniese',
+    staffName: employee?.name ?? (request.staffName || 'Unassigned'),
     date: request.date,
     day: dayKeyForDate(request.date),
     dateDisplay: formatCalendarDate(request.date),
@@ -36,21 +51,29 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
   };
 }
 
-/** Only structured confirmation actions change the schedule; offers and free text do not. */
+/**
+ * Only structured confirmation actions change the schedule; offers and free text do not.
+ * A booking names its service and stylist by id; a move keeps those of the appointment.
+ * Returns null when the appointment, the service or the stylist no longer exists.
+ */
 export function appointmentFromConversationAction(
   action: AppointmentAction,
   conversation: Pick<Conversation, 'customerName'>,
   events: CalendarEvent[],
   services: ServiceItem[],
+  employees: Employee[],
   isAiBooked: boolean,
 ): CalendarEvent | null {
   const existing = events.find((event) => event.id === action.appointmentId);
   if (action.type === 'reschedule' && !existing) return null;
-  const serviceName = action.type === 'book' ? action.serviceName : existing!.serviceName;
-  const service = action.type === 'reschedule' && existing?.serviceId
-    ? services.find(item => item.id === existing.serviceId)
-    : services.find((item) => item.name === serviceName);
+  const service = action.type === 'book'
+    ? services.find((item) => item.id === action.serviceId)
+    : existing!.serviceId !== undefined
+      ? services.find((item) => item.id === existing!.serviceId)
+      : services.find((item) => item.name === existing!.serviceName);
   if (!service) return null;
+  const employee = action.type === 'book' ? employees.find((item) => item.id === action.employeeId) : undefined;
+  if (action.type === 'book' && !employee) return null;
   return {
     ...existing,
     id: action.appointmentId,
@@ -59,7 +82,8 @@ export function appointmentFromConversationAction(
     serviceId: service.id,
     prepMinutes: service.prepMinutes ?? 0,
     postMinutes: service.postMinutes ?? 0,
-    staffName: action.type === 'book' ? action.staffName : existing!.staffName,
+    employeeId: employee?.id ?? existing?.employeeId,
+    staffName: employee?.name ?? existing!.staffName,
     date: action.date,
     day: dayKeyForDate(action.date),
     dateDisplay: formatCalendarDate(action.date),
@@ -67,8 +91,8 @@ export function appointmentFromConversationAction(
     endTime: addMinutes(action.startTime, service.durationMinutes),
     colorTheme: existing?.colorTheme ?? 'purple',
     isAiBooked: existing?.isAiBooked ?? isAiBooked,
-    outsideHoursApproved: action.type === 'reschedule'
-      ? action.outsideHoursApproved ?? false
-      : existing?.outsideHoursApproved,
+    // An approval of the old time does not carry over to the new one. Whoever saves the
+    // appointment decides it again from that day's opening hours (see isOutsideOpeningHours).
+    outsideHoursApproved: false,
   };
 }

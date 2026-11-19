@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 
-// Bump the version when demo data changes, so tabs opened before a deploy don't keep
-// stale chats (e.g. the old fixed 9/10 Oct dates that were rejected as past).
-export const DEMO_STORAGE_VERSION = 'booking-demo-v2';
+// Bump the version whenever the starting data or their shape change, so tabs opened before a
+// deploy don't keep stale records (v3: new salon data, customers without stored visit counts,
+// chats and bookings linked by id).
+export const DEMO_STORAGE_VERSION = 'booking-demo-v3';
 
 /** The sessionStorage key of one piece of demo state. Tests use it instead of repeating the version. */
 export const demoStorageKey = (

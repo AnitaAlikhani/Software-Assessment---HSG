@@ -22,10 +22,21 @@ async function call(method: string, payload: Record<string, unknown>) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const data = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: unknown };
-  if (!response.ok || !data.ok) throw new Error(`Telegram ${method} failed: ${data.description ?? response.status}`);
+  const data = (await response.json().catch(() => ({}))) as { ok?: boolean; description?: string; error_code?: number; result?: unknown };
+  if (!response.ok || !data.ok) {
+    // The status goes along, so the caller can tell a refusal from a hiccup (see telegramRefused).
+    throw Object.assign(new Error(`Telegram ${method} failed: ${data.description ?? response.status}`), { status: data.error_code ?? response.status });
+  }
   return data.result;
 }
+
+/**
+ * True when Telegram itself turned a call down for good: the customer blocked the bot or the chat
+ * does not exist (403, 400). Sending the same again cannot help. Everything else (no connection,
+ * a busy or failing Telegram) may work the next time.
+ */
+export const telegramRefused = (error: unknown): boolean =>
+  [400, 403].includes((error as { status?: unknown } | null)?.status as number);
 
 /** Sends a text message from the SlotBee bot to a Telegram chat. */
 export const sendTelegramText = (chatId: string, text: string) => call('sendMessage', { chat_id: chatId, text });

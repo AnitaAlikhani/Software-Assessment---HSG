@@ -2,13 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { ChevronLeft, ChevronRight, Plus, ArrowLeft, X, Info, Clock } from 'lucide-react';
 import { Employee, ShiftEntry } from '../types';
-import { addDays, currentSalonWeek, formatCalendarDate, formatDate, salonTimeZone, startOfWeek } from '../scheduling';
+import { addDays, currentSalonWeek, formatCalendarDate, formatDate, startOfWeek } from '../scheduling';
+import { formatDateRange, formatTimeRange, weekdayName } from '../format';
 
 interface ShiftPlanViewProps {
   employees: Employee[];
   shiftOverview: ShiftEntry[];
   timeZone?: string;
   onUpdateShift: (employeeId: string, date: string, shift: { start: string; end: string } | null) => void;
+  /** The moment the plan opens on. Tests pass a fixed one; the app leaves it out and gets the current week. */
+  now?: Date;
 }
 
 const minutesAt = (time: string) => {
@@ -17,8 +20,8 @@ const minutesAt = (time: string) => {
 };
 const fieldStyle = 'min-h-11 w-full min-w-0 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-base sm:text-sm text-slate-700';
 
-export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, timeZone, onUpdateShift }) => {
-  const [weekStart, setWeekStart] = useState(() => currentSalonWeek(timeZone));
+export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOverview, timeZone, onUpdateShift, now }) => {
+  const [weekStart, setWeekStart] = useState(() => currentSalonWeek(timeZone, now));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [editorEmployeeId, setEditorEmployeeId] = useState('');
@@ -136,7 +139,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
           >Today</button>
           <div className="flex max-w-full items-center bg-white border border-slate-200 rounded-xl">
             <button aria-label="Previous week" onClick={() => setWeekStart(addDays(weekStart, -7))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="min-w-0 px-1 text-center text-xs font-semibold text-slate-600 tabular-nums">{formatCalendarDate(weekStart)} - {formatCalendarDate(days[6])}</span>
+            <span className="min-w-0 px-1 text-center text-xs font-semibold text-slate-600 tabular-nums">{formatDateRange(weekStart, days[6])}</span>
             <button aria-label="Next week" onClick={() => setWeekStart(addDays(weekStart, 7))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800"><ChevronRight className="w-4 h-4" /></button>
           </div>
           <input type="date" aria-label="Choose shift plan week" value={weekStart} onChange={(event) => { if (event.target.value) setWeekStart(startOfWeek(event.target.value)); }} className="min-h-11 max-w-full px-3 py-2 text-base sm:text-xs bg-white border border-slate-200 rounded-xl text-slate-600" />
@@ -150,7 +153,6 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
         )}
       </div>
 
-      <p className="text-xs text-slate-500">Shift times are in {salonTimeZone(timeZone)}.</p>
       <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100/90 text-xs sm:text-sm text-indigo-900/80 leading-relaxed flex items-start gap-3">
         <Info className="w-4 h-4 text-[#5551FF] shrink-0 mt-0.5" />
         <p>Booking slots follow salon opening hours and staff shifts. An employee is unavailable on dates without a shift. Select a day to edit their availability.</p>
@@ -165,12 +167,12 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
             return (
               <div key={date} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{formatCalendarDate(date)}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{formatDate(date)}</p>
+                  <p className="text-sm font-semibold text-slate-800">{weekdayName(date)}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{formatDate(date, { weekday: 'none' })}</p>
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-4">
-                  <span className={`text-xs font-semibold tabular-nums ${shift ? 'text-emerald-700' : 'text-slate-400'}`}>{shift ? `${shift.start} - ${shift.end}` : 'Unavailable'}</span>
-                  <button onClick={() => openEditor(selectedEmployee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${selectedEmployee.name} on ${formatDate(date)}`} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 rounded-xl">{shift ? 'Edit shift' : 'Add shift'}</button>
+                  <span className={`text-xs font-semibold tabular-nums ${shift ? 'text-emerald-700' : 'text-slate-400'}`}>{shift ? formatTimeRange(shift.start, shift.end) : 'Unavailable'}</span>
+                  <button onClick={() => openEditor(selectedEmployee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${selectedEmployee.name} on ${formatDate(date, { weekday: 'long' })}`} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 rounded-xl">{shift ? 'Edit shift' : 'Add shift'}</button>
                 </div>
               </div>
             );
@@ -197,7 +199,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({ employees, shiftOv
                     const shift = shiftFor(employee.id, date);
                     return (
                       <td key={date} className="py-3 px-1 text-center">
-                        <button onClick={() => openEditor(employee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${employee.name} on ${formatDate(date)}`} className={`min-h-11 w-full whitespace-nowrap px-2 py-2 rounded-lg text-[11px] font-semibold tabular-nums border transition-colors ${shift ? 'bg-emerald-50 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100' : 'bg-slate-50 text-slate-400 border-transparent hover:bg-indigo-50 hover:text-[#5551FF]'}`}>{shift ? `${shift.start} - ${shift.end}` : 'Unavailable'}</button>
+                        <button onClick={() => openEditor(employee.id, date, !shift)} aria-label={`${shift ? 'Edit' : 'Add'} shift for ${employee.name} on ${formatDate(date, { weekday: 'long' })}`} className={`min-h-11 w-full whitespace-nowrap px-2 py-2 rounded-lg text-[11px] font-semibold tabular-nums border transition-colors ${shift ? 'bg-emerald-50 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100' : 'bg-slate-50 text-slate-400 border-transparent hover:bg-indigo-50 hover:text-[#5551FF]'}`}>{shift ? formatTimeRange(shift.start, shift.end) : 'Unavailable'}</button>
                       </td>
                     );
                   })}

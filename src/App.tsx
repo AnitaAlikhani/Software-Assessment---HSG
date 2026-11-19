@@ -16,14 +16,11 @@ import {
   Conversation,
   AiAssistantSettings,
 } from './types';
-import { createDemoConversations, DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
+import { DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
 import {
-  initialCalendarEvents,
-  initialCustomers,
   initialEmployees,
   initialServices,
   initialResources,
-  createDemoShifts,
   initialCompanySettings,
   initialBookingHours,
 } from './mockData';
@@ -42,20 +39,32 @@ import { SettingsView } from './views/SettingsView';
 import { BookingPageView, BookingDraft, createBookingDraft } from './views/BookingPageView';
 import { ConversationsView } from './views/ConversationsView';
 import { AiAssistantView } from './views/AiAssistantView';
-import { POSModal } from './components/POSModal';
 import { PilotInterest } from './components/PilotInterest';
+import { AssistantPanel } from './components/AssistantPanel';
+import { SalonTimeNote } from './components/SalonTimeNote';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import { bookingPageHead, ownerPageHead, usePageHead } from './pageHead';
 import { AppRoute, parseRoute, routeHash } from './navigation';
+import { analyticsPeriods, analyticsReport, type Period } from './analytics';
+import { downloadCsv } from './csv';
+import { PRODUCT_NAME } from './brand';
 import { mostRecentAiAppointment, nextUpcomingAppointment } from './dashboard';
 import { addMinutes, formatDate } from './scheduling';
-import { getAvailableSlots, getNextAvailableDate, getSalonNow, validateBookingRequest, validateCalendarEvent } from './availability';
-import { appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
+import { firstFreeEmployee, getSalonNow, isEmployeeAssignedToService, isOutsideOpeningHours, validateBookingRequest, validateCalendarEvent } from './availability';
+import { appointmentForConversation, appointmentFromRequest, appointmentFromConversationAction, upsertAppointment } from './appointmentActions';
 
-import { createDemoRequests } from './demoRequests';
+import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
+import { createIncomingRequest } from './demoRequests';
 import { useDemoState } from './useDemoState';
 import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
-import { customerForAppointment, customerForRequest, upsertCustomer, validateContact } from './bookingData';
+import { chatBookingName, chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, upsertCustomer, validateContact, type ChatContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
+import { headerAccount } from './headerModels';
+
+// The starting data that depend on the date (calendar, customers, chats, requests, shifts) are
+// built together, for one moment, so that they agree. Only a tab with nothing stored needs them.
+let startingWorkspace: DemoWorkspace | null = null;
+const startingData = (): DemoWorkspace => (startingWorkspace ??= createDemoWorkspace());
 
 export default function App() {
   const [publicMode, setPublicMode] = useState(new URLSearchParams(window.location.search).get('booking') === '1');
@@ -97,13 +106,12 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [route.tab]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isPOSOpen, setIsPOSOpen] = useState(false);
   const [isPilotInterestOpen, setIsPilotInterestOpen] = useState(false);
   useEffect(() => {
     // A Back/Forward gesture changes the page behind an open drawer or dialog; close them.
     setIsMobileMenuOpen(false);
-    setIsPOSOpen(false);
     setIsPilotInterestOpen(false);
   }, [route.tab, route.requestId, route.customerId, route.appointmentId, route.conversationId]);
   const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' | 'info'; action?: { label: string; onClick: () => void } } | null>(null);
@@ -119,19 +127,20 @@ export default function App() {
   }, []);
 
   // Core application states
-  const [requests, setRequests] = useDemoState<AppointmentRequest[]>('requests', () => createDemoRequests());
-  const [calendarEvents, setCalendarEvents] = useDemoState<CalendarEvent[]>('calendarEvents', initialCalendarEvents);
-  const [customers, setCustomers] = useDemoState<Customer[]>('customers', initialCustomers);
+  const [requests, setRequests] = useDemoState<AppointmentRequest[]>('requests', () => startingData().requests);
+  const [calendarEvents, setCalendarEvents] = useDemoState<CalendarEvent[]>('calendarEvents', () => startingData().events);
+  const [customers, setCustomers] = useDemoState<Customer[]>('customers', () => startingData().customers);
   const [employees, setEmployees] = useDemoState<Employee[]>('employees', initialEmployees);
   const [services, setServices] = useDemoState<ServiceItem[]>('services', initialServices);
   const [resources, setResources] = useDemoState<Resource[]>('resources', initialResources);
-  const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', () => createDemoShifts());
+  const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', () => startingData().shifts);
   const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
   const [calendarDate, setCalendarDate] = useState(() => getSalonNow(companySettings.timeZone).date);
   const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
-  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', () => createDemoConversations());
+  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', () => startingData().conversations);
   // Real WhatsApp chats from the test number (only with a "?live=KEY" link); shown above the demo chats.
-  const live = useLiveWhatsApp();
+  // The public booking page is a customer's page: it never asks the server for them.
+  const live = useLiveWhatsApp(!publicMode);
   const allConversations = [...live.conversations, ...conversations];
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(DEFAULT_DEMO_CONVERSATION_ID);
   const [aiSettings, setAiSettings] = useDemoState<AiAssistantSettings>('aiSettings', initialAiSettings);
@@ -166,17 +175,6 @@ export default function App() {
     if (selectedCalendarEvent) setCalendarDate(selectedCalendarEvent.date);
   }, [route.appointmentId, selectedCalendarEvent?.date]);
 
-  // Activity stats matching Figma Page 1-3
-  const [activityStats, setActivityStats] = useState({
-    messagesToday: 4,
-    messagesMonth: 24,
-    aiBookingsToday: 1,
-    aiBookingsMonth: 3,
-    afterHoursToday: 2,
-    afterHoursMonth: 9,
-    replyTimeSec: 12,
-  });
-
   const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ message, kind, action });
@@ -184,17 +182,15 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), action ? 10000 : kind === 'error' ? 7000 : 4000);
   };
 
-  const commitCalendarEvent = (event: CalendarEvent) => {
+  const commitCalendarEvent = (event: CalendarEvent, chat?: ChatContact) => {
     const previousEvent = calendarEvents.find(item => item.id === event.id);
-    const { customer, previousCustomerId } = customerForAppointment(customers, event, previousEvent);
-    const saved = { ...event, customerId: customer.id, customerPhone: customer.phone };
-    setCustomers(previous => upsertCustomer(previous.map(item => {
-      if (previousCustomerId !== item.id || item.id === customer.id) return item;
-      const bookingsCount = Math.max(0, item.bookingsCount - 1);
-      const latest = calendarEvents.filter(booking => booking.id !== event.id && (booking.customerId === item.id || (!booking.customerId && booking.customerName === item.name)))
-        .sort((a, b) => `${b.date} ${b.startTime}`.localeCompare(`${a.date} ${a.startTime}`))[0];
-      return { ...item, bookingsCount, lastBooking: latest ? `${formatDate(latest.date)}, ${latest.startTime}` : bookingsCount ? 'Earlier confirmed bookings' : 'No confirmed bookings' };
-    }), customer));
+    const { customer } = customerForAppointment(customers, event, previousEvent, chat);
+    const saved = {
+      ...event, customerId: customer.id, customerPhone: customer.phone,
+      createdAt: previousEvent?.createdAt ?? event.createdAt ?? new Date().toISOString(),
+    };
+    // Only the contact is stored. Visits and last appointments are counted from the calendar.
+    setCustomers(previous => upsertCustomer(previous, customer));
     setCalendarEvents(previous => upsertAppointment(previous, saved));
     setCalendarDate(saved.date);
     setSubmittedRequest(previous => previous && `cal-${previous.id}` === saved.id ? {
@@ -215,19 +211,11 @@ export default function App() {
       return;
     }
 
-    const newCalEvent = appointmentFromRequest(accepted, services);
+    const newCalEvent = appointmentFromRequest(accepted, services, employees);
     setRequests((prev) => prev.filter((r) => r.id !== id));
     setSubmittedRequest((previous) => previous?.id === id ? { ...accepted, status: 'accepted' } : previous);
     commitCalendarEvent(newCalEvent);
     if (route.requestId === id) navigate({ tab: 'home' });
-
-    if (newCalEvent.isAiBooked) {
-      setActivityStats((prev) => ({
-        ...prev,
-        aiBookingsToday: prev.aiBookingsToday + 1,
-        aiBookingsMonth: prev.aiBookingsMonth + 1,
-      }));
-    }
 
     showToast(`Accepted appointment for ${accepted.customerName}`, 'success', { label: 'View appointment', onClick: () => { openAppointment(newCalEvent); setToast(null); } });
   };
@@ -280,7 +268,7 @@ export default function App() {
     if (error) return error;
     if (requests.some((item) => item.id === request.id)) return 'This request has already been submitted.';
     const customer = customerForRequest(customers, request);
-    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false };
+    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? new Date().toISOString() };
     setRequests((previous) => [saved, ...previous]);
     setCustomers((previous) => upsertCustomer(previous, customer));
     showToast(`Booking request saved for ${request.customerName}`);
@@ -293,7 +281,7 @@ export default function App() {
     const error = validateContact(request.customerName, request.customerPhone ?? '') ?? validateBookingRequest(availabilityContext, request, request.id);
     if (error) return error;
     const customer = customerForRequest(customers, { ...request, customerId: existing.customerId });
-    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false };
+    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? existing.createdAt };
     setRequests((previous) => previous.map((item) => item.id === saved.id ? saved : item));
     setCustomers((previous) => upsertCustomer(previous, customer));
     setSubmittedRequest(saved);
@@ -322,60 +310,47 @@ export default function App() {
     }
   };
 
+  // Home's "New appointment" ends in the appointment form, which lives inside the Calendar page:
+  // the page is opened with the wish to start adding, and takes it once (see CalendarView).
+  // Where no appointment can be added yet, the owner lands on the Calendar, which says why.
+  const [startNewAppointment, setStartNewAppointment] = useState(false);
+
+  // Study tool (shown with the research switch only): a made-up request from the booking page,
+  // so a study session has a fresh request to accept or decline.
   const handleSimulateNewRequest = () => {
-    const service = services.find((item) => item.name === 'Haircut' && item.onlineBooking);
-    if (!service) { showToast('No online haircut service is available.', 'error'); return; }
-    const date = getNextAvailableDate(availabilityContext, service.id, getSalonNow(companySettings.timeZone).date);
-    if (!date) { showToast('No appointment slots are available in the next 90 days.', 'error'); return; }
-    const available = employees.map((employee) => ({
-      employee,
-      slots: getAvailableSlots(availabilityContext, { date, serviceId: service.id, employeeId: employee.id }),
-    })).find((item) => item.slots.length > 0);
-    if (!available) { showToast('There are no available slots for this demo date.', 'error'); return; }
-    const names = ['Léa Girard', 'Chloé Favre', 'Camille Bonnet', 'Elena Rossi'];
-    const startTime = available.slots[0];
-    handleNewBookingRequest({
-      id: `req-${Date.now()}`,
-      serviceId: service.id,
-      employeeId: available.employee.id,
-      customerName: names[Math.floor(Math.random() * names.length)],
-      serviceName: service.name,
-      date,
-      dateStr: formatDate(date),
-      timeStr: `${startTime} - ${addMinutes(startTime, service.durationMinutes)}`,
-      timeAgo: 'Just now',
-      staffName: available.employee.name,
-      channel: 'Web',
-      customerPhone: '+41 79 555 99 99',
-      isAiBooked: false,
-      status: 'pending',
-    });
+    // The request is built like the starting data: one of the salon's own services that can be
+    // booked online, the first free time from tomorrow on, and an invented person with a number
+    // of their own. Whoever has a record or a pending request already is never used again.
+    const known = [...customers, ...requests.map((item) => ({ id: item.customerId ?? '', name: item.customerName }))];
+    const request = createIncomingRequest(availabilityContext, known, `req-${Date.now()}`);
+    if (!request) {
+      showToast('No request could be simulated: no service is bookable online, no time is free in the next 90 days, or every sample person is a customer already.', 'info');
+      return;
+    }
+    const error = handleNewBookingRequest(request);
+    if (error) showToast(error, 'error');
   };
 
-  const handleExportActivity = () => {
-    const report = {
-      date: new Date().toISOString(),
-      salon: companySettings.companyName,
-      dataType: 'sample-demo-activity',
-      note: 'Illustrative demo figures. This export does not measure participant behaviour.',
-      stats: activityStats,
-    };
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
-      type: 'application/json',
+  // "Export CSV" on Home (the current month) and in Analytics (the period chosen there) write
+  // the same report: the figures on screen and the appointments they are counted from.
+  const handleExportReport = (period?: Period) => {
+    const clock = getSalonNow(companySettings.timeZone, now);
+    const report = analyticsReport({
+      companyName: companySettings.companyName,
+      events: calendarEvents,
+      period: period ?? analyticsPeriods(clock.date).month,
+      clock,
+      fallbackName: PRODUCT_NAME.toLowerCase(),
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bella_salon_sample_activity_${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('Sample activity exported');
+    if (!report) { showToast('Choose a valid date range before exporting.', 'error'); return; }
+    downloadCsv(report.fileName, report.rows);
+    showToast(`Exported ${report.fileName}`);
   };
 
   // Calendar
-  const saveCalendarEvent = (ev: Omit<CalendarEvent, 'id'>, id: string): string | null => {
+  const storeCalendarEvent = (ev: Omit<CalendarEvent, 'id'>, id: string, chat?: ChatContact): { error: string } | { saved: CalendarEvent } => {
     const validationError = validateCalendarEvent(availabilityContext, ev, id);
-    if (validationError) return validationError;
+    if (validationError) return { error: validationError };
     const service = ev.serviceId ? services.find(item => item.id === ev.serviceId) : services.find(item => item.name === ev.serviceName);
     const employee = ev.employeeId ? employees.find(item => item.id === ev.employeeId) : employees.find(item => item.name === ev.staffName);
     const newEv: CalendarEvent = {
@@ -385,8 +360,11 @@ export default function App() {
       prepMinutes: service?.prepMinutes ?? 0, postMinutes: service?.postMinutes ?? 0,
       id,
     };
-    commitCalendarEvent(newEv);
-    return null;
+    return { saved: commitCalendarEvent(newEv, chat) };
+  };
+  const saveCalendarEvent = (ev: Omit<CalendarEvent, 'id'>, id: string): string | null => {
+    const result = storeCalendarEvent(ev, id);
+    return 'error' in result ? result.error : null;
   };
   const handleAddCalendarEvent = (ev: Omit<CalendarEvent, 'id'>): string | null => {
     const error = saveCalendarEvent(ev, `cal-${crypto.randomUUID()}`);
@@ -401,12 +379,8 @@ export default function App() {
   };
 
   const handleDeleteCalendarEvent = (id: string) => {
-    const removed = calendarEvents.find((event) => event.id === id);
     setCalendarEvents(calendarEvents.filter((e) => e.id !== id));
     setSubmittedRequest((previous) => previous && `cal-${previous.id}` === id ? { ...previous, status: 'cancelled' } : previous);
-    if (removed?.customerId) setCustomers((previous) => previous.map((customer) => customer.id === removed.customerId
-      ? { ...customer, bookingsCount: Math.max(0, customer.bookingsCount - 1), lastBooking: 'Appointment cancelled' }
-      : customer));
     showToast('Appointment removed from calendar');
   };
 
@@ -428,12 +402,12 @@ export default function App() {
         ? { ...item, shifts: { ...item.shifts, [date]: shift } }
         : item);
     });
-    showToast(shift ? `Shift saved for ${employee.name}` : `${employee.name} is unavailable on ${formatDate(date)}`);
+    showToast(shift ? `Shift saved for ${employee.name}` : `${employee.name} is unavailable on ${formatDate(date, { weekday: 'long' })}`);
   };
 
   // Customers
   const handleAddCustomer = (
-    cust: Omit<Customer, 'id' | 'initials' | 'lastBooking' | 'bookingsCount'>
+    cust: Omit<Customer, 'id' | 'initials'>
   ) => {
     const initials = cust.name
       .split(' ')
@@ -446,8 +420,6 @@ export default function App() {
       ...cust,
       id: `cust-${Date.now()}`,
       initials: initials || 'CU',
-      lastBooking: 'No confirmed bookings',
-      bookingsCount: 0,
     };
     setCustomers([newCustomer, ...customers]);
     showToast(`Customer ${cust.name} added`);
@@ -478,6 +450,9 @@ export default function App() {
     setRequests(previous => previous.map(rename));
     setCalendarEvents(previous => previous.map(rename));
     setSubmittedRequest(previous => previous ? rename(previous) : previous);
+    // The chat belongs to the same person: its header follows the record.
+    setConversations(previous => previous.map(item => item.customerId === id
+      ? { ...item, customerName: updated.name, initials: updated.initials, phone: chatPhoneAfterCustomerEdit(item.phone, customer, updated) } : item));
     showToast('Customer updated');
   };
 
@@ -626,10 +601,20 @@ export default function App() {
     navigate({ tab: 'conversations', conversationId: target?.id });
   };
 
-  const openChatForCustomer = (customerName: string) => {
-    const conv = conversations.find((c) => c.customerName === customerName);
+  // Chats and customers are linked by id, in both directions: a sample chat names its customer,
+  // and a customer created from a live chat remembers that chat. Names are never compared.
+  const conversationOfCustomer = (customer: Customer) => allConversations.find((c) =>
+    c.customerId === customer.id || (customer.conversationId !== undefined && c.id === customer.conversationId));
+  const customersWithChat = new Set(customers.filter(conversationOfCustomer).map((customer) => customer.id));
+  /** The chat an appointment was booked or changed in, if it still exists. */
+  const conversationOfAppointment = (event: CalendarEvent) => allConversations.find((c) =>
+    (event.conversationId !== undefined && c.id === event.conversationId) || c.appointmentId === event.id) ?? null;
+
+  const openChatForCustomer = (customerId: string) => {
+    const customer = customers.find((item) => item.id === customerId);
+    const conv = customer && conversationOfCustomer(customer);
     if (!conv) {
-      showToast(`No conversation with ${customerName} yet`, 'info');
+      showToast(`No conversation with ${customer?.name ?? 'this customer'} yet`, 'info');
       return;
     }
     openConversation(conv.id);
@@ -646,12 +631,20 @@ export default function App() {
     showToast('You took over this conversation. The AI is paused.');
   };
 
-  const applyConversationAppointment = (conversation: Conversation, action: AppointmentAction, fromAi: boolean): string | null => {
-    const appointment = appointmentFromConversationAction(action, conversation, calendarEvents, services, fromAi);
+  const applyConversationAppointment = (conversation: Conversation, action: AppointmentAction, fromAi: boolean): { error: string } | { saved: CalendarEvent } => {
+    const appointment = appointmentFromConversationAction(action, conversation, calendarEvents, services, employees, fromAi);
     if (!appointment) {
-      return 'This appointment could not be updated. Check the calendar and service before confirming.';
+      return { error: 'This appointment could not be updated. Check the calendar and service before confirming.' };
     }
-    return saveCalendarEvent({ ...appointment, customerPhone: conversation.phone }, appointment.id);
+    return storeCalendarEvent({
+      ...appointment,
+      // A time outside opening hours is the owner's decision, taken by sending this reply. The AI never books one.
+      outsideHoursApproved: !fromAi && isOutsideOpeningHours(bookingHours, appointment.date, appointment.startTime, appointment.endTime),
+      customerId: appointment.customerId ?? conversation.customerId,
+      // A chat shows a masked number or none at all. Only a real number goes into the records.
+      customerPhone: isPhoneNumber(conversation.phone) ? conversation.phone : appointment.customerPhone,
+      conversationId: conversation.id,
+    }, appointment.id, { language: conversation.language, channel: conversation.channel, conversationId: conversation.id });
   };
 
   /** A live chat's booking request: add it to the calendar (with the usual checks), then tell the customer. */
@@ -659,20 +652,29 @@ export default function App() {
     const conversation = allConversations.find((item) => item.id === id);
     const request = conversation?.bookingRequest;
     if (!conversation || !request || request.status !== 'requested') return;
-    const service = services.find((item) => item.name === request.service);
-    const staff = employees.find((item) => service?.assignedEmployeeIds?.includes(item.id)) ?? employees[0];
+    // The server sends the service's id. A chat stored before it did names the service only.
+    const service = request.serviceId !== undefined
+      ? services.find((item) => item.id === request.serviceId)
+      : services.find((item) => item.name.toLowerCase() === request.service.trim().toLowerCase());
+    if (!service) { showToast(`"${request.service}" is no longer one of your services. Reply to the customer or add the appointment in the calendar.`, 'error'); return; }
+    const appointmentId = `live-appt-${id}-${request.date}-${request.time.replace(':', '')}`;
+    // The customer asked for no particular stylist: take the first one who offers the service and is
+    // free at that time. If nobody is, the booking is checked for the first who offers it, which gives the reason.
+    const stylist = firstFreeEmployee(availabilityContext, service.id, request.date, request.time, appointmentId)
+      ?? employees.find((item) => item.status === 'Active' && isEmployeeAssignedToService(service, item));
+    if (!stylist) { showToast(`No active employee offers ${service.name}. Assign someone in Services first.`, 'error'); return; }
     const action: AppointmentAction = {
       type: 'book',
-      appointmentId: `live-appt-${id}-${request.date}-${request.time.replace(':', '')}`,
+      appointmentId,
       date: request.date,
       startTime: request.time,
-      serviceName: request.service,
-      staffName: staff?.name ?? '',
+      serviceId: service.id,
+      employeeId: stylist.id,
     };
-    const error = applyConversationAppointment({ ...conversation, customerName: request.customerName }, action, true);
-    if (error) { showToast(error, 'error'); return; }
+    const result = applyConversationAppointment({ ...conversation, customerName: chatBookingName(conversation.customerName, request.customerName) }, action, true);
+    if ('error' in result) { showToast(result.error, 'error'); return; }
     void live.confirmBooking(id).then((sendError) => showToast(
-      sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${request.service}, ${request.time}. The customer got the confirmation.`,
+      sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${service.name}, ${request.time} with ${stylist.name}. The customer got the confirmation.`,
       sendError ? 'error' : 'success',
     ));
   };
@@ -686,28 +688,34 @@ export default function App() {
     if (!conversation) return 'This conversation no longer exists.';
     const followUp = conversation.aiFollowUp;
     if (followUp && !aiSettings.answerLanguages[conversation.language]) {
-      const error = 'Enable this customer’s language in AI Assistant settings, or take over and reply yourself.';
+      const error = 'Enable this customer’s language on the AI receptionist page, or take over and reply yourself.';
       showToast(error, 'error');
       return error;
     }
     const action = followUp?.appointmentAction;
-    const error = action ? applyConversationAppointment(conversation, action, true) : null;
-    if (error) { showToast(error, 'error'); return error; }
+    const result = action ? applyConversationAppointment(conversation, action, true) : null;
+    if (result && 'error' in result) { showToast(result.error, 'error'); return result.error; }
 
+    const sentAt = new Date();
+    const sentLabel = getSalonNow(companySettings.timeZone, sentAt).time;
     setConversations((prev) => prev.map((c) => c.id !== id ? c : {
       ...c,
       takenOver: false,
       status: action || c.appointmentId ? 'booked' : 'ai-handled',
       appointmentId: action?.appointmentId ?? c.appointmentId,
+      customerId: result?.saved.customerId ?? c.customerId,
       aiFollowUp: undefined,
       messages: followUp ? [...c.messages, {
         id: `msg-${Date.now()}`,
         sender: 'ai' as const,
         original: followUp.original,
         translation: followUp.translation,
-        time: 'now',
+        ...(followUp.translationDe ? { translationDe: followUp.translationDe } : {}),
+        time: sentLabel,
+        sentAt: sentAt.toISOString(),
       }] : c.messages,
-      lastTime: followUp ? 'now' : c.lastTime,
+      lastTime: followUp ? sentLabel : c.lastTime,
+      lastMessageAt: followUp ? sentAt.toISOString() : c.lastMessageAt,
     }));
     showToast('The AI is continuing this conversation');
     return null;
@@ -720,14 +728,19 @@ export default function App() {
     }
     const conversation = conversations.find((item) => item.id === id);
     if (!conversation) return false;
-    const error = action ? applyConversationAppointment(conversation, action, false) : null;
-    if (error) { showToast(error, 'error'); return false; }
+    const result = action ? applyConversationAppointment(conversation, action, false) : null;
+    if (result && 'error' in result) { showToast(result.error, 'error'); return false; }
 
+    const sentAt = new Date();
+    const sentLabel = getSalonNow(companySettings.timeZone, sentAt).time;
+    // A suggested reply brings its German text along; a typed one has none.
+    const german = local ? conversation.quickReplies?.find((reply) => reply.en === english && reply.local === local)?.de : undefined;
     setConversations((prev) => prev.map((c) => c.id !== id ? c : {
       ...c,
       takenOver: true,
       status: 'owner-handled' as const,
       appointmentId: action?.appointmentId ?? c.appointmentId,
+      customerId: result?.saved.customerId ?? c.customerId,
       // The scripted follow-up predates this reply and may now contradict the owner.
       aiFollowUp: undefined,
       // Suggestions answer the customer's last message; once the owner has replied they
@@ -738,29 +751,23 @@ export default function App() {
         sender: 'owner' as const,
         original: local ?? english,
         translation: english,
-        time: 'now',
+        ...(german ? { translationDe: german } : {}),
+        time: sentLabel,
+        sentAt: sentAt.toISOString(),
         untranslated: !local,
       }],
-      lastTime: 'now',
+      lastTime: sentLabel,
+      lastMessageAt: sentAt.toISOString(),
     }));
     return true;
   };
 
   const handleSaveAiSettings = (settings: AiAssistantSettings) => {
     setAiSettings(settings);
-    showToast('AI Assistant settings saved');
+    showToast('AI receptionist settings saved');
   };
-
-  // POS: the dialog shows its own confirmation; the toast would render behind the modal backdrop,
-  // so it is deferred until the dialog closes.
-  const pendingSaleToast = useRef<string | null>(null);
-  const handleCompleteSale = (amount: number, serviceName: string) => {
-    pendingSaleToast.current = `Simulated CHF ${amount.toFixed(2)} checkout for ${serviceName}. No payment was taken.`;
-  };
-  const closePOS = () => {
-    setIsPOSOpen(false);
-    if (pendingSaleToast.current) { showToast(pendingSaleToast.current, 'info'); pendingSaleToast.current = null; }
-  };
+  // The browser tab names the screen, the salon and the product; the customers' booking page names the salon only.
+  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, companySettings.companyName));
 
   const bookingPage = <BookingPageView {...availabilityContext}
     companySettings={companySettings} draft={bookingDraft} setDraft={setBookingDraft}
@@ -789,6 +796,7 @@ export default function App() {
         <Header
           companyName={companySettings.companyName}
           companyLocation={companySettings.city}
+          {...headerAccount(employees)}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           isMobileMenuOpen={isMobileMenuOpen}
           searchQuery={searchQuery}
@@ -806,12 +814,12 @@ export default function App() {
             navigate({ tab: 'home', requestId: req.id });
             setSearchQuery('');
           }}
-          onOpenPOSModal={() => setIsPOSOpen(true)}
           needsAttentionCount={needsAttention.length}
           needsAttentionNames={needsAttention.map((c) => c.customerName.split(' ')[0])}
           latestAiBooking={latestAiBookedEvent}
           needsAttentionUpdates={needsAttention.map(c => `${c.id}:${c.messages.at(-1)?.id}:${c.attentionReason}`).sort()}
           onOpenConversations={() => openConversation()}
+          onOpenAssistant={() => setIsAssistantOpen(true)}
 
         />
 
@@ -823,6 +831,8 @@ export default function App() {
 
         {/* Main View Body */}
         <main ref={mainRef} tabIndex={-1} id="main-content" className="flex-1 overflow-x-clip pb-28 lg:pb-16 outline-none">
+          {/* Every time in the app is the salon's. This says so, and only on a device set to another time zone. */}
+          <SalonTimeNote timeZone={companySettings.timeZone} className="mx-4 mt-3 text-xs sm:mx-6 lg:mx-8" />
           {currentTab === 'home' && rejectedRequests.length > 0 && (
             <div role="status" className="mx-4 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-1.5 text-xs sm:mx-8">
               <span>Request from {rejectedRequests.at(-1)?.request.customerName} declined.</span>
@@ -841,11 +851,14 @@ export default function App() {
               onRejectRequest={handleRejectRequest}
               onMoveRequest={handleMoveRequest}
               onSimulateNewRequest={handleSimulateNewRequest}
+              now={now}
               nextAppointment={nextAppointment}
-              activityStats={activityStats}
-              onExportActivity={handleExportActivity}
-              conversations={conversations}
+              onExportReport={() => handleExportReport()}
+              onOpenAnalytics={() => setCurrentTab('analytics')}
+              conversations={allConversations}
               onOpenConversations={openConversation}
+              onOpenBookingPage={() => setCurrentTab('booking-page')}
+              onNewAppointment={() => { setStartNewAppointment(true); setCurrentTab('calendar'); }}
             />
           )}
 
@@ -867,6 +880,10 @@ export default function App() {
               onAddEvent={handleAddCalendarEvent}
               onUpdateEvent={handleUpdateCalendarEvent}
               onDeleteEvent={handleDeleteCalendarEvent}
+              conversationFor={conversationOfAppointment}
+              onOpenConversation={openConversation}
+              startAdding={startNewAppointment}
+              onStartedAdding={() => setStartNewAppointment(false)}
             />
           )}
 
@@ -882,6 +899,10 @@ export default function App() {
           {currentTab === 'customers' && (
             <CustomersView
               customers={customers}
+              events={calendarEvents}
+              now={now}
+              timeZone={companySettings.timeZone}
+              customersWithChat={customersWithChat}
               selectedCustomerId={route.customerId ?? null}
               onClearSelection={() => navigate({ tab: 'customers' })}
               onAddCustomer={handleAddCustomer}
@@ -920,7 +941,7 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'analytics' && <AnalyticsView events={calendarEvents} conversations={conversations} companyName={companySettings.companyName} timeZone={companySettings.timeZone} />}
+          {currentTab === 'analytics' && <AnalyticsView events={calendarEvents} conversations={allConversations} companyName={companySettings.companyName} timeZone={companySettings.timeZone} now={now} onExportReport={handleExportReport} />}
 
           {currentTab === 'conversations' && (
             <ConversationsView
@@ -936,11 +957,23 @@ export default function App() {
               onOpenAiSettings={() => setCurrentTab('ai-assistant')}
               liveChannels={live.channels}
               onConfirmBooking={handleConfirmLiveBooking}
+              appointmentFor={(conversation) => appointmentForConversation(conversation, calendarEvents)}
+              onOpenAppointment={openAppointment}
+              timeZone={companySettings.timeZone}
             />
           )}
 
           {currentTab === 'ai-assistant' && (
-            <AiAssistantView settings={aiSettings} onSave={handleSaveAiSettings} />
+            <AiAssistantView
+              settings={aiSettings}
+              onSave={handleSaveAiSettings}
+              channels={{
+                live: live.status,
+                telegramBot: live.telegram,
+                whatsappChats: live.conversations.some((item) => item.channel === 'WhatsApp'),
+                businessPhone: companySettings.businessPhone,
+              }}
+            />
           )}
 
           {currentTab === 'settings' && (
@@ -968,18 +1001,13 @@ export default function App() {
         />
       </div>
 
-      {/* POS Quick Register Modal */}
-      <POSModal
-        isOpen={isPOSOpen}
-        onClose={closePOS}
-        services={services}
-        customers={customers}
-        onCompleteSale={handleCompleteSale}
-      />
-
-      {/* Feedback distinguishes a completed action from a problem or demo information. */}
+      {/* Feedback distinguishes a completed action from a problem or demo information.
+          On wide screens the assistant can be docked on the right (it sets --assistant-dock to its
+          width): the toast then moves left by that much and never lies over the assistant's input.
+          While it is docked a long message also has to stay clear of the menu on the left (16rem),
+          so it wraps earlier: min(16rem, dock) is the menu's width then, and nothing otherwise. */}
       {toast && (
-        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-24 sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap">
+        <div role={toast.kind === 'error' ? 'alert' : 'status'} className="fixed inset-x-4 top-[7.5rem] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl min-[480px]:top-[4.5rem] sm:inset-x-auto sm:top-auto sm:bottom-24 sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap xl:right-[calc(1.25rem+var(--assistant-dock,0px))] xl:max-w-[calc(100vw-2.5rem-var(--assistant-dock,0px)-min(16rem,var(--assistant-dock,0px)))]">
           {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
           <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{toast.message}</span>
           {/* On phones an action gets its own row so the message keeps the full width. */}
@@ -989,6 +1017,19 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Owner assistant: answers from the data above and changes it only through the handlers the screens use. */}
+      <AssistantPanel
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
+        salon={availabilityContext}
+        customers={customers}
+        onAddEvent={handleAddCalendarEvent}
+        onDeleteEvent={handleDeleteCalendarEvent}
+        onSaveClosedDates={setClosedDates}
+        onOpenCalendar={(date) => { setCalendarDate(date); navigate({ tab: 'calendar' }); }}
+        onResultShown={() => setToast(null)}
+      />
     </div>
   );
 }

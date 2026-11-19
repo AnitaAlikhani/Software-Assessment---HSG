@@ -3,18 +3,23 @@ import {
   Check,
   RotateCcw,
   X,
-  Share2,
-  MessageSquare,
+  Download,
+  CalendarDays,
+  CalendarClock,
   Sparkles,
-  Moon,
-  Timer,
+  Users,
   Clock,
   User,
   Plus,
 } from 'lucide-react';
+import { researchMode } from '../flags';
 import { AppointmentRequest, CalendarEvent, Conversation } from '../types';
 import { addMinutes, formatCalendarDate, formatDate } from '../scheduling';
-import { getAvailableSlots, type AvailabilityContext } from '../availability';
+import { formatDayMonth, formatPhone, formatStoredTimeRange, formatTimeRange, weekdayName } from '../format';
+import { getAvailableSlots, getNextAvailableDate, getSalonNow, type AvailabilityContext } from '../availability';
+import { timeAgoLabel } from '../demoRequests';
+import { conversationsWaiting, periodLabel } from '../analytics';
+import { homeFigures } from '../dashboard';
 
 const LANG_CHIP: Record<string, string> = {
   FR: 'bg-violet-100 text-violet-700',
@@ -22,6 +27,25 @@ const LANG_CHIP: Record<string, string> = {
   IT: 'bg-rose-100 text-rose-700',
   EN: 'bg-amber-100 text-amber-700',
 };
+
+/** One figure of "This month": the number, what it counts, and a line of detail. */
+const Figure = ({ icon, tint, value, label, detail }: {
+  icon: React.ReactNode; tint: string; value: number | string; label: string; detail: React.ReactNode;
+}) => (
+  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
+    <div className="flex items-center justify-between gap-2">
+      <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center ${tint}`}>
+        {icon}
+      </div>
+      {/* The number is the message: it is set in the text colour, the icon alone carries the tint. */}
+      <span className="text-2xl font-bold text-slate-900">{value}</span>
+    </div>
+    <div>
+      <p className="text-xs font-bold text-slate-800">{label}</p>
+      <p className="text-[11px] text-slate-500">{detail}</p>
+    </div>
+  </div>
+);
 
 interface HomeViewProps {
   requests: AppointmentRequest[];
@@ -32,20 +56,20 @@ interface HomeViewProps {
   onRejectRequest: (id: string) => void;
   onMoveRequest: (id: string, date: string, startTime: string) => string | null;
   onSimulateNewRequest: () => void;
+  /** The current moment, refreshed by the app every minute. */
+  now?: Date;
   nextAppointment: CalendarEvent | null;
   onOpenAppointment: (event: CalendarEvent) => void;
-  activityStats: {
-    messagesToday: number;
-    messagesMonth: number;
-    aiBookingsToday: number;
-    aiBookingsMonth: number;
-    afterHoursToday: number;
-    afterHoursMonth: number;
-    replyTimeSec: number;
-  };
-  onExportActivity: () => void;
+  /** Starts the download of this month's figures and appointments. */
+  onExportReport: () => void;
+  /** Leads to the same figures for any period. The link is shown only when it has a target. */
+  onOpenAnalytics?: () => void;
+  /** Every chat the owner sees, live ones included: the card counts what the header counts. */
   conversations: Conversation[];
   onOpenConversations: (conversationId?: string) => void;
+  /** What an owner with an empty request list can do next. A button is shown only when it has a target. */
+  onOpenBookingPage?: () => void;
+  onNewAppointment?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -57,12 +81,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onRejectRequest,
   onMoveRequest,
   onSimulateNewRequest,
+  now,
   nextAppointment,
   onOpenAppointment,
-  activityStats,
-  onExportActivity,
+  onExportReport,
+  onOpenAnalytics,
   conversations,
   onOpenConversations,
+  onOpenBookingPage,
+  onNewAppointment,
 }) => {
   const [movingRequestId, setMovingRequestId] = useState<string | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
@@ -92,10 +119,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const selectedMoveStart = availableMoveSlots.includes(rescheduleStart)
     ? rescheduleStart
     : availableMoveSlots[0] ?? '';
-  const requestDate = currentRequest ? new Date(`${currentRequest.date}T00:00:00.000Z`) : null;
+  const clock = now ?? availabilityContext.now ?? new Date();
+  const salonNow = getSalonNow(availabilityContext.timeZone, clock);
+  const hasPassed = (request: AppointmentRequest) =>
+    `${request.date} ${request.timeStr.split(/\s*-\s*/)[0]}` < `${salonNow.date} ${salonNow.time}`;
+  // A request whose start has passed cannot be accepted any more. The card says so and offers
+  // to move it, instead of letting "Accept" end in an error.
+  const requestTimePassed = currentRequest !== null && hasPassed(currentRequest);
 
   const openMoveDialog = (request: AppointmentRequest) => {
-    setRescheduleDate(request.date);
+    // A request in the past opens on the stylist's next free day, where there is something to choose.
+    const nextFreeDate = hasPassed(request) && request.serviceId
+      ? getNextAvailableDate({ ...availabilityContext, now: clock }, request.serviceId, salonNow.date, request.employeeId, request.id)
+      : null;
+    setRescheduleDate(nextFreeDate ?? (hasPassed(request) ? salonNow.date : request.date));
     setRescheduleStart(request.timeStr.split(/\s*-\s*/)[0]);
     setMoveError(null);
     setMovingRequestId(request.id);
@@ -115,7 +152,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
     };
   }, [movingRequestId, Boolean(movingRequest)]);
 
-  const needingAttention = conversations.filter((c) => c.status === 'needs-attention');
+  // Counted from the calendar on every render, by the functions Analytics uses.
+  const figures = homeFigures(availabilityContext.events, clock, availabilityContext.timeZone);
+
+  const needingAttention = conversationsWaiting(conversations);
   const shownConversations = (needingAttention.length > 0 ? needingAttention : conversations).slice(0, 2);
 
   return (
@@ -129,13 +169,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
               {/* Date Block + Info */}
               <div className="flex items-start gap-3 sm:gap-5">
-                {/* Request date */}
+                {/* Request date: the weekday above the day, written like every short date ("THU" over "19.11.") */}
                 <div className="flex flex-col items-center justify-center w-16 h-18 rounded-xl border border-slate-200/90 bg-white p-2 shrink-0 shadow-2xs">
                   <span className="text-[11px] font-bold text-slate-400 tracking-wider">
-                    {requestDate?.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }).toUpperCase()}
+                    {weekdayName(currentRequest.date, 'short').toUpperCase()}
                   </span>
-                  <span className="text-2xl font-bold text-slate-800 tabular-nums">
-                    {requestDate?.getUTCDate()}
+                  <span className="text-base font-bold text-slate-800 tabular-nums">
+                    {formatDayMonth(currentRequest.date)}
                   </span>
                 </div>
 
@@ -146,7 +186,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       Appointment request
                     </h2>
                     <span className="text-xs text-slate-400">
-                      {currentRequest.timeAgo}
+                      {currentRequest.createdAt ? timeAgoLabel(currentRequest.createdAt, clock) : currentRequest.timeAgo}
                     </span>
                   </div>
 
@@ -156,7 +196,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                   <div className="text-xs text-slate-500 pt-0.5 space-y-0.5">
                     <p className="font-medium text-slate-700">
-                      {formatDate(currentRequest.date)}, from {currentRequest.timeStr}
+                      {formatDate(currentRequest.date)}, {formatStoredTimeRange(currentRequest.timeStr)}
                     </p>
                     <p className="text-slate-500">{currentRequest.serviceName}</p>
                     <p className="flex items-center gap-1.5">
@@ -164,24 +204,25 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <span>Staff: {currentRequest.staffName || 'Unassigned'}</span>
                     </p>
                     {currentRequest.channel && <p className="text-slate-400">Via {currentRequest.channel}</p>}
-                    {currentRequest.customerPhone && <p>Phone: {currentRequest.customerPhone}</p>}
+                    {currentRequest.customerPhone && <p>Phone: <span className="whitespace-nowrap">{formatPhone(currentRequest.customerPhone)}</span></p>}
+                    {requestTimePassed && <p role="status" className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1.5 font-medium text-amber-800">This time has passed. Move the request to a new time, or reject it.</p>}
                   </div>
                 </div>
               </div>
 
               {/* Actions: Accept, Move, Reject */}
-              <div className="grid grid-cols-1 min-[380px]:grid-cols-3 sm:flex sm:flex-col gap-2 w-full sm:w-auto shrink-0 justify-end">
-                <button
+              <div className={`grid grid-cols-1 ${requestTimePassed ? 'min-[380px]:grid-cols-2' : 'min-[380px]:grid-cols-3'} sm:flex sm:flex-col gap-2 w-full sm:w-auto shrink-0 justify-end`}>
+                {!requestTimePassed && <button
                   onClick={() => onAcceptRequest(currentRequest.id)}
                   className="min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200/60 shadow-2xs"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>Accept</span>
-                </button>
+                </button>}
 
                 <button
                   onClick={() => openMoveDialog(currentRequest)}
-                  className="min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors border border-slate-200/70"
+                  className={`min-h-11 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${requestTimePassed ? 'text-white bg-[#5551FF] hover:bg-[#433fd8] border-transparent' : 'text-slate-600 bg-slate-50 hover:bg-slate-100 border-slate-200/70'}`}
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Move</span>
@@ -197,24 +238,44 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </div>
           ) : (
-            /* Empty State from Figma Page 11 & 25 */
+            /* Nothing to decide: say so, and offer what an owner would do next. */
             <div className="text-center py-6 px-4 space-y-2">
               <h3 className="text-base sm:text-lg font-bold text-slate-800">
-                {unavailableRequest ? 'This request is no longer available' : 'No pending appointment requests'}
+                {unavailableRequest ? 'This request is no longer available' : 'All requests handled'}
               </h3>
               <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
                 {unavailableRequest && requests.length > 0
                   ? 'Select another pending request below.'
-                  : 'New requests from WhatsApp and Instagram will show up here.'}
+                  : 'New booking requests appear here as they come in.'}
               </p>
-              {requests.length === 0 && <div className="pt-3">
-                <button
-                  onClick={onSimulateNewRequest}
-                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors border border-[#5551FF]/20"
-                >
-                  <Plus className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">Simulate incoming booking</span>
-                </button>
+              {requests.length === 0 && <div className="pt-3 flex flex-wrap items-center justify-center gap-2">
+                {onOpenBookingPage && (
+                  <button
+                    onClick={onOpenBookingPage}
+                    className="inline-flex min-h-11 items-center px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 transition-colors border border-slate-200 shadow-2xs"
+                  >
+                    <span className="whitespace-nowrap">Open booking page</span>
+                  </button>
+                )}
+                {onNewAppointment && (
+                  <button
+                    onClick={onNewAppointment}
+                    className="inline-flex min-h-11 items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors shadow-2xs"
+                  >
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    <span className="whitespace-nowrap">New appointment</span>
+                  </button>
+                )}
+                {/* Study tool: adds a made-up request. Not part of the product; back with the research switch. */}
+                {researchMode() && (
+                  <button
+                    onClick={onSimulateNewRequest}
+                    className="inline-flex min-h-11 items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium text-[#5551FF] bg-[#5551FF]/8 hover:bg-[#5551FF]/15 transition-colors border border-[#5551FF]/20"
+                  >
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    <span className="whitespace-nowrap">Simulate incoming booking</span>
+                  </button>
+                )}
               </div>}
             </div>
           )}
@@ -237,7 +298,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     }`}
                   >
                     <span className="min-w-0 max-w-full truncate font-semibold">{request.customerName}</span>
-                    <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500 sm:text-right">{formatCalendarDate(request.date)} · {request.timeStr}</span>
+                    <span className="shrink-0 whitespace-nowrap tabular-nums text-slate-500 sm:text-right">{formatCalendarDate(request.date)} · {formatStoredTimeRange(request.timeStr)}</span>
                   </button>
                 ))}
               </div>
@@ -254,7 +315,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <div>
                   <p className="text-xs font-medium text-slate-500 mb-1">{formatDate(nextAppointment.date)}</p>
                   <p className="text-lg font-bold text-slate-900 tabular-nums">
-                    {nextAppointment.startTime} - {nextAppointment.endTime}
+                    {formatTimeRange(nextAppointment.startTime, nextAppointment.endTime)}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -288,100 +349,70 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       </div>
 
-      {/* Sample activity and conversations */}
+      {/* This month's figures and conversations */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       <div className="lg:col-span-8 space-y-4">
-        {/* Header & Export Button */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* Heading, the way to Analytics and the export */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <div className="min-w-0">
             <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-              Sample activity
+              This month
             </h2>
-            <p className="text-xs text-slate-400 mt-1">Demo salon metrics. Participant activity is not tracked here.</p>
+            <p className="text-xs text-slate-500 mt-1">{periodLabel(figures.month)} · past and upcoming appointments</p>
           </div>
 
-          <button
-            onClick={onExportActivity}
-            className="flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200/80 shadow-2xs transition-colors"
-          >
-            <Share2 className="w-3.5 h-3.5 text-slate-500" />
-            <span>Export sample</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {onOpenAnalytics && (
+              <button
+                type="button"
+                onClick={onOpenAnalytics}
+                className="inline-flex min-h-11 items-center rounded-lg px-2 text-xs font-semibold text-[#5551FF] hover:underline"
+              >
+                View analytics
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onExportReport}
+              aria-label="Export CSV for this month"
+              className="flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200/80 shadow-2xs transition-colors"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          </div>
         </div>
 
-        {/* 4 Stat Cards matching Figma */}
+        {/* Four figures of the month. Analytics shows the same numbers for "This month". */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-          {/* Messages */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="w-9 h-9 rounded-xl bg-pink-50 flex items-center justify-center text-pink-600">
-                <MessageSquare className="w-4 h-4" />
-              </div>
-              <span className="text-xl font-bold text-pink-600 tabular-nums">
-                {activityStats.messagesToday}
-              </span>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-800">Messages</p>
-              <p className="text-[11px] text-slate-400 tabular-nums">
-                of {activityStats.messagesMonth} this month
-              </p>
-            </div>
-          </div>
-
-          {/* AI Bookings */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
-                <Sparkles className="w-4 h-4" />
-              </div>
-              <span className="text-xl font-bold text-amber-600 tabular-nums">
-                {activityStats.aiBookingsToday}
-              </span>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-800">AI Bookings</p>
-              <p className="text-[11px] text-slate-400 tabular-nums">
-                of {activityStats.aiBookingsMonth} this month
-              </p>
-            </div>
-          </div>
-
-          {/* After-hours */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
-                <Moon className="w-4 h-4" />
-              </div>
-              <span className="text-xl font-bold text-emerald-600 tabular-nums">
-                {activityStats.afterHoursToday}
-              </span>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-800">After-hours</p>
-              <p className="text-[11px] text-slate-400 tabular-nums">
-                of {activityStats.afterHoursMonth} this month
-              </p>
-            </div>
-          </div>
-
-          {/* Reply time */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600">
-                <Timer className="w-4 h-4" />
-              </div>
-              <span className="text-xl font-bold text-purple-600 tabular-nums">
-                {activityStats.replyTimeSec}s
-              </span>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-slate-800">Reply time</p>
-              <p className="text-[11px] text-slate-400 tabular-nums">
-                avg. this month
-              </p>
-            </div>
-          </div>
+          <Figure
+            icon={<CalendarDays className="w-4 h-4" />}
+            tint="bg-indigo-50 text-[#5551FF]"
+            value={figures.appointments}
+            label="Appointments"
+            detail={<><span className="whitespace-nowrap">{figures.today} today,</span> <span className="whitespace-nowrap">{figures.week} this week</span></>}
+          />
+          <Figure
+            icon={<Sparkles className="w-4 h-4" />}
+            tint="bg-amber-50 text-amber-600"
+            value={figures.aiShare === null ? '–' : `${figures.aiShare}%`}
+            label="Booked by AI"
+            detail={<><span className="whitespace-nowrap">{figures.aiBookings} of {figures.appointments}</span> {figures.appointments === 1 ? 'appointment' : 'appointments'}</>}
+          />
+          <Figure
+            icon={<Users className="w-4 h-4" />}
+            tint="bg-emerald-50 text-emerald-600"
+            value={figures.customers}
+            label="Customers"
+            detail={figures.customers === 1 ? 'with an appointment' : 'with appointments'}
+          />
+          <Figure
+            icon={<CalendarClock className="w-4 h-4" />}
+            tint="bg-purple-50 text-purple-600"
+            value={figures.stillToCome}
+            label="Still to come"
+            detail={`${figures.appointments - figures.stillToCome} so far`}
+          />
         </div>
       </div>
 
@@ -415,10 +446,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <span className="text-xs font-semibold text-slate-900 truncate">
                         {c.customerName}
                       </span>
+                      {/* A live chat can be in any language: show the one the AI detected, as the chat list does. */}
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
+                        className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
                       >
-                        {c.language}
+                        {c.live && c.languageLabel ? c.languageLabel : c.language}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 truncate">{last?.translation || 'No messages yet.'}</p>
@@ -484,7 +516,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <p className="font-semibold text-slate-700">{movingRequest.customerName}</p>
               <p>{moveService?.name ?? movingRequest.serviceName}{moveDuration > 0 ? ` · ${moveDuration} minutes` : ''}</p>
               <p>Staff: {moveEmployee?.name ?? movingRequest.staffName ?? 'Unassigned'}</p>
-              <p>Current: {formatDate(movingRequest.date)}, {movingRequest.timeStr}</p>
+              <p>Current: {formatDate(movingRequest.date)}, {formatStoredTimeRange(movingRequest.timeStr)}</p>
             </div>
 
             <div className="space-y-3">
@@ -516,7 +548,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 >
                   {availableMoveSlots.length === 0 && <option value="">No available times</option>}
                   {availableMoveSlots.map((start) => (
-                    <option key={start} value={start}>{start} - {addMinutes(start, moveDuration)}</option>
+                    <option key={start} value={start}>{formatTimeRange(start, addMinutes(start, moveDuration))}</option>
                   ))}
                 </select>
                 {availableMoveSlots.length === 0 && (

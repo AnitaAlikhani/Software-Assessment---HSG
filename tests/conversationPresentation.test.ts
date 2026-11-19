@@ -3,10 +3,12 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { initialAiSettings } from '../src/conversationData';
+import { appointmentForConversation } from '../src/appointmentActions';
 import { demoStorageKey } from '../src/useDemoState';
-import { demoConversations } from './fixedClock';
+import { demoConversations, demoEvents } from './fixedClock';
 import { conversationForSelection, messageForOwner } from '../src/conversationPresentation';
 import { ConversationsView } from '../src/views/ConversationsView';
+import { channelLabel } from '../src/components/ChannelBadge';
 
 const germanSettings = { ...initialAiSettings, ownerLanguage: 'German', translateChats: true };
 
@@ -72,11 +74,34 @@ test('a stale conversation link displays recovery and no reply or takeover actio
   assert.doesNotMatch(html, />Take over</);
 });
 
-test('Instagram conversations expose an Instagram demo preview', () => {
+test('a chat shows its own channel and offers the customer view', () => {
   const html = renderToStaticMarkup(React.createElement(ConversationsView, props));
-  assert.match(html, /Preview Instagram/);
-  assert.match(html, /Instagram preview for Chloé Favre/);
+  // The channel comes from the chat itself, whichever one the sample data gives it.
+  const chloe = demoConversations.find(conversation => conversation.id === 'conv-chloe')!;
+  assert.match(html, new RegExp(`via ${channelLabel(chloe.channel)}<`));
+  assert.match(html, />Customer view</);
+  assert.match(html, /Customer view of the chat with Chloé Favre/);
+  assert.match(html, /How Chloé sees this chat/);
   assert.doesNotMatch(html, /Open in WhatsApp/);
+});
+
+test('a chat whose booking is in the calendar offers the way to that appointment', () => {
+  const view = (selectedId: string, extra: Partial<React.ComponentProps<typeof ConversationsView>> = {}) =>
+    renderToStaticMarkup(React.createElement(ConversationsView, {
+      ...props, selectedId, onOpenAppointment: () => {},
+      appointmentFor: conversation => appointmentForConversation(conversation, demoEvents), ...extra,
+    }));
+  // Marie's haircut was booked in her chat, Giulia asks to move an appointment she has.
+  assert.match(view('conv-marie'), />View appointment</);
+  assert.match(view('conv-giulia'), />View appointment</);
+  // Chloé only asked for a time: nothing is booked, so nothing is offered.
+  assert.doesNotMatch(view('conv-chloe'), /View appointment/);
+  // A cancelled appointment has left the calendar: no link that leads nowhere.
+  const withoutMarie = demoEvents.filter(event => event.id !== 'cal-2');
+  assert.doesNotMatch(view('conv-marie', { appointmentFor: conversation => appointmentForConversation(conversation, withoutMarie) }), /View appointment/);
+  // Without a calendar to look in, or a way to open it, the link is left out.
+  assert.doesNotMatch(view('conv-marie', { appointmentFor: undefined }), /View appointment/);
+  assert.doesNotMatch(view('conv-marie', { onOpenAppointment: undefined }), /View appointment/);
 });
 
 test('approval setting replaces immediate AI sending with a review entry point', () => {

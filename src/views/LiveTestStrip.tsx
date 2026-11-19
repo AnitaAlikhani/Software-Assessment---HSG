@@ -10,8 +10,9 @@ interface LiveTestStripProps {
 }
 
 /**
- * Shown on top of Conversations during the live test: how people can write to the AI right now.
- * The QR code is made in the browser, so the link is never sent to another service.
+ * A study tool, shown on top of Conversations with the research switch only: how testers can
+ * write to the AI right now. Normal visitors never get it, because the website chat link carries
+ * the access key. The QR code is made in the browser, so the link is never sent to another service.
  */
 export function LiveTestStrip({ channels, liveCount, waitingCount }: LiveTestStripProps) {
   const telegramUrl = channels.telegram ? `https://t.me/${channels.telegram}` : null;

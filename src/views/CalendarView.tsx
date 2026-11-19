@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import {
   ChevronLeft,
@@ -10,9 +10,11 @@ import {
   User,
   Scissors,
   X,
+  MessageSquare,
 } from 'lucide-react';
-import { AppointmentRequest, BookingHoursDay, CalendarEvent, ClosedDate, Employee, ServiceItem, ShiftEntry, StaffAbsence } from '../types';
-import { addDays, addMinutes, calendarHours, calendarTimeZoneOffset, dayKeyForDate, formatCalendarDate, getSalonNow, salonTimeZone, startOfWeek } from '../scheduling';
+import { AppointmentRequest, BookingHoursDay, CalendarEvent, ClosedDate, Conversation, Employee, ServiceItem, ShiftEntry, StaffAbsence } from '../types';
+import { addDays, addMinutes, calendarHours, dayKeyForDate, formatCalendarDate, getSalonNow, startOfWeek } from '../scheduling';
+import { formatDate, formatDateRange, formatMonthSpan, formatPhone, formatTimeRange, formatWeek, openingHoursDay } from '../format';
 import { getAvailableSlots, isEmployeeAssignedToService } from '../availability';
 
 interface CalendarViewProps {
@@ -32,6 +34,16 @@ interface CalendarViewProps {
   onAddEvent: (event: Omit<CalendarEvent, 'id'>) => string | null;
   onUpdateEvent: (id: string, event: Omit<CalendarEvent, 'id'>) => string | null;
   onDeleteEvent: (id: string) => void;
+  /** The chat an appointment was booked in, if there is one. */
+  conversationFor?: (event: CalendarEvent) => Pick<Conversation, 'id' | 'channel'> | null;
+  onOpenConversation?: (conversationId: string) => void;
+  /**
+   * True when the page was opened to add an appointment ("New appointment" on Home): the add
+   * form opens once, as if "Add" had been pressed. `onStartedAdding` tells the caller that the
+   * wish was taken, so a later visit to the Calendar does not open the form again.
+   */
+  startAdding?: boolean;
+  onStartedAdding?: () => void;
 }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({
@@ -51,6 +63,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onAddEvent,
   onUpdateEvent,
   onDeleteEvent,
+  conversationFor,
+  onOpenConversation,
+  startAdding = false,
+  onStartedAdding,
 }) => {
   const [activeView, setActiveView] = useState<'List' | 'Day' | '3-day' | 'Week'>('Week');
   const [showFilters, setShowFilters] = useState(false);
@@ -58,6 +74,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [serviceFilter, setServiceFilter] = useState('');
   const [clock, setClock] = useState(() => new Date());
   const selectedEvent = events.find(event => event.id === selectedEventId) ?? null;
+  const selectedEventChat = selectedEvent ? conversationFor?.(selectedEvent) ?? null : null;
   const setSelectedEvent = onSelectEvent;
   const detailsRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -132,6 +149,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setClock(new Date());
     setShowAddModal(true);
   };
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  // Before the first paint, like a press on "Add": the form is open by the time the app moves
+  // focus to the heading of a newly opened page, so that focus stays with the form.
+  useLayoutEffect(() => {
+    if (!startAdding) return;
+    onStartedAdding?.();
+    // Without a service or an active employee the form cannot be filled in: the page says why instead.
+    if (createUnavailable) return;
+    // Focus first: the form returns focus to the Add button when it closes.
+    addButtonRef.current?.focus({ preventScroll: true });
+    openCreate();
+  }, [startAdding]);
   const openEdit = (event: CalendarEvent) => {
     setEditingEventId(event.id);
     setNewCustomer(event.customerName);
@@ -146,7 +175,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const isOpenDate = (value: string) => {
-    const weekday = new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+    const weekday = openingHoursDay(value);
     return !closedDates.some(closure => value >= closure.start && value <= closure.end) &&
       bookingHours.some((day) => day.day === weekday && day.isOpen && day.from < day.to);
   };
@@ -186,7 +215,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     .filter(event => !staffFilter || (event.employeeId !== undefined ? event.employeeId === staffFilter : event.staffName === employees.find(employee => employee.id === staffFilter)?.name))
     .filter(event => !serviceFilter || (event.serviceId !== undefined ? event.serviceId === serviceFilter : event.serviceName === services.find(service => service.id === serviceFilter)?.name))
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
-  const dateRange = `${visibleDays[0].label} - ${visibleDays[visibleDays.length - 1].label}`;
+  const firstDay = visibleDays[0].key;
+  const lastDay = visibleDays[visibleDays.length - 1].key;
+  // "16.–22.11.2026" for several days; one day reads "Wed, 18.11.2026".
+  const dateRange = formatDateRange(firstDay, lastDay);
+  // The page's title: the month or months on screen, and the calendar week of the first day.
+  const monthTitle = formatMonthSpan(firstDay, lastDay);
+  const weekLabel = formatWeek(firstDay);
 
   const hours = calendarHours(visibleDays.map(day => day.key), bookingHours, visibleEvents);
 
@@ -232,9 +267,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
             Calendar
           </h1>
-          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full">
-            {date.slice(0, 4)}
-          </span>
+          <p aria-live="polite" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-slate-700">
+            <span>{monthTitle}</span>
+            <span className="whitespace-nowrap text-xs font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+              {weekLabel}
+            </span>
+          </p>
 
           <div className="flex max-w-full flex-wrap items-center gap-1.5">
             <button onClick={() => onDateChange(getSalonNow(timeZone).date)} className="min-h-11 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
@@ -244,7 +282,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               <button aria-label="Previous date range" onClick={() => onDateChange(addDays(date, -navigationStep))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <span className="min-w-0 text-center text-xs font-medium text-slate-600 px-1">{dateRange}</span>
+              <span className="min-w-0 text-center text-xs font-medium text-slate-600 px-1 tabular-nums">{dateRange}</span>
               <button aria-label="Next date range" onClick={() => onDateChange(addDays(date, navigationStep))} className="flex size-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-800 transition-colors">
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -278,6 +316,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </button>
 
           <button
+            ref={addButtonRef}
             aria-label="Add appointment"
             disabled={createUnavailable}
             onClick={() => openCreate()}
@@ -289,7 +328,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">Appointment times are in {salonTimeZone(timeZone)}.</p>
       {showFilters && <section id="calendar-filters" aria-label="Calendar filters" className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <div>
           <label htmlFor="calendar-staff-filter" className="mb-1 block text-xs font-semibold text-slate-600">Employee</label>
@@ -322,7 +360,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               key={ev.id}
               role="button"
               tabIndex={0}
-              aria-label={`Open appointment for ${ev.customerName} on ${formatCalendarDate(ev.date)} at ${ev.startTime}`}
+              aria-label={`Open appointment for ${ev.customerName} on ${formatDate(ev.date, { weekday: 'long' })} at ${ev.startTime}`}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedEvent(ev); } }}
               onClick={() => setSelectedEvent(ev)}
               className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center justify-between p-3.5 rounded-xl bg-slate-50 hover:bg-indigo-50/50 border border-slate-100 transition-colors cursor-pointer"
@@ -336,7 +374,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
               <div className="shrink-0 pl-6 sm:pl-0 sm:text-right">
                 <p className="text-xs font-semibold text-slate-800">{formatCalendarDate(ev.date)}</p>
-                <p className="text-xs text-[#5551FF] font-medium">{ev.startTime} - {ev.endTime}</p>
+                <p className="text-xs text-[#5551FF] font-medium tabular-nums">{formatTimeRange(ev.startTime, ev.endTime)}</p>
               </div>
             </div>
           ))}
@@ -360,7 +398,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   }`}
                 >
                   <span className="font-semibold">{d.label}</span>
-                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400">{calendarTimeZoneOffset(d.key, timeZone)}</span>
                   {events.some((event) => event.date === d.key && event.outsideHoursApproved) && (
                     <span className="block text-[10px] font-medium text-indigo-600 mt-1">Owner-approved appointment</span>
                   )}
@@ -410,7 +447,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               key={ev.id}
                               role="button"
                               tabIndex={0}
-                              aria-label={`Open appointment for ${ev.customerName} on ${formatCalendarDate(ev.date)} at ${ev.startTime}`}
+                              aria-label={`Open appointment for ${ev.customerName} on ${formatDate(ev.date, { weekday: 'long' })} at ${ev.startTime}`}
                               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setSelectedEvent(ev); } }}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -438,7 +475,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               </div>
                               <p className="text-[11px] opacity-80 truncate">{ev.serviceName}</p>
                               <p className="text-[10px] opacity-70 tabular-nums">
-                                {ev.startTime} – {ev.endTime}
+                                {formatTimeRange(ev.startTime, ev.endTime)}
                               </p>
                             </div>
                           ))
@@ -484,17 +521,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-slate-400" />
-                <span>Time: <strong className="text-slate-800">{formatCalendarDate(selectedEvent.date)}, {selectedEvent.startTime} - {selectedEvent.endTime}</strong></span>
+                <span>Time: <strong className="text-slate-800">{formatDate(selectedEvent.date)}, {formatTimeRange(selectedEvent.startTime, selectedEvent.endTime)}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4 text-slate-400" />
                 <span>Staff: <strong className="text-slate-800">{selectedEvent.staffName}</strong></span>
               </div>
-              {selectedEvent.customerPhone && <p className="text-sm text-slate-600">Phone: <strong>{selectedEvent.customerPhone}</strong></p>}
+              {selectedEvent.customerPhone
+                ? <p className="text-sm text-slate-600">Phone: <strong className="whitespace-nowrap">{formatPhone(selectedEvent.customerPhone)}</strong></p>
+                // Booked in a chat without a phone number: say how the customer can be reached.
+                : selectedEventChat && <p className="text-sm text-slate-600">Contact: <strong>via {selectedEventChat.channel === 'Website' ? 'web chat' : selectedEventChat.channel}</strong></p>}
               {selectedEvent.isAiBooked && (
                 <div className="flex items-center gap-2 text-indigo-600 font-medium bg-indigo-50 p-2 rounded-xl">
                   <Sparkles className="w-4 h-4" />
-                  <span>Booked with the AI Assistant</span>
+                  <span>Booked by the AI receptionist</span>
                 </div>
               )}
               {selectedEvent.outsideHoursApproved && (
@@ -503,6 +543,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
 
             <button onClick={() => openEdit(selectedEvent)} className="mb-3 min-h-11 w-full rounded-xl bg-[#5551FF] px-3 py-2 text-sm font-semibold text-white hover:bg-[#433fd8]">Edit appointment</button>
+            {selectedEventChat && onOpenConversation && (
+              <button onClick={() => onOpenConversation(selectedEventChat.id)} className="mb-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-[#5551FF] hover:bg-indigo-50">
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />Open conversation
+              </button>
+            )}
             <div className="pt-2 flex gap-2">
               <button
                 onClick={() => {
@@ -634,7 +679,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
             {newEmployee && newSlotDate && availableSlots.length === 0 && <p role="status" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">No times are available for this employee and service on this date. Choose another date or check opening hours, shifts, closures and existing appointments.</p>}
             {newSlotTime && !selectedStartTime && availableSlots.length > 0 && <p role="status" className="text-xs text-amber-700">The previous time is unavailable. Choose another start time.</p>}
-            {newService && selectedStartTime && <p className="text-xs text-slate-500">{newService.durationMinutes} minutes · Ends at {addMinutes(selectedStartTime, newService.durationMinutes)} · {salonTimeZone(timeZone)}</p>}
+            {newService && selectedStartTime && <p className="text-xs text-slate-500">{newService.durationMinutes} minutes · Ends at {addMinutes(selectedStartTime, newService.durationMinutes)}</p>}
             {formError && <p ref={errorRef} tabIndex={-1} role="alert" className="text-xs text-rose-600 focus:outline-hidden">{formError}</p>}
             <div className="pt-3 flex gap-2">
               <button

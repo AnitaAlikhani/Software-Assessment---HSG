@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { Plus, X, Trash2 } from 'lucide-react';
 import { Employee, ServiceItem } from '../types';
+import { formatMoney } from '../format';
 
 interface ServicesViewProps {
   services: ServiceItem[];
@@ -117,10 +118,10 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
           return <div key={service.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <button onClick={() => startEdit(service)} className="min-h-11 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button>
+                <button onClick={() => startEdit(service)} className="min-h-11 min-w-11 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button>
                 <p className="text-slate-500 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && ` (+ ${(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time)`} · {assignments.length} {assignments.length === 1 ? 'employee' : 'employees'}</p>
               </div>
-              <span className="shrink-0 font-semibold tabular-nums">CHF {service.priceCHF.toFixed(2)}</span>
+              <span className="shrink-0 font-semibold tabular-nums">{formatMoney(service.priceCHF)}</span>
             </div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 font-semibold text-slate-700">
@@ -153,7 +154,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
               return <tr key={service.id} className="group hover:bg-slate-50">
                 <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 py-4 px-4"><button onClick={() => startEdit(service)} className="min-h-11 max-w-40 [overflow-wrap:anywhere] text-left font-semibold text-slate-900 hover:text-[#5551FF] focus-visible:outline-[#5551FF]">{service.name}</button></td>
                 <td className="py-4 px-4 text-slate-600 tabular-nums">{service.durationMinutes} min{Boolean(service.prepMinutes || service.postMinutes) && <span className="block text-[11px] text-slate-400">+ {(service.prepMinutes || 0) + (service.postMinutes || 0)} min staff time</span>}</td>
-                <td className="py-4 px-4 font-semibold tabular-nums whitespace-nowrap">CHF {service.priceCHF.toFixed(2)}</td>
+                <td className="py-4 px-4 font-semibold tabular-nums whitespace-nowrap">{formatMoney(service.priceCHF)}</td>
                 <td className="py-4 px-4">
                   <label className="relative inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
                   <input type="checkbox" aria-label={`Show ${service.name} in online booking`} checked={service.onlineBooking}
@@ -176,7 +177,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
           <div className="flex items-center justify-between pb-3 border-b border-slate-100"><h2 id="service-title" className="text-base font-bold text-slate-900">{isCreating ? 'Create Service' : 'Edit Service'}</h2><button type="button" aria-label="Close service editor" onClick={closeModal} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button></div>
           <label className="flex min-h-11 items-center justify-between font-semibold text-slate-700">Show in online booking<input type="checkbox" checked={showInBooking} onChange={(event) => setShowInBooking(event.target.checked)} className="h-4 w-4 accent-[#5551FF]" /></label>
           <div><label htmlFor="service-name" className="font-semibold text-slate-700 block mb-1">Name</label><input id="service-name" required value={name} onChange={(event) => setName(event.target.value)} className={inputClass} /></div>
-          <div><label htmlFor="service-category" className="font-semibold text-slate-700 block mb-1">Category</label><select id="service-category" value={category} onChange={(event) => setCategory(event.target.value)} className={inputClass}>{['No category', 'Hair', 'Haircut', 'Colour', 'Treatment'].map((item) => <option key={item}>{item}</option>)}</select></div>
+          <div><label htmlFor="service-category" className="font-semibold text-slate-700 block mb-1">Category</label><select id="service-category" value={category} onChange={(event) => setCategory(event.target.value)} className={inputClass}>{['No category', 'Cut', 'Colour', 'Styling', 'Treatment'].map((item) => <option key={item}>{item}</option>)}</select></div>
           <div><label htmlFor="service-description" className="font-semibold text-slate-700 block mb-1">Description</label><textarea id="service-description" rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Help customers choose the right service." className={inputClass} /></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label htmlFor="service-price" className="font-semibold text-slate-700 block mb-1">Price (CHF)</label><input id="service-price" type="number" inputMode="decimal" required min="0" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} className={inputClass} /></div>

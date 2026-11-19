@@ -5,13 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CalendarView } from '../src/views/CalendarView';
 import { ShiftPlanView } from '../src/views/ShiftPlanView';
 import { bookingProfileUrl } from '../src/views/BookingPageView';
-import { calendarHours, calendarTimeZoneOffset, currentSalonWeek } from '../src/scheduling';
+import { calendarHours, currentSalonWeek } from '../src/scheduling';
 import type { CalendarEvent } from '../src/types';
 import { initialBookingHours as bookingHours, initialEmployees as employees, initialServices as services } from '../src/mockData';
 
 const event = (id: string, startTime: string, endTime: string): CalendarEvent => ({
   id, customerName: id, serviceId: 'srv-2', serviceName: 'Haircut',
-  employeeId: 'emp-1', staffName: 'Nilufar Ismayilova',
+  employeeId: 'emp-1', staffName: 'Anna Weber',
   date: '2030-10-07', day: 'mon', dateDisplay: 'Mon 07/10',
   startTime, endTime, colorTheme: 'blue',
 });
@@ -63,13 +63,26 @@ test('confirmed appointment details expose an edit action alongside cancellation
   assert.match(html, /Cancel Appointment/);
 });
 
-test('timezone labels follow the displayed date and configured salon timezone', () => {
-  assert.equal(calendarTimeZoneOffset('2026-07-15', 'Europe/Zurich (GMT+01:00)'), 'GMT+2');
-  assert.equal(calendarTimeZoneOffset('2026-12-15', 'Europe/Zurich'), 'GMT+1');
-  assert.match(calendarTimeZoneOffset('2026-12-15', 'Europe/London'), /^GMT(?:\+0)?$/);
+test('the calendar names its month and week and carries no time zone labels', () => {
+  // Tuesday 15 December 2026: the week from Monday 14 to Sunday 20 December, calendar week 51.
   const html = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, date: '2026-12-15', timeZone: 'Europe/London' }));
-  assert.match(html, /Appointment times are in Europe\/London/);
-  assert.doesNotMatch(html, /GMT\+2/);
+  assert.match(html, />December 2026</);
+  assert.match(html, />Week 51</);
+  assert.match(html, />14\.–20\.12\.2026</);
+  // Seven columns, Monday first, each with its short date.
+  const columns = Array.from(html.matchAll(/data-date="([^"]+)"[^>]*><span class="font-semibold">([^<]+)</g), (match) => match.slice(1));
+  assert.deepEqual(columns.map(([date]) => date), ['2026-12-14', '2026-12-15', '2026-12-16', '2026-12-17', '2026-12-18', '2026-12-19', '2026-12-20']);
+  assert.deepEqual(columns.map(([, label]) => label), ['Mon 14.12.', 'Tue 15.12.', 'Wed 16.12.', 'Thu 17.12.', 'Fri 18.12.', 'Sat 19.12.', 'Sun 20.12.']);
+  // No offset under the days and no zone id in a sentence: whose clock the times follow is said
+  // once for the whole app, and only when it is in doubt (tests/format.test.ts).
+  assert.doesNotMatch(html, /GMT|Europe\/|London|Appointment times are in/);
+
+  // The week across the turn of the year belongs to 2026: week 53, under both months.
+  const turn = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, date: '2026-12-30' }));
+  assert.match(turn, />December 2026–January 2027</);
+  assert.match(turn, />Week 53</);
+  assert.match(turn, />28\.12\.2026–03\.01\.2027</);
+  assert.doesNotMatch(turn, />2027</);
 });
 
 test('current shift week follows salon date across a local week boundary', () => {

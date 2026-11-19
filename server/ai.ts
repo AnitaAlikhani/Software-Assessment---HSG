@@ -1,9 +1,10 @@
 import process from 'node:process';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { initialAiSettings } from '../src/conversationData.js';
-import { initialBookingHours, initialCompanySettings, initialServices } from '../src/mockData.js';
+import { formatMoney, formatMonth, weekdayName, zonedDateTime } from '../src/format.js';
+import { initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
-import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES } from './salonRules.js';
+import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES, teamFact } from './salonRules.js';
 
 /**
  * Tried in order, all on Google's free tier. Each model has its own free daily quota; the Lite
@@ -49,16 +50,28 @@ const toMinutes = (time: string) => { const [h, m] = time.split(':').map(Number)
 const toTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 const bullets = (items: string[]) => items.map(item => `- ${item}`).join('\n');
 
-/** What the AI knows about the demo salon: website demo data plus the rulebook in salonRules.ts. */
+/** "Tuesday to Friday" for days that follow each other in the week, otherwise "Tuesday, Thursday". */
+const dayRange = (days: string[], week: string[]) => {
+  const positions = days.map(day => week.indexOf(day));
+  const inARow = positions.every((position, index) => index === 0 || position === positions[index - 1] + 1);
+  return days.length >= 3 && inARow ? `${days[0]} to ${days[days.length - 1]}` : days.join(', ');
+};
+
+/** What the AI knows about the salon: its services, team, address and hours, plus the rulebook in salonRules.ts. */
 export function salonContext() {
   const open = initialBookingHours.filter(day => day.isOpen);
-  // Latest start so the service ends by closing time, assuming the same hours on all open days.
-  const closing = open.length ? Math.min(...open.map(day => toMinutes(day.to))) : 18 * 60;
+  const week = initialBookingHours.map(day => day.day);
+  // The latest start lets the service end by closing time. Days do not all close at the same
+  // time (Saturday is shorter), so each closing time gets its own latest start.
+  const closings = [...new Set(open.map(day => day.to))];
+  const latestStarts = (durationMinutes: number) => closings.map(closing => {
+    const latest = toTime(Math.floor((toMinutes(closing) - durationMinutes) / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES);
+    return closings.length === 1 ? latest : `${latest} (${dayRange(open.filter(day => day.to === closing).map(day => day.day), week)})`;
+  }).join(', ');
   const services = initialServices
     .map(service => {
-      const lastStart = toTime(Math.floor((closing - service.durationMinutes) / SLOT_STEP_MINUTES) * SLOT_STEP_MINUTES);
       const extra = service.onlineBooking ? '' : ' The owner books this one personally: collect the request, then hand over.';
-      return `- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}. ${service.description ?? ''} Latest start ${lastStart}.${extra}`;
+      return `- ${service.name}: ${service.durationMinutes} min, ${formatMoney(service.priceCHF)}. ${service.description ?? ''} Latest start ${latestStarts(service.durationMinutes)}.${extra}`;
     })
     .join('\n');
   const hours = initialBookingHours.map(day => `- ${day.day}: ${day.isOpen ? `${day.from}–${day.to}` : 'closed'}`).join('\n');
@@ -68,8 +81,12 @@ export function salonContext() {
   ];
   const tone = initialAiSettings.tone === 'formal' ? 'polite and formal (use "Sie"/"vous" where the language has it)' : 'warm and friendly';
   const { companyName, street, postalCode, city, businessPhone } = initialCompanySettings;
+  const address = [street, [postalCode, city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  // A salon without a phone line gets no phone sentence: the AI must not invent a number.
+  const phone = businessPhone.trim() ? ` Salon phone: ${businessPhone.trim()}.` : '';
+  const team = teamFact(initialEmployees);
 
-  return `You are the booking assistant of ${companyName}, a small hair salon at ${street}, ${postalCode} ${city}. Salon phone: ${businessPhone}. Your tone is ${tone}.
+  return `You are the booking assistant of ${companyName}, a small hair salon${address ? ` at ${address}` : ''}.${phone} Your tone is ${tone}.
 
 SERVICES (the only services; never invent others or other prices):
 ${services}
@@ -83,7 +100,7 @@ TIME RULES:
 - If a wanted time breaks a rule, say why in a few words and offer the nearest two times that work.
 
 SALON FACTS (you may share these):
-${bullets(SALON_FACTS)}
+${bullets(team ? [...SALON_FACTS, team] : SALON_FACTS)}
 
 BOOKING FLOW:
 ${bullets(BOOKING_FLOW)}
@@ -113,6 +130,8 @@ export interface IncomingAnalysis {
 
 export interface BookingRequest {
   service: string;
+  /** Id of that service in the salon's list. Added by the check in bookingRules.ts, not by the AI. */
+  serviceId?: string;
   /** YYYY-MM-DD */
   date: string;
   /** HH:MM */
@@ -165,7 +184,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 /** Stop trying more models after this long, so a visitor gets an answer (or a "busy" note) in time. */
 const TOTAL_BUDGET_MS = 40_000;
 
-async function json<T>(prompt: string, schema: unknown, systemInstruction = salonContext()): Promise<T> {
+export async function json<T>(prompt: string, schema: unknown, systemInstruction = salonContext()): Promise<T> {
   let lastError: unknown;
   const started = Date.now();
   for (const name of models()) {
@@ -206,11 +225,16 @@ async function json<T>(prompt: string, schema: unknown, systemInstruction = salo
 }
 
 /** Reads a new customer message, translates it for the owner and drafts the AI reply. */
-/** "Monday, 16 November 2026, 19:19" in salon time, so "tomorrow" or "next Friday" mean the right day. */
-export const salonNow = (now = new Date()) =>
-  now.toLocaleString('en-GB', {
-    timeZone: 'Europe/Zurich', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+/**
+ * "Monday, 16 November 2026 at 19:19" in salon time, so "tomorrow" or "next Friday" mean the
+ * right day. This line is read by the AI model, not by a person: the month is spelled out, so
+ * the model cannot take day and month for each other. It is put together from the date's parts,
+ * so the wording does not change with the server's version.
+ */
+export const salonNow = (now = new Date()) => {
+  const { date, time } = zonedDateTime(now, 'Europe/Zurich');
+  return `${weekdayName(date)}, ${Number(date.slice(8))} ${formatMonth(date)} at ${time}`;
+};
 
 export const analyzeIncoming = (earlier: ChatMessage[], text: string, now = new Date()) =>
   json<IncomingAnalysis>(

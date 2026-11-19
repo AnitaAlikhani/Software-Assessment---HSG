@@ -1,3 +1,4 @@
+import { formatDate, zonedDateTime } from '../src/format.js';
 import { initialBookingHours, initialServices } from '../src/mockData.js';
 import type { BookingRequest } from './ai.js';
 import { MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SLOT_STEP_MINUTES } from './salonRules.js';
@@ -7,11 +8,8 @@ const toMinutes = (time: string) => { const [h, m] = time.split(':').map(Number)
 
 /** Salon-local date and minutes for a moment in time (Europe/Zurich). */
 function zurich(now: Date) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .formatToParts(now).map(part => [part.type, part.value]),
-  );
-  return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+  const { date, time } = zonedDateTime(now, 'Europe/Zurich');
+  return { date, minutes: toMinutes(time) };
 }
 
 const dayIndex = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
@@ -41,9 +39,13 @@ export function validBookingRequest(request: BookingRequest | undefined, now = n
   if (ahead < 0 || ahead > MAX_WEEKS_AHEAD * 7) return null;
   if (ahead === 0 && start < today.minutes + MIN_NOTICE_HOURS * 60) return null;
 
-  return { service: service.name, date, time, customerName };
+  // The id travels with the request, so the owner's confirmation still finds the service after a rename.
+  return { service: service.name, serviceId: service.id, date, time, customerName };
 }
 
-/** "Tuesday, 17 November" */
-export const bookingDateLabel = (date: string) =>
-  new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
+/**
+ * "Tuesday, 17.11.2026": the date in the sentences about a booking, written like on every screen.
+ * The confirmation to the customer is translated afterwards; the weekday is a word a translation
+ * carries over, and the numbers read the same in every language the salon answers in.
+ */
+export const bookingDateLabel = (date: string) => formatDate(date, { weekday: 'long' });

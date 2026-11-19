@@ -5,12 +5,17 @@ import { normalizeWebsiteUrl, validateLogoFile, validateOptionalContact } from '
 
 test('CSV keeps hashes, quoted names, commas, newlines and Unicode in complete records', () => {
   const csv = createCsv([['Name', 'Phone'], ['Jane #1 "JJ", Müller\nJr.', '+41 79 123 45 67'], ['Following customer', '']]);
-  assert.equal(csv, '\uFEFF"Name","Phone"\r\n"Jane #1 ""JJ"", Müller\nJr.","\'+41 79 123 45 67"\r\n"Following customer",""');
+  // Semicolons between the cells: Excel with Swiss regional settings splits a double-clicked file at those.
+  assert.equal(csv, '\uFEFF"Name";"Phone"\r\n"Jane #1 ""JJ"", Müller\nJr.";"+41 79 123 45 67"\r\n"Following customer";""');
   assert.equal(csvCell(12), '"12"');
 });
 
 test('CSV text is safe from spreadsheet formula evaluation without changing numeric counts', () => {
   for (const value of ['=1+1', '+SUM(A1)', '-1+2', '@SUM(A1)', ' \t=1+1']) assert.equal(csvCell(value), `"'${value}"`);
+  // A plus sign followed by more than digits and spaces is still treated as a formula.
+  for (const value of ['+41 79 123 45 67+SUM(A1)', '+41*2', '+1', '+41 79 cmd|x', '+A1 23 45 67']) assert.equal(csvCell(value), `"'${value}"`);
+  // A phone number in international form is not: no apostrophe in the customer list.
+  for (const value of ['+41 79 123 45 67', '+41791234567', '+423 234 56 78', '+49 151 23456789']) assert.equal(csvCell(value), `"${value}"`);
   assert.equal(csvCell(-1), '"-1"');
 });
 

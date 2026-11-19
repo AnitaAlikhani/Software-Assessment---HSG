@@ -95,11 +95,12 @@ test('the AI is told the salon services, opening hours and handover rules', () =
   const context = salonContext();
   assert.match(context, /Bella Hair Salon/);
   assert.match(context, /Haircut/);
-  assert.match(context, /Saturday: closed/);
+  assert.match(context, /Monday: closed/);
+  assert.match(context, /Saturday: 08:00–16:00/);
   assert.match(context, /Discounts and price changes/);
 });
 
-test('live chats are labelled as live, with the detected language and no demo preview', () => {
+test('live chats show their channel and the detected language, and no customer view', () => {
   const state = emptyState();
   addCustomerMessage(state, parseWebhook(webhook('Hola, ¿tienen cita el lunes?'))[0], { original: 'Hola', translation: 'Hello' }, 'EN', 'Spanish');
   const [conversation] = publicConversations(state);
@@ -115,10 +116,12 @@ test('live chats are labelled as live, with the detected language and no demo pr
     aiSettings: initialAiSettings,
     onOpenAiSettings: () => {},
   }));
-  assert.match(html, /Live · WhatsApp/);
+  assert.match(html, /via WhatsApp</);
   assert.match(html, /Spanish/);
-  assert.match(html, /AI translations: Spanish/);
-  assert.doesNotMatch(html, /Preview WhatsApp/);
+  assert.match(html, /Translated from Spanish/);
+  assert.doesNotMatch(html, />Customer view</);
+  // "Live" marks a tester's chat for moderators only (see tests/studyTools.test.ts).
+  assert.doesNotMatch(html, />Live</);
 });
 
 test('website chats show as live "Website" chats and the visitor sees only their own language', () => {
@@ -134,7 +137,7 @@ test('website chats show as live "Website" chats and the visitor sees only their
   addReply(conversation, 'ai', { original: 'Samstag ist geschlossen.', translation: 'We are closed on Saturday.' });
   const [shown] = publicConversations(state);
   assert.equal(shown.channel, 'Website');
-  assert.equal(shown.phone, 'Test visitor');
+  assert.equal(shown.phone, ''); // a website chat has no number, and no label stands in for one
   assert.deepEqual(visitorMessages(conversation).map(m => [m.from, m.text]), [
     ['me', 'Hallo, habt ihr Samstag frei?'],
     ['salon', 'Samstag ist geschlossen.'],
@@ -164,7 +167,7 @@ test('reads private Telegram text messages and shows them as live Telegram chats
   addCustomerMessage(state, message, { original: message.text, translation: 'Hello, any slot Friday?' }, 'EN', 'Portuguese');
   const [shown] = publicConversations(state);
   assert.equal(shown.channel, 'Telegram');
-  assert.equal(shown.phone, 'Telegram user');
+  assert.equal(shown.phone, '');
   assert.equal(shown.languageLabel, 'Portuguese');
 });
 
@@ -176,17 +179,30 @@ test('AI booking requests are checked against the salon rules in code', async ()
   const { validBookingRequest } = await import('../server/bookingRules');
   const now = new Date('2026-11-16T18:19:00Z'); // Monday 19:19 in Zurich
   const ask = (date: string, time: string, service = 'Haircut') => validBookingRequest({ service, date, time, customerName: 'Ana' }, now);
-  assert.deepEqual(ask('2026-11-17', '15:00'), { service: 'Haircut', date: '2026-11-17', time: '15:00', customerName: 'Ana' });
+  // The answer names the service by its id too, so the owner's confirmation survives a rename.
+  assert.deepEqual(ask('2026-11-17', '15:00'), { service: 'Haircut', serviceId: 'srv-2', date: '2026-11-17', time: '15:00', customerName: 'Ana' });
   assert.equal(ask('2026-11-17', '15:00', 'haircut')?.service, 'Haircut');
-  assert.equal(ask('2026-11-21', '10:00'), null, 'Saturday is closed');
+  assert.equal(ask('2026-11-23', '10:00'), null, 'Monday is closed');
+  assert.equal(ask('2026-11-22', '10:00'), null, 'Sunday is closed');
   assert.equal(ask('2026-11-17', '17:45'), null, 'not on a 30-minute step');
-  assert.equal(ask('2026-11-17', '17:00', 'Colouring'), null, 'Colouring would end after closing');
-  assert.equal(ask('2026-11-17', '08:30'), null, 'before opening');
-  assert.equal(ask('2026-11-16', '20:00'), null, 'today, outside hours and too soon');
+  assert.equal(ask('2026-11-17', '17:00', 'Colouring')?.serviceId, 'srv-3', 'Colouring ends exactly at closing time');
+  assert.equal(ask('2026-11-17', '17:30', 'Colouring'), null, 'Colouring would end after closing');
+  assert.equal(ask('2026-11-17', '08:30')?.time, '08:30', 'opening time');
+  assert.equal(ask('2026-11-17', '08:00'), null, 'before opening');
+  // Each day has its own closing time: 18:00 is fine on a weekday, Saturday ends at 16:00.
+  assert.equal(ask('2026-11-17', '18:00')?.time, '18:00');
+  assert.equal(ask('2026-11-21', '15:30')?.time, '15:30');
+  assert.equal(ask('2026-11-21', '16:00'), null, 'Saturday closes at 16:00');
+  assert.equal(ask('2026-11-16', '20:00'), null, 'today, closed and too soon');
   assert.equal(ask('2026-11-13', '10:00'), null, 'in the past');
-  assert.equal(ask('2027-03-01', '10:00'), null, 'more than 8 weeks ahead');
+  assert.equal(ask('2027-03-02', '10:00'), null, 'more than 8 weeks ahead');
   assert.equal(ask('2026-11-17', '15:00', 'Massage'), null, 'unknown service');
   assert.equal(validBookingRequest(undefined, now), null);
+  // Same day: at least two hours' notice.
+  const tuesdayMorning = new Date('2026-11-17T09:00:00Z'); // 10:00 in Zurich
+  const today = (time: string) => validBookingRequest({ service: 'Haircut', date: '2026-11-17', time, customerName: 'Ana' }, tuesdayMorning);
+  assert.equal(today('11:30'), null);
+  assert.equal(today('12:00')?.time, '12:00');
 });
 
 test('a valid AI booking request asks the owner to confirm; the reply is only stored after sending', async () => {
@@ -202,7 +218,8 @@ test('a valid AI booking request asks the owner to confirm; the reply is only st
   const { conversation, reply } = recordAnalysis(state, incoming, analysis, new Date('2026-11-16T18:19:00Z'));
   assert.equal(conversation.status, 'needs-attention');
   assert.equal(conversation.bookingRequest?.status, 'requested');
-  assert.match(conversation.attentionReason ?? '', /Haircut on Tuesday 17 November at 15:00 for Ana/);
+  assert.equal(conversation.bookingRequest?.serviceId, 'srv-2');
+  assert.match(conversation.attentionReason ?? '', /Haircut on Tuesday, 17\.11\.2026 at 15:00 for Ana/);
   assert.equal(reply?.original, analysis.reply);
   assert.equal(conversation.messages.length, 1, 'the AI reply is added only after the channel sent it');
 
@@ -222,7 +239,8 @@ test('a valid AI booking request asks the owner to confirm; the reply is only st
   }));
   assert.match(html, /Booking request from the AI/);
   assert.match(html, /Confirm booking/);
-  assert.match(html, /Live · Telegram/);
-  assert.match(html, /Live test is on/);
-  assert.match(html, /@slotbee_bella_bot/);
+  assert.match(html, /via Telegram</);
+  // The strip with the tester links is a study tool: a normal visitor does not get it.
+  assert.doesNotMatch(html, /Live test is on/);
+  assert.doesNotMatch(html, /@slotbee_bella_bot/);
 });

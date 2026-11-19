@@ -1,189 +1,58 @@
 import type {
-  AppointmentRequest,
-  CalendarEvent,
-  Customer,
   Employee,
   Resource,
   ServiceItem,
   CompanySettingsData,
   BookingHoursDay,
-  ShiftEntry,
 } from './types.js';
-import { addDays, getSalonNow, startOfWeek } from './scheduling.js';
 
-export const initialAppointmentRequests: AppointmentRequest[] = [
-  {
-    id: 'req-1',
-    serviceId: 'srv-1',
-    employeeId: 'emp-2',
-    customerName: 'Nilufar Ismayilova',
-    serviceName: 'Sample Service',
-    date: '2026-10-01',
-    dateStr: '1 October 2026',
-    timeStr: '10:00 - 10:30',
-    timeAgo: '10 minutes ago',
-    staffName: 'Eloise Denniese',
-    channel: 'WhatsApp',
-    isAiBooked: true,
-    status: 'pending',
-  },
-  {
-    id: 'req-2',
-    serviceId: 'srv-2',
-    employeeId: 'emp-1',
-    customerName: 'Atilla Ismayilova',
-    serviceName: 'Haircut',
-    date: '2026-10-01',
-    dateStr: '1 October 2026',
-    timeStr: '11:00 - 11:30',
-    timeAgo: '1 minutes ago',
-    staffName: 'Nilufar Ismayilova',
-    channel: 'Instagram',
-    isAiBooked: true,
-    status: 'pending',
-  },
-];
-
-export const initialCalendarEvents: CalendarEvent[] = [
-  {
-    id: 'cal-1',
-    serviceId: 'srv-1',
-    employeeId: 'emp-2',
-    customerName: 'Nilufar Ismayilova',
-    serviceName: 'Sample Service',
-    staffName: 'Eloise Denniese',
-    date: '2026-10-07',
-    day: 'wed',
-    dateDisplay: 'Wed 07/10',
-    startTime: '10:00',
-    endTime: '10:30',
-    colorTheme: 'yellow',
-  },
-  {
-    id: 'cal-2',
-    serviceId: 'srv-2',
-    employeeId: 'emp-1',
-    customerName: 'Marie Dupont',
-    serviceName: 'Haircut',
-    staffName: 'Nilufar Ismayilova',
-    date: '2026-10-08',
-    day: 'thu',
-    dateDisplay: 'Thu 08/10',
-    startTime: '13:30',
-    endTime: '14:00',
-    colorTheme: 'purple',
-    isAiBooked: true,
-  },
-  {
-    id: 'cal-3',
-    serviceId: 'srv-3',
-    employeeId: 'emp-2',
-    customerName: 'L\u00e9a Girard',
-    serviceName: 'Colouring',
-    staffName: 'Eloise Denniese',
-    date: '2026-10-09',
-    day: 'fri',
-    dateDisplay: 'Fri 09/10',
-    startTime: '11:00',
-    endTime: '12:30',
-    colorTheme: 'green',
-  },
-  {
-    id: 'cal-giulia',
-    serviceId: 'srv-2',
-    employeeId: 'emp-2',
-    customerName: 'Giulia Rossi',
-    serviceName: 'Haircut',
-    staffName: 'Eloise Denniese',
-    date: '2026-10-08',
-    day: 'thu',
-    dateDisplay: 'Thu 08/10',
-    startTime: '15:00',
-    endTime: '15:30',
-    colorTheme: 'blue',
-  },
-  {
-    id: 'cal-john',
-    serviceId: 'srv-2',
-    employeeId: 'emp-1',
-    customerName: 'John Smith',
-    serviceName: 'Haircut',
-    staffName: 'Nilufar Ismayilova',
-    date: '2026-10-07',
-    day: 'wed',
-    dateDisplay: 'Wed 07/10',
-    startTime: '15:00',
-    endTime: '15:30',
-    colorTheme: 'purple',
-    isAiBooked: true,
-  },
-];
-
-export const initialCustomers: Customer[] = [
-  {
-    id: 'cust-1',
-    name: 'Nilufar Ismayilova',
-    initials: 'NI',
-    email: 'nilufar.demo@example.ch',
-    phone: '+41 78 555 00 19',
-    language: 'EN',
-    lastBooking: 'Thu 1 Oct, 10:30',
-    bookingsCount: 3,
-  },
-  {
-    id: 'cust-2',
-    name: 'Marie Dupont',
-    initials: 'MD',
-    email: 'marie.dupont@example.ch',
-    phone: '+41 79 555 01 12',
-    language: 'FR',
-    lastBooking: 'Wed 30 Sep, 13:30',
-    bookingsCount: 2,
-  },
-  {
-    id: 'cust-3',
-    name: 'L\u00e9a Girard',
-    initials: 'LG',
-    email: 'lea.girard@example.ch',
-    phone: '+41 76 555 02 34',
-    language: 'FR',
-    lastBooking: 'Mon 28 Sep, 16:00',
-    bookingsCount: 1,
-  },
-  {
-    id: 'cust-4',
-    name: 'Chlo\u00e9 Favre',
-    initials: 'CF',
-    email: 'chloe.favre@example.ch',
-    phone: '+41 77 555 03 45',
-    language: 'DE',
-    lastBooking: 'Fri 25 Sep, 10:00',
-    bookingsCount: 1,
-  },
-];
+/**
+ * The salon a new workspace starts with: team, services, rooms, profile and opening hours.
+ * Everything here is fixed. Whatever depends on today's date (appointments, customers, chats,
+ * requests, shifts) is built in src/demoSeed.ts, src/conversationData.ts and src/demoRequests.ts.
+ *
+ * All people and contact details are invented. Phone numbers stay in the 555 block and e-mail
+ * addresses on reserved example domains, so none of them can belong to anyone. Numbers are
+ * stored as every number is, in the international form, and shown as "+41 79 555 31 08".
+ * The server reads this file too (server/ai.ts, server/bookingRules.ts): keep it free of imports.
+ */
 
 export const initialEmployees: Employee[] = [
   {
     id: 'emp-1',
-    firstName: 'Nilufar',
-    lastName: 'Ismayilova',
-    name: 'Nilufar Ismayilova',
-    initials: 'NI',
-    email: 'nilufar.demo@example.ch',
-    phone: '+41 78 555 00 19',
+    firstName: 'Anna',
+    lastName: 'Weber',
+    name: 'Anna Weber',
+    initials: 'AW',
+    email: 'anna.weber@bella-hair.example',
+    phone: '+41795553108',
     status: 'Active',
     location: 'Bella Hair Salon',
     canBookOnline: true,
     hidden: false,
+    role: 'Owner',
   },
   {
     id: 'emp-2',
-    firstName: 'Eloise',
-    lastName: 'Denniese',
-    name: 'Eloise Denniese',
-    initials: 'ED',
-    email: 'eloise.denniese@example.ch',
-    phone: '+41 79 555 04 56',
+    firstName: 'Selina',
+    lastName: 'Keller',
+    name: 'Selina Keller',
+    initials: 'SK',
+    email: 'selina.keller@bella-hair.example',
+    phone: '+41785556427',
+    status: 'Active',
+    location: 'Bella Hair Salon',
+    canBookOnline: true,
+    hidden: false,
+  },
+  {
+    id: 'emp-3',
+    firstName: 'Luca',
+    lastName: 'Frei',
+    name: 'Luca Frei',
+    initials: 'LF',
+    email: 'luca.frei@bella-hair.example',
+    phone: '+41765551952',
     status: 'Active',
     location: 'Bella Hair Salon',
     canBookOnline: true,
@@ -191,191 +60,109 @@ export const initialEmployees: Employee[] = [
   },
 ];
 
+/** The person who runs the salon account: the employee with the role "Owner", else the first one. */
+export const accountOwner = (employees: Employee[]): Employee | null =>
+  employees.find((employee) => employee.role === 'Owner') ?? employees[0] ?? null;
+
+const everyone = ['emp-1', 'emp-2', 'emp-3'];
+// Colour work and updos are done by the two senior stylists.
+const seniors = ['emp-1', 'emp-2'];
+
+const service = (
+  id: string, name: string, durationMinutes: number, priceCHF: number, onlineBooking: boolean,
+  assignedEmployeeIds: string[], category: string, description: string,
+): ServiceItem => ({
+  id, name, durationMinutes, priceCHF, onlineBooking,
+  assignedEmployeesCount: assignedEmployeeIds.length, assignedEmployeeIds, category, description,
+});
+
+// The ids srv-1 to srv-3 and the names "Haircut" and "Colouring" are referred to by chats,
+// requests and the assistant's rules: keep them. Durations are multiples of the 30-minute step.
+// Colour work is not offered online: the assistant collects the request and the owner books it.
 export const initialServices: ServiceItem[] = [
-  {
-    id: 'srv-1',
-    name: 'Sample Service',
-    durationMinutes: 30,
-    priceCHF: 45.0,
-    onlineBooking: true,
-    assignedEmployeesCount: 1,
-    assignedEmployeeIds: ['emp-2'],
-    category: 'Hair',
-    description: 'Quick hair styling and consultation for regular care.',
-  },
-  {
-    id: 'srv-2',
-    name: 'Haircut',
-    durationMinutes: 30,
-    priceCHF: 55.0,
-    onlineBooking: true,
-    assignedEmployeesCount: 2,
-    assignedEmployeeIds: ['emp-1', 'emp-2'],
-    category: 'Haircut',
-    description: 'Precision haircut including shampoo, conditioning, and blow dry.',
-  },
-  {
-    id: 'srv-3',
-    name: 'Colouring',
-    durationMinutes: 90,
-    priceCHF: 120.0,
-    onlineBooking: false,
-    assignedEmployeesCount: 2,
-    assignedEmployeeIds: ['emp-1', 'emp-2'],
-    category: 'Colour',
-    description: 'Full hair colouring and gloss treatment by experienced colorists.',
-  },
+  service('srv-1', 'Wash & blow-dry', 30, 45, true, everyone, 'Styling', 'Shampoo, blow-dry and styling.'),
+  service('srv-2', 'Haircut', 30, 55, true, everyone, 'Cut', 'Consultation, cut and finish.'),
+  service('srv-3', 'Colouring', 90, 120, false, seniors, 'Colour', 'Full colour with a gloss finish, by experienced colourists.'),
+  service('srv-4', 'Cut & blow-dry', 60, 89, true, everyone, 'Cut', 'Wash, cut and blow-dry.'),
+  service('srv-5', "Men's cut", 30, 45, true, everyone, 'Cut', 'Wash, cut and styling.'),
+  service('srv-6', "Children's cut", 30, 32, true, everyone, 'Cut', 'For children up to 12 years.'),
+  service('srv-7', 'Root colour', 60, 85, false, seniors, 'Colour', 'Colour for the regrowth, with a gloss finish.'),
+  service('srv-8', 'Highlights', 120, 160, false, seniors, 'Colour', 'Foil highlights with toner.'),
+  service('srv-9', 'Balayage', 180, 240, false, ['emp-1'], 'Colour', 'Hand-painted highlights with toner and blow-dry.'),
+  service('srv-10', 'Updo', 60, 110, true, seniors, 'Styling', 'Pinned-up styling for weddings and events.'),
 ];
+
+const resource = (id: string, name: string, type: Resource['type'], capacity: number, color: string): Resource => ({
+  id, name, type, capacity, color,
+  reserveEntireRoom: false, visibleOnline: false, allServices: false, generalHours: false,
+});
 
 export const initialResources: Resource[] = [
-  {
-    id: 'res-sample-styling-chair-1',
-    name: 'Styling Chair 1',
-    type: 'Chair',
-    capacity: 1,
-    color: '#FDE047',
-    reserveEntireRoom: false,
-    visibleOnline: false,
-    allServices: false,
-    generalHours: false,
-  },
-  {
-    id: 'res-sample-styling-chair-2',
-    name: 'Styling Chair 2',
-    type: 'Chair',
-    capacity: 1,
-    color: '#C4B5FD',
-    reserveEntireRoom: false,
-    visibleOnline: false,
-    allServices: false,
-    generalHours: false,
-  },
-  {
-    id: 'res-sample-hair-wash-station',
-    name: 'Hair Wash Station',
-    type: 'Equipment',
-    capacity: 1,
-    color: '#93C5FD',
-    reserveEntireRoom: false,
-    visibleOnline: false,
-    allServices: false,
-    generalHours: false,
-  },
-  {
-    id: 'res-sample-colour-studio',
-    name: 'Colour Studio',
-    type: 'Room',
-    capacity: 2,
-    color: '#F87171',
-    reserveEntireRoom: false,
-    visibleOnline: false,
-    allServices: false,
-    generalHours: false,
-  },
-  {
-    id: 'res-sample-hair-steamer',
-    name: 'Hair Steamer',
-    type: 'Equipment',
-    capacity: 1,
-    color: '#86EFAC',
-    reserveEntireRoom: false,
-    visibleOnline: false,
-    allServices: false,
-    generalHours: false,
-  },
+  resource('res-styling-chair-1', 'Styling Chair 1', 'Chair', 1, '#FDE047'),
+  resource('res-styling-chair-2', 'Styling Chair 2', 'Chair', 1, '#C4B5FD'),
+  resource('res-styling-chair-3', 'Styling Chair 3', 'Chair', 1, '#FDBA74'),
+  resource('res-hair-wash-station', 'Hair Wash Station', 'Equipment', 1, '#93C5FD'),
+  resource('res-colour-studio', 'Colour Studio', 'Room', 2, '#F87171'),
+  resource('res-hair-steamer', 'Hair Steamer', 'Equipment', 1, '#86EFAC'),
 ];
 
-export const initialShiftOverview: ShiftEntry[] = [
-  {
-    employeeId: 'emp-1',
-    employeeName: 'Nilufar Ismayilova',
-    initials: 'NI',
-    avatarColor: 'bg-rose-100 text-rose-700',
-    shifts: {
-      '2026-09-28': { start: '09:00', end: '18:00' },
-      '2026-09-29': { start: '09:00', end: '18:00' },
-      '2026-09-30': { start: '09:00', end: '18:00' },
-      '2026-10-01': { start: '09:00', end: '18:00' },
-      '2026-10-02': { start: '09:00', end: '18:00' },
-      '2026-10-03': null,
-      '2026-10-04': null,
-      '2026-10-05': { start: '09:00', end: '18:00' },
-      '2026-10-06': { start: '09:00', end: '18:00' },
-      '2026-10-07': { start: '09:00', end: '18:00' },
-      '2026-10-08': { start: '09:00', end: '18:00' },
-      '2026-10-09': { start: '09:00', end: '18:00' },
-      '2026-10-10': null,
-      '2026-10-11': null,
-    },
+/**
+ * Each stylist's regular week (0 = Sunday ... 6 = Saturday). Every shift lies inside the opening
+ * hours below, and together they cover them: an early and a late stylist on weekdays.
+ * Anna 40 h, Selina 33.5 h, Luca 24 h. Days that are not listed are days off.
+ */
+export const demoShiftPattern: Record<string, Record<number, { start: string; end: string } | undefined>> = {
+  'emp-1': {
+    2: { start: '08:30', end: '17:00' },
+    3: { start: '08:30', end: '17:00' },
+    4: { start: '10:00', end: '18:30' },
+    5: { start: '10:00', end: '18:30' },
+    6: { start: '08:00', end: '14:00' },
   },
-  {
-    employeeId: 'emp-2',
-    employeeName: 'Eloise Denniese',
-    initials: 'ED',
-    avatarColor: 'bg-amber-100 text-amber-700',
-    shifts: {
-      '2026-09-28': null,
-      '2026-09-29': null,
-      '2026-09-30': { start: '10:00', end: '18:00' },
-      '2026-10-01': { start: '10:00', end: '18:00' },
-      '2026-10-02': { start: '10:00', end: '18:00' },
-      '2026-10-03': { start: '10:00', end: '18:00' },
-      '2026-10-04': null,
-      '2026-10-05': null,
-      '2026-10-06': null,
-      '2026-10-07': { start: '10:00', end: '18:00' },
-      '2026-10-08': { start: '10:00', end: '18:00' },
-      '2026-10-09': { start: '10:00', end: '18:00' },
-      '2026-10-10': { start: '10:00', end: '18:00' },
-      '2026-10-11': null,
-    },
+  'emp-2': {
+    3: { start: '10:00', end: '18:30' },
+    4: { start: '08:30', end: '17:00' },
+    5: { start: '08:30', end: '17:00' },
+    6: { start: '08:00', end: '16:00' },
   },
-];
-
-/** Fresh sample capacity created once per demo session, never by availability checks. */
-export const createDemoShifts = (timeZone?: string, now = new Date()): ShiftEntry[] => {
-  const today = getSalonNow(timeZone, now).date;
-  const weekStart = startOfWeek(today);
-  const end = addDays(today, 89);
-  return initialShiftOverview.map((entry) => {
-    const shifts = Object.fromEntries(Object.entries(entry.shifts).map(([date, shift]) => [date, shift ? { ...shift } : null]));
-    for (let date = weekStart; date <= end; date = addDays(date, 1)) {
-      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-      // Nilufar works Mon-Fri, Eloise Wed-Sat, matching the original sample week.
-      const works = entry.employeeId === 'emp-1' ? weekday >= 1 && weekday <= 5 : weekday >= 3 && weekday <= 6;
-      shifts[date] = works ? { start: entry.employeeId === 'emp-1' ? '09:00' : '10:00', end: '18:00' } : null;
-    }
-    return { ...entry, shifts };
-  });
+  'emp-3': {
+    2: { start: '10:00', end: '18:30' },
+    5: { start: '10:00', end: '18:30' },
+    6: { start: '09:00', end: '16:00' },
+  },
 };
 
+/** Avatar colours of the team in the shift plan, in the order of initialEmployees. */
+export const demoShiftColors = ['bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-700', 'bg-sky-100 text-sky-700'];
+
+// The salon has no phone line, website or social pages of its own, so those fields stay empty:
+// the booking page hides empty links, and nothing leads to a page or a number of a stranger.
 export const initialCompanySettings: CompanySettingsData = {
   companyName: 'Bella Hair Salon',
-  street: 'Musterstrasse 1',
+  street: 'Tuchgasse 7',
   postalCode: '9000',
   city: 'St. Gallen',
+  canton: 'SG',
   country: 'Switzerland',
-  state: 'St. Gallen',
-  industry: 'Hair & Beauty',
-  businessPhone: '+41 71 000 00 00',
-  currency: 'Swiss Franc - CHF',
-  branchLanguage: 'English',
-  timeZone: 'Europe/Zurich (GMT+01:00)',
-  description: 'Tell customers about your salon...',
-  website: 'https://www.bellahair.ch',
-  facebook: 'facebook.com/bellahair',
-  xProfile: 'x.com/bellahair',
-  instagram: 'instagram.com/bellahair',
-  legalNote: 'https://www.bellahair.ch/legal',
+  businessPhone: '',
+  currency: 'Swiss franc (CHF)',
+  timeZone: 'Europe/Zurich',
+  description: 'Hair salon in the old town of St. Gallen: cuts, colour and styling for women, men and children. Walk-ins are welcome when a chair is free, but we recommend booking.',
+  website: '',
+  facebook: '',
+  xProfile: '',
+  instagram: '',
+  legalNote: '',
   customTerms: false,
 };
 
+// Closed on Sunday and Monday, shorter on Saturday, as most hair salons in St. Gallen are.
 export const initialBookingHours: BookingHoursDay[] = [
-  { day: 'Monday', isOpen: true, from: '09:00', to: '18:00' },
-  { day: 'Tuesday', isOpen: true, from: '09:00', to: '18:00' },
-  { day: 'Wednesday', isOpen: true, from: '09:00', to: '18:00' },
-  { day: 'Thursday', isOpen: true, from: '09:00', to: '18:00' },
-  { day: 'Friday', isOpen: true, from: '09:00', to: '18:00' },
-  { day: 'Saturday', isOpen: false, from: '09:00', to: '18:00' },
-  { day: 'Sunday', isOpen: false, from: '09:00', to: '18:00' },
+  { day: 'Monday', isOpen: false, from: '08:30', to: '18:30' },
+  { day: 'Tuesday', isOpen: true, from: '08:30', to: '18:30' },
+  { day: 'Wednesday', isOpen: true, from: '08:30', to: '18:30' },
+  { day: 'Thursday', isOpen: true, from: '08:30', to: '18:30' },
+  { day: 'Friday', isOpen: true, from: '08:30', to: '18:30' },
+  { day: 'Saturday', isOpen: true, from: '08:00', to: '16:00' },
+  { day: 'Sunday', isOpen: false, from: '08:30', to: '18:30' },
 ];

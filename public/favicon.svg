@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The SlotBee mark: one honeycomb cell with a check. Same drawing as src/components/Logo.tsx. -->
+  <path fill="#5551FF" d="M13.2 2.6Q16 1 18.8 2.6L26.2 6.9Q29 8.5 29 11.7V20.3Q29 23.5 26.2 25.1L18.8 29.4Q16 31 13.2 29.4L5.8 25.1Q3 23.5 3 20.3V11.7Q3 8.5 5.8 6.9Z"/>
+  <path fill="none" stroke="#F5B400" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="M9.9 16.5l4.2 4.2 8-8.9"/>
+</svg>

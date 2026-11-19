@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyticsRangeError, appointmentAnalytics, conversationAnalytics } from '../src/analytics';
-import { initialCalendarEvents } from '../src/mockData';
-import { demoConversations } from './fixedClock';
+import { demoConversations, demoEvents } from './fixedClock';
 
 test('analytics filters appointments by inclusive date boundaries and derives actual counts', () => {
-  const template = initialCalendarEvents[0];
+  const template = demoEvents[0];
   const events = [
     { ...template, id: 'a', date: '2026-10-01', customerId: 'one', isAiBooked: true },
     { ...template, id: 'b', date: '2026-10-03', customerId: 'one', isAiBooked: false },
@@ -22,13 +21,13 @@ test('analytics filters appointments by inclusive date boundaries and derives ac
 test('analytics rejects impossible, reversed or unbounded date ranges', () => {
   for (const [from, to] of [['2026-02-30', '2026-03-01'], ['', '2026-10-01'], ['2026-10-02', '2026-10-01'], ['2020-01-01', '2026-01-01']]) {
     assert.ok(analyticsRangeError(from, to));
-    assert.deepEqual(appointmentAnalytics(initialCalendarEvents, from, to).series, []);
+    assert.deepEqual(appointmentAnalytics(demoEvents, from, to).series, []);
   }
   assert.equal(analyticsRangeError('2026-10-01', '2026-10-01'), null);
 });
 
 test('customer totals reconcile legacy names with unique IDs without merging distinct contacts', () => {
-  const template = { ...initialCalendarEvents[0], date: '2026-10-01', customerName: 'Test Customer' };
+  const template = { ...demoEvents[0], date: '2026-10-01', customerName: 'Test Customer' };
   const legacy = { ...template, id: 'legacy', customerId: undefined };
   const linked = { ...template, id: 'linked', customerId: 'customer-one' };
   assert.equal(appointmentAnalytics([legacy, linked], template.date, template.date).customers, 1);
