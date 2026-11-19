@@ -141,6 +141,7 @@ const recording = (events: [ms: number, name: string][], finals: string[] = [], 
   finals: finals.map((text, index) => ({ ms: 1000 * (index + 1), text })),
   alternatives: [],
   interimCount: events.filter(([, name]) => name === 'interim').length,
+  unfinished: '',
   errors: [],
   durationMs: events.at(-1)?.[0] ?? 0,
   ...more,
@@ -230,7 +231,7 @@ test('the file to send back holds the choices, the texts and the timings, and no
   });
   assert.deepEqual(Object.keys(report), ['kind', 'version', 'createdAt', 'browser', 'support', 'settings', 'summary', 'sentences', 'talk']);
   assert.equal(report.kind, 'slotbee-voice-check');
-  assert.equal(report.version, 1);
+  assert.equal(report.version, 2);
   assert.equal(report.settings.label, 'A.B.');
   assert.deepEqual({ ...report.settings, label: '' }, { ...settings, label: '' });
   assert.equal(report.sentences.length, 12);
@@ -243,6 +244,24 @@ test('the file to send back holds the choices, the texts and the timings, and no
 
   assert.equal(reportFileName(report), 'voice-check-de-a-b-2026-11-19-1432.json');
   assert.equal(reportFileName({ createdAt: '2026-11-19T14:32:10.000Z', settings: { ...settings, label: '', language: 'en' } }), 'voice-check-en-2026-11-19-1432.json');
+});
+
+test('words the engine never finished are kept with the try, but not scored', () => {
+  // What happened in the first real round: Stop was pressed while the words were still grey.
+  const stopped = attemptFrom(sentence('en-01'), recording(
+    [[5, 'start'], [1600, 'speechstart'], [3100, 'interim'], [3300, 'interim'], [5200, 'stop-pressed'], [5230, 'speechend'], [5400, 'end'], [5400, 'unfinished']],
+    [],
+    { unfinished: 'do we have anything free on Thursday' },
+  ));
+  assert.equal(stopped.heard, '');
+  assert.equal(stopped.unfinished, 'do we have anything free on Thursday');
+  assert.deepEqual(stopped.score.found, [false, false]);
+  assert.deepEqual(stopped.timings, { firstWordMs: 1500, finalDelayMs: null, totalMs: null });
+  assert.ok(stopped.events.some(event => event.name === 'stop-pressed'));
+
+  const call = talkFrom(LAB_LANGUAGES.en.talk, recording([[5, 'start'], [4000, 'final'], [9000, 'end'], [9000, 'unfinished']], ['a haircut sure'], { unfinished: 'thursday the twenty' }));
+  assert.equal(call.heard, 'a haircut sure');
+  assert.equal(call.unfinished, 'thursday the twenty');
 });
 
 // ---------- the page ----------
@@ -287,6 +306,7 @@ test('the first screen says what is asked, what happens to the voice, and offers
   assert.doesNotMatch(text, /This browser has no speech recognition/);
   assert.match(text, /Voice check/);
   assert.match(text, /You read 12 short sentences aloud, then one short call/);
+  assert.match(text, /There is nothing to pass\. A sentence that comes out wrong is exactly what we need to see/);
   assert.match(text, /keeps no sound and stores nothing/);
   assert.match(text, /Google for Chrome, Apple for Safari/);
   for (const label of ['Language you will speak', 'Around you', 'Microphone', 'Your initials (optional)', 'More options', 'Favour salon words.', 'Recognise on this device.']) {

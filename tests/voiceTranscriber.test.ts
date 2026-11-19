@@ -177,6 +177,75 @@ test('an engine that reports its end in time leaves no timer behind', () => {
   assert.equal(timers[0].ms, 1000);
 });
 
+test('words that were heard but never finished are handed over when the engine closes', () => {
+  // Stop pressed while the engine was still working: Chrome can close without a finished phrase.
+  const stopped = setup();
+  stopped.transcriber.start();
+  stopped.engine().onstart?.();
+  stopped.engine().hear([{ text: 'do we have anything' }]);
+  stopped.engine().hear([{ text: 'do we have anything free on thursday' }]);
+  stopped.transcriber.stop();
+  stopped.engine().onend?.();
+  assert.deepEqual(stopped.types().slice(-3), ['engine:end', 'unfinished', 'stopped']);
+  assert.deepEqual(stopped.events.find(event => event.type === 'unfinished'), { type: 'unfinished', text: 'do we have anything free on thursday' });
+
+  // A phrase that was delivered leaves nothing behind.
+  const delivered = setup();
+  delivered.transcriber.start();
+  delivered.engine().onstart?.();
+  delivered.engine().hear([{ text: 'confirm' }]);
+  delivered.engine().hear([{ text: 'confirm booking', final: true }]);
+  delivered.engine().onend?.();
+  assert.equal(delivered.events.some(event => event.type === 'unfinished'), false);
+
+  // The engine withdrew its words with an empty result: that is noted, and the words are still handed over.
+  const withdrawn = setup();
+  withdrawn.transcriber.start();
+  withdrawn.engine().onstart?.();
+  withdrawn.engine().hear([{ text: 'hm' }]);
+  withdrawn.engine().hear([{ text: '', final: true }]);
+  withdrawn.engine().onend?.();
+  assert.deepEqual(withdrawn.types().slice(-5), ['interim', 'engine:empty-final', 'engine:end', 'unfinished', 'stopped']);
+
+  // In a call: what one session left unfinished is handed over before the next one opens, once.
+  const call = setup({ continuous: true });
+  call.transcriber.start();
+  call.engine().onstart?.();
+  call.wait(60_000);
+  call.engine().hear([{ text: 'a haircut sure', final: true }]);
+  call.engine().hear([{ text: 'a haircut sure', final: true }, { text: 'thursday the' }], 1);
+  call.engine().onend?.();
+  assert.deepEqual(call.types().slice(-3), ['engine:end', 'unfinished', 'engine:reopen']);
+  call.runTimers();
+  call.engine().onstart?.();
+  call.wait(5000);
+  call.engine().onend?.();
+  assert.equal(call.events.filter(event => event.type === 'unfinished').length, 1);
+
+  // An engine that is given up after stop still hands over what it had.
+  const silent = setup();
+  silent.transcriber.start();
+  silent.engine().onstart?.();
+  silent.engine().hear([{ text: 'friday at' }]);
+  silent.transcriber.stop();
+  silent.runTimers();
+  assert.deepEqual(silent.types().slice(-3), ['engine:no-end', 'unfinished', 'stopped']);
+});
+
+test('a new start does not inherit unfinished words from the one before', () => {
+  const { transcriber, events, engine } = setup();
+  transcriber.start();
+  engine().onstart?.();
+  engine().hear([{ text: 'first try' }]);
+  transcriber.abort();
+  engine().onend?.();
+  const before = events.filter(event => event.type === 'unfinished').length;
+  transcriber.start();
+  engine().onstart?.();
+  engine().onend?.();
+  assert.equal(events.filter(event => event.type === 'unfinished').length, before);
+});
+
 test('abort ends at once', () => {
   const { transcriber, engine, types } = setup();
   transcriber.start();

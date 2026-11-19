@@ -72,7 +72,13 @@ function useListening(speech: SpeechEnvironment | undefined) {
   const [live, setLive] = useState('');
   const [heard, setHeard] = useState('');
   const [slow, setSlow] = useState(false);
-  const active = useRef<{ transcriber: Transcriber; limit: ReturnType<typeof setTimeout>; patience: ReturnType<typeof setTimeout> } | null>(null);
+  const active = useRef<{
+    transcriber: Transcriber;
+    limit: ReturnType<typeof setTimeout>;
+    patience: ReturnType<typeof setTimeout>;
+    /** Notes something the page itself did, next to what the engine reports. */
+    mark: (name: string) => void;
+  } | null>(null);
   const gone = useRef(false);
 
   useEffect(() => {
@@ -91,7 +97,13 @@ function useListening(speech: SpeechEnvironment | undefined) {
     if (active.current) return;
     const began = performance.now();
     const at = () => Math.round(performance.now() - began);
-    const recording: Recording = { startedAt: new Date().toISOString(), events: [], finals: [], alternatives: [], interimCount: 0, errors: [], durationMs: 0 };
+    const recording: Recording = { startedAt: new Date().toISOString(), events: [], finals: [], alternatives: [], interimCount: 0, unfinished: '', errors: [], durationMs: 0 };
+    const mark = (name: string) => { recording.events.push({ ms: at(), name }); };
+    // The page ends a try that takes too long. The note tells such an end from a press of Stop.
+    const endBecause = (reason: string) => () => {
+      mark(reason);
+      transcriber.stop();
+    };
     let timed = false;
     setLive('');
     setHeard('');
@@ -110,7 +122,7 @@ function useListening(speech: SpeechEnvironment | undefined) {
             timed = true;
             clearTimeout(active.current.limit);
             clearTimeout(active.current.patience);
-            active.current.limit = setTimeout(() => transcriber.stop(), limitMs);
+            active.current.limit = setTimeout(endBecause('time-limit'), limitMs);
           }
           setSlow(false);
           break;
@@ -128,6 +140,10 @@ function useListening(speech: SpeechEnvironment | undefined) {
           setHeard(heardText(recording));
           break;
         }
+        case 'unfinished':
+          recording.events.push({ ms: at(), name: 'unfinished' });
+          recording.unfinished = [recording.unfinished, event.text].filter(Boolean).join(' ');
+          break;
         case 'error':
           recording.events.push({ ms: at(), name: `error:${event.code}` });
           recording.errors.push(event.code);
@@ -148,13 +164,18 @@ function useListening(speech: SpeechEnvironment | undefined) {
     }, speech);
     active.current = {
       transcriber,
-      limit: setTimeout(() => transcriber.stop(), WAIT_FOR_MICROPHONE_MS),
+      limit: setTimeout(endBecause('microphone-wait-over'), WAIT_FOR_MICROPHONE_MS),
       patience: setTimeout(() => setSlow(true), SLOW_START_MS),
+      mark,
     };
     transcriber.start();
   }, [speech]);
 
-  const stop = useCallback(() => active.current?.transcriber.stop(), []);
+  const stop = useCallback(() => {
+    if (!active.current) return;
+    active.current.mark('stop-pressed');
+    active.current.transcriber.stop();
+  }, []);
 
   return { status, live, heard, slow, start, stop };
 }
@@ -225,6 +246,24 @@ const ListenBox: React.FC<{
     </div>
   </div>
 );
+
+/**
+ * Why a try ended without a finished text. When the engine had words but never finished them, they
+ * are shown: nearly always Stop was pressed, or listening was ended, before the engine was done.
+ */
+const Problem: React.FC<{ errors: string[]; onDevice: boolean; events: { name: string }[]; unfinished: string; language: string }> = ({ errors, onDevice, events, unfinished, language }) => {
+  const stated = problemText(errors.filter(code => code !== 'no-speech' || !unfinished), onDevice, opened(events));
+  if (unfinished && !stated) {
+    return (
+      <div role="alert" className="space-y-1 text-sm text-rose-700">
+        <p className="font-medium">Listening ended before the browser had finished this text:</p>
+        <p lang={language} className="text-slate-700">{unfinished}</p>
+        <p>Start again and let listening end by itself. Pressing Stop while the words are still grey can lose the sentence.</p>
+      </div>
+    );
+  }
+  return <p role="alert" className="text-sm font-medium text-rose-700">{stated ?? 'Nothing was heard. Press Start again and speak right away.'}</p>;
+};
 
 const Steps: React.FC<{ phase: Phase }> = ({ phase }) => {
   const steps: { id: Phase; label: string }[] = [
@@ -379,6 +418,9 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
               <p className="text-sm text-slate-600">
                 Speak the way you would on the phone in the salon. Do not slow down or raise your voice for the computer.
               </p>
+              <p className="text-sm font-medium text-slate-800">
+                There is nothing to pass. A sentence that comes out wrong is exactly what we need to see, so read each one once and go on.
+              </p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -481,7 +523,7 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
           <section className={`${card} space-y-5`} aria-labelledby="sentence-title">
             <p id="sentence-title" className="text-sm font-semibold text-slate-500">Sentence {index + 1} of {pack.sentences.length}</p>
             <p lang={settings.language} className="text-2xl font-semibold leading-snug text-slate-900">{sentence.text}</p>
-            <p className="text-sm text-slate-600">Press Start, then read the sentence aloud once. Listening ends by itself when you stop speaking.</p>
+            <p className="text-sm text-slate-600">Press Start, then read the sentence aloud once. Listening ends by itself when you stop speaking, so there is no need to press Stop.</p>
 
             <ListenBox
               status={listening.status}
@@ -496,11 +538,14 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
 
             {!busy && last && (
               <div className="space-y-3">
-                {!last.heard && <p role="alert" className="text-sm font-medium text-rose-700">{problemText(last.errors, settings.onDevice, opened(last.events)) ?? 'Nothing was heard. Press Start again and speak right away.'}</p>}
+                {!last.heard && <Problem errors={last.errors} onDevice={settings.onDevice} events={last.events} unfinished={last.unfinished} language={settings.language} />}
                 {last.heard && sentence.keys.length > 0 && (
                   <>
                     <p className="text-sm text-slate-600">Details that arrived: {last.score.foundCount} of {last.score.total}. Wait for the finished text: {seconds(last.timings.finalDelayMs)}.</p>
                     <KeyChips keys={sentence.keys} score={last.score} />
+                    {last.score.foundCount < last.score.total && (
+                      <p className="text-sm text-slate-600">Something missing or wrong is fine: that is what this check measures. Go on to the next sentence.</p>
+                    )}
                   </>
                 )}
                 {last.heard && sentence.keys.length === 0 && (
@@ -543,7 +588,7 @@ export default function VoiceLab({ speech }: { speech?: SpeechEnvironment }) {
 
             {!busy && talk && (
               <div className="space-y-3">
-                {!talk.heard && <p role="alert" className="text-sm font-medium text-rose-700">{problemText(talk.errors, settings.onDevice, opened(talk.events)) ?? 'Nothing was heard. Press Start again and speak right away.'}</p>}
+                {!talk.heard && <Problem errors={talk.errors} onDevice={settings.onDevice} events={talk.events} unfinished={talk.unfinished} language={settings.language} />}
                 {talk.heard && (
                   <>
                     <p className="text-sm text-slate-600">Details that arrived: {talk.score.foundCount} of {talk.score.total}.</p>

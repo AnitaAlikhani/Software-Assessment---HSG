@@ -25,6 +25,8 @@ export interface Recording {
   alternatives: HeardAlternative[];
   /** How often the unfinished text changed while the person spoke. */
   interimCount: number;
+  /** Words the engine had heard but never delivered as a finished phrase. Empty when all were delivered. */
+  unfinished: string;
   errors: string[];
   durationMs: number;
 }
@@ -60,7 +62,10 @@ export function timingsOf(events: LabEvent[]): Timings {
 /** One try at one sentence. */
 export interface Attempt {
   startedAt: string;
+  /** The finished text. Only this is scored. */
   heard: string;
+  /** What the engine was still working on when listening ended. Not scored. */
+  unfinished: string;
   alternatives: HeardAlternative[];
   interimCount: number;
   errors: string[];
@@ -76,6 +81,7 @@ export function attemptFrom(sentence: LabSentence, recording: Recording): Attemp
   return {
     startedAt: recording.startedAt,
     heard,
+    unfinished: recording.unfinished,
     alternatives: recording.alternatives,
     interimCount: recording.interimCount,
     errors: recording.errors,
@@ -89,6 +95,8 @@ export function attemptFrom(sentence: LabSentence, recording: Recording): Attemp
 export interface TalkRecord {
   startedAt: string;
   heard: string;
+  /** What the engine was still working on when one of its sessions closed. Not scored. */
+  unfinished: string;
   /** The phrases as the engine cut them, with the moment each one was finished. */
   segments: { ms: number; text: string }[];
   /** How often the engine closed by itself and was opened again. */
@@ -104,6 +112,7 @@ export function talkFrom(script: { lines: string[]; keys: KeyItem[] }, recording
   return {
     startedAt: recording.startedAt,
     heard,
+    unfinished: recording.unfinished,
     segments: recording.finals,
     reopened: recording.events.filter(event => event.name === 'reopen').length,
     errors: recording.errors,
@@ -173,7 +182,8 @@ export function summarise(sentences: LabSentence[], attempts: Record<string, Att
 /** The file a person sends back. */
 export interface LabReport {
   kind: 'slotbee-voice-check';
-  version: 1;
+  /** 2: tries also hold the unfinished text, and the events say when Stop was pressed. */
+  version: 2;
   createdAt: string;
   browser: { userAgent: string; languages: string[] };
   support: SpeechSupport;
@@ -195,7 +205,7 @@ export function buildReport(input: {
 }): LabReport {
   return {
     kind: 'slotbee-voice-check',
-    version: 1,
+    version: 2,
     createdAt: input.createdAt,
     browser: input.browser,
     support: input.support,

@@ -22,6 +22,11 @@ export type TranscriberEvent =
   | { type: 'interim'; text: string }
   /** A finished phrase. */
   | { type: 'final'; text: string; alternatives: HeardAlternative[] }
+  /**
+   * Words the engine had heard but never delivered as a finished phrase, because listening ended
+   * first (stopped early, or the engine closed). Sent when the engine closes, before "stopped".
+   */
+  | { type: 'unfinished'; text: string }
   /** The engine reported a problem. A fatal one ends listening. */
   | { type: 'error'; code: string; fatal: boolean }
   /** What the engine itself reports ("speechstart", "end", ...), for timing and for finding faults. */
@@ -209,6 +214,16 @@ export function createTranscriber(
   let shortSessions = 0;
   let reopen: unknown = null;
   let giveUp: unknown = null;
+  /** The unfinished text of the phrase being spoken. Empty once the phrase is delivered. */
+  let pending = '';
+
+  /** What was still unfinished when an engine closed must not vanish without a trace. */
+  const handOver = () => {
+    if (!pending) return;
+    const text = pending;
+    pending = '';
+    listener({ type: 'unfinished', text });
+  };
 
   const finish = () => {
     if (!running) return;
@@ -255,6 +270,7 @@ export function createTranscriber(
     };
     current.onresult = (event) => {
       let unfinished = '';
+      let delivered = false;
       for (let index = event.resultIndex; index < event.results.length; index++) {
         const result = event.results[index];
         if (!result || result.length === 0) continue;
@@ -267,10 +283,21 @@ export function createTranscriber(
           const text = clean(result[n]?.transcript);
           if (text) alternatives.push({ text, confidence: Number(result[n].confidence) || 0 });
         }
-        // Some engines close a silent phrase with an empty result: there is nothing to pass on.
-        if (alternatives.length > 0) listener({ type: 'final', text: alternatives[0].text, alternatives });
+        if (alternatives.length > 0) {
+          delivered = true;
+          listener({ type: 'final', text: alternatives[0].text, alternatives });
+        } else {
+          // Some engines close a phrase with an empty result. There is nothing to pass on, but the
+          // moment is noted: together with "unfinished" it shows that words were withdrawn.
+          listener({ type: 'engine', name: 'empty-final' });
+        }
       }
-      if (clean(unfinished)) listener({ type: 'interim', text: clean(unfinished) });
+      if (clean(unfinished)) {
+        pending = clean(unfinished);
+        listener({ type: 'interim', text: pending });
+      } else if (delivered) {
+        pending = '';
+      }
     };
     current.onerror = (event) => {
       const code = event.error || 'unknown';
@@ -287,6 +314,7 @@ export function createTranscriber(
     current.onend = () => {
       listener({ type: 'engine', name: 'end' });
       if (engine === current) engine = null;
+      handOver();
       const again = wanted && !fatal && (boostRefused || options.continuous === true);
       const wasRefused = boostRefused;
       boostRefused = false;
@@ -351,6 +379,7 @@ export function createTranscriber(
       for (const name of LIFECYCLE) closing[`on${name}`] = null;
       engine = null;
       listener({ type: 'engine', name: 'no-end' });
+      handOver();
       finish();
     }, how === 'abort' ? ABORT_GRACE_MS : STOP_GRACE_MS);
   };
@@ -363,6 +392,7 @@ export function createTranscriber(
       fatal = false;
       boostRefused = false;
       shortSessions = 0;
+      pending = '';
       boost = options.boost ?? [];
       open();
     },
