@@ -2,14 +2,26 @@ import type { AppointmentAction, AppointmentRequest, CalendarEvent, Conversation
 import { addMinutes, dayKeyForDate, formatCalendarDate } from './scheduling';
 
 /**
- * The appointment a chat booked or is about, while it is in the calendar: the one the chat names,
- * else the newest one that was booked in it (new bookings are added at the top of the list).
- * Null when there is none, or when it has been cancelled since.
+ * True while an appointment still belongs to a chat: it was booked in that chat, or it is not for
+ * another customer than the chat's. An appointment the owner has given to somebody else since
+ * (src/appointmentForm.ts takes the chat off it then) names another customer: it belongs to neither.
+ */
+export const belongsToConversation = (
+  event: Pick<CalendarEvent, 'conversationId' | 'customerId'>, conversation: Pick<Conversation, 'id' | 'customerId'>,
+): boolean => event.conversationId === conversation.id
+  || event.customerId === undefined || conversation.customerId === undefined || event.customerId === conversation.customerId;
+
+/**
+ * The appointment a chat booked or is about, while it is in the calendar and still the chat's
+ * own: the one the chat names, else the newest one that was booked in it (new bookings are added
+ * at the top of the list). Null when there is none, when it has been cancelled since, or when it
+ * is somebody else's appointment now: a chat never leads to another customer's appointment.
  */
 export const appointmentForConversation = (
-  conversation: Pick<Conversation, 'id' | 'appointmentId'>, events: CalendarEvent[],
+  conversation: Pick<Conversation, 'id' | 'customerId' | 'appointmentId'>, events: CalendarEvent[],
 ): CalendarEvent | null =>
-  events.find((event) => conversation.appointmentId !== undefined && event.id === conversation.appointmentId)
+  events.find((event) => conversation.appointmentId !== undefined && event.id === conversation.appointmentId
+    && belongsToConversation(event, conversation))
   ?? events.find((event) => event.conversationId === conversation.id) ?? null;
 
 /** Reuse stable IDs so confirming or moving the same appointment cannot duplicate it. */
@@ -73,11 +85,12 @@ export function appointmentFromRequest(request: AppointmentRequest, services: Se
 /**
  * Only structured confirmation actions change the schedule; offers and free text do not.
  * A booking names its service and stylist by id; a move keeps those of the appointment.
- * Returns null when the appointment, the service or the stylist no longer exists.
+ * Returns null when the appointment, the service or the stylist no longer exists, or when the
+ * appointment is no longer the chat's own.
  */
 export function appointmentFromConversationAction(
   action: AppointmentAction,
-  conversation: Pick<Conversation, 'customerName'>,
+  conversation: Pick<Conversation, 'id' | 'customerId' | 'customerName'>,
   events: CalendarEvent[],
   services: ServiceItem[],
   employees: Employee[],
@@ -85,6 +98,8 @@ export function appointmentFromConversationAction(
 ): CalendarEvent | null {
   const existing = events.find((event) => event.id === action.appointmentId);
   if (action.type === 'reschedule' && !existing) return null;
+  // The appointment has been given to another customer since: this chat no longer changes it.
+  if (existing && !belongsToConversation(existing, conversation)) return null;
   const service = action.type === 'book'
     ? services.find((item) => item.id === action.serviceId)
     : existing!.serviceId !== undefined

@@ -65,7 +65,7 @@ test('a person is deleted in their own form, which asks first and says why when 
   const selina = initialEmployees[1];
   const section = render(React.createElement(DeleteEmployee, { employee: selina, blocked: null, onDelete: () => null, onDeleted: nothing }));
   assert.match(section, /<h2[^>]*>Delete this employee<\/h2>/);
-  assert.match(section, /Removes Selina Keller from the team, with their shifts and absences\./);
+  assert.match(section, /Removes Selina Keller from the team, with their working hours and absences\./);
   // One button, and it does not delete yet: the ellipsis says that a question follows.
   const controls = Array.from(section.matchAll(/<button[^>]*>\s*(.*?)\s*<\/button>/g), (match) => match[1]);
   assert.deepEqual(controls, ['Delete…']);
@@ -78,6 +78,10 @@ test('a person is deleted in their own form, which asks first and says why when 
   assert.ok(blocked.includes(`>${reason}</p>`));
   // The reason stands in the button's place: no control that would only refuse.
   assert.doesNotMatch(blocked, /<button/);
+  // Somebody who has left keeps their appointments by being set to inactive: the form says so where deleting is refused.
+  assert.match(blocked, />To stop new bookings and keep these appointments, set the status above to Inactive\.<\/p>/);
+  const inactive = render(React.createElement(DeleteEmployee, { employee: { ...selina, status: 'Inactive' }, blocked: reason, onDelete: () => reason, onDeleted: nothing }));
+  assert.doesNotMatch(inactive, /set the status above/);
   // Somebody new, with nothing booked, can be deleted.
   assert.equal(deletionDependency('employee', 'emp-new', 'Mira Probst', demoEvents, demoRequests), null);
 });
@@ -90,15 +94,19 @@ test('the list of people works by itself, and names nothing that the page around
   assert.match(html, /No employees yet\. Add the first team member above\./);
 });
 
-test('This week is the shift plan: the week, the people and their shifts', () => {
+test('This week shows the working hours of the week: the week, the people and each of their days', () => {
   const html = team({ tab: 'week' });
   const text = readableText(html).replace(/\s+/g, ' ');
   assert.match(text, /05\.–11\.10\.2026/);
-  assert.match(text, /Employee Mon 05\.10\. Tue 06\.10\./);
-  for (const person of initialEmployees) assert.ok(html.includes(`aria-label="View shifts for ${person.name}"`), person.name);
-  assert.match(text, /New shift/);
-  assert.match(text, /Booking slots follow salon opening hours and staff shifts\./);
-  assert.deepEqual(headings(html, 2), ['Shifts']);
+  // Today (Monday 5 October) is marked in its column.
+  assert.match(text, /Employee Mon 05\.10\. Today Tue 06\.10\./);
+  for (const person of initialEmployees) assert.ok(html.includes(`aria-label="View the week of ${person.name}"`), person.name);
+  // A single day is changed here; the regular week is part of each person's form.
+  assert.match(text, /Change a day/);
+  assert.match(text, /Copy last week/);
+  assert.match(text, /Everybody works their regular hours, set in People\./);
+  assert.deepEqual(headings(html, 2), ['Working hours']);
+  // The states of the week (regular hours, changed days, today, the sums) are in tests/teamWeek.test.ts.
 });
 
 test('Absences moved to Team with the list and the form they had in the settings', () => {

@@ -61,7 +61,7 @@ test('a refusal says what is in the way and what the owner can do', () => {
   assert.equal(refusal({ shiftOverview: withShift('emp-2', wash.date, { start: '13:00', end: '14:00' }) }),
     'Selina Keller works 13:00–14:00 on Wed, 07.10.2026, not at 10:00–10:30. Move the request to a new time, or reject it.');
   assert.equal(refusal({ shiftOverview: withShift('emp-2', wash.date, null) }),
-    'Selina Keller has no shift on Wed, 07.10.2026. Move the request to another day, or add a shift for Selina Keller in Team.');
+    'Selina Keller does not work on Wed, 07.10.2026. Move the request to another day, or give Selina Keller working hours for that day in Team.');
   assert.equal(refusal({ closedDates: [{ id: 'c-1', name: 'Team day', start: '2026-10-07', end: '2026-10-07' }] }),
     'The salon is closed on Wed, 07.10.2026 (Team day). Move the request to another day, or reject it.');
   assert.equal(refusal({ absences: [{ id: 'a-1', employeeId: 'emp-2', start: '2026-10-06', end: '2026-10-09' }] }),
@@ -133,7 +133,7 @@ test('every refusal of the slot rules has words for the owner', () => {
   assert.deepEqual(onlineOnly, ['This service is not available for online booking.', 'This employee is not available for online booking.']);
   const refusals = all.filter((refusal) => !onlineOnly.includes(refusal));
   assert.ok(refusals.length >= 18, `found ${refusals.length} refusals`);
-  assert.ok(refusals.includes('This employee has no shift on this date.'));
+  assert.ok(refusals.includes('This employee does not work on this date.'));
   const facts = { context: salon(), employee: initialEmployees[1], staff: 'Selina Keller', service: 'Wash & blow-dry', date: wash.date, start: '10:00', end: '10:30' };
   for (const refusal of [...refusals, 'Choose a valid 30-minute slot on the same day.']) {
     const wording = wordingForRule(refusal, facts);
@@ -163,7 +163,8 @@ test('a request is moved under the owner\'s rules and keeps its length', () => {
   // Nothing is offered on a day she does not work; the next day with a free time is found from there.
   assert.deepEqual(freeStartsForRequest(salon(), wash, '2026-10-06'), []);
   assert.equal(nextFreeDayForRequest(salon(), wash, '2026-10-06'), '2026-10-07');
-  assert.equal(nextFreeDayForRequest(salon({ shiftOverview: [] }), wash, '2026-10-06'), null);
+  // Somebody without working hours has no free day at all: nothing falls back to the opening hours.
+  assert.equal(nextFreeDayForRequest(salon({ employees: withEmployee('emp-2', { weeklyHours: undefined }) }), wash, '2026-10-06'), null);
   // A request without its service or its stylist cannot be moved anywhere.
   assert.deepEqual(freeStartsForRequest(salon({ employees: [] }), wash, wash.date), []);
 });
@@ -224,4 +225,19 @@ test('a chat\'s booking request that cannot be booked says why, and that the cha
   for (const text of [refusal({ events: bothBusy }), refusal({}, { date: '2026-10-03' }), refusal({}, { serviceId: 'srv-gone' })]) {
     assert.doesNotMatch(text!, /reject|decline|Move the request/i);
   }
+});
+
+test('a moved request remembers the time the customer asked for, however often it is moved', () => {
+  const asked = { date: wash.date, timeStr: wash.timeStr };
+  const once = movedRequest(wash, '2026-10-09', '10:00');
+  assert.deepEqual(once.movedFrom, asked);
+  // Moved again: still the customer's own time, not the salon's first suggestion.
+  const twice = movedRequest(once, '2026-10-10', '09:00');
+  assert.deepEqual(twice.movedFrom, asked);
+  assert.equal(twice.date, '2026-10-10');
+  // Back at the time asked for: nothing is moved any more.
+  const back = movedRequest(twice, asked.date, asked.timeStr.slice(0, 5));
+  assert.equal(back.movedFrom, undefined);
+  assert.equal('movedFrom' in back, false);
+  assert.equal(back.timeStr, wash.timeStr);
 });

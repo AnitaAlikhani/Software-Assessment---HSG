@@ -62,20 +62,28 @@ test('finding 3: one person\'s time off never closes the salon, and the owner is
   assert.deepEqual(interpret('Selina is taking Friday off', words()), { language: 'en', intent: 'absence', date: FRIDAY, employeeId: SELINA.id });
   assert.deepEqual(interpret('Luca ist morgen krank', words()), { language: 'de', intent: 'absence', date: TUESDAY, employeeId: LUCA.id });
 
-  // What the shift plan and the calendar hold for that person on that day is said too.
+  // What that person's working hours and the calendar hold for that day is said too.
   assert.deepEqual(chat().say('Selina is taking Friday off').reply?.text, [
     'I cannot enter time off for Selina. Nothing was changed, and the salon was not closed.',
-    'You enter it in Team, on the tab Absences. For a single day you can also change the shift, in Team on the tab This week.',
-    'In the shift plan Selina works from 09:00 to 18:00 on Friday, 09.10.2026.',
+    'You enter it in Team, on the tab Absences. For a single day you can also change that day’s working hours, in Team on the tab This week.',
+    'Selina works from 09:00 to 18:00 on Friday, 09.10.2026.',
     '1 appointment is booked with Selina that day. It stays in the calendar when you enter an absence.',
     'If the whole salon should be closed, write for example “Close Friday”.',
   ]);
   assert.deepEqual(chat().say('Luca ist morgen krank').reply?.text, [
     'Eine Abwesenheit für Luca kann ich nicht eintragen. Es wurde nichts geändert, und der Salon wurde nicht geschlossen.',
-    'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Schicht ändern, unter Team im Reiter This week.',
-    'Im Schichtplan hat Luca morgen (Dienstag, 06.10.2026) keine Schicht.',
+    'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Arbeitszeit dieses Tages ändern, unter Team im Reiter This week.',
+    'Luca arbeitet morgen (Dienstag, 06.10.2026) nicht.',
     'Wenn der ganze Salon geschlossen sein soll, schreibe zum Beispiel «Am Freitag geschlossen».',
   ]);
+  // A single day that differs from the regular week is told as it applies, and marked as changed.
+  const changedDay = (hours: { start: string; end: string } | null) => {
+    const data = salon();
+    data.shiftOverview = data.shiftOverview.map(entry => entry.employeeId === SELINA.id ? { ...entry, shifts: { [FRIDAY]: hours } } : entry);
+    return chat(data).say('Selina is taking Friday off').reply?.text[2];
+  };
+  assert.equal(changedDay({ start: '12:00', end: '16:00' }), 'Selina works from 12:00 to 16:00 on Friday, 09.10.2026 (changed for this day).');
+  assert.equal(changedDay(null), 'Selina does not work on Friday, 09.10.2026 (changed for this day).');
   const away = salon({ absences: [{ id: 'away-1', employeeId: SELINA.id, start: FRIDAY, end: FRIDAY }] });
   assert.match(text(chat(away).say('Is Selina off on Friday?')), /An absence is already entered for Selina on Friday, 09\.10\.2026\./);
 
@@ -132,7 +140,7 @@ test('finding 6: a refusal after Confirm is said in the owner\'s language, and a
     assert.deepEqual(refused.reply?.text, language === 'de'
       ? [
         'Der Termin wurde nicht eingetragen:',
-        'Diese Zeit ist nicht verfügbar. Bitte wähle eine Zeit innerhalb der Schicht und der Öffnungszeiten, die sich mit keinem anderen Termin überschneidet.',
+        'Diese Zeit ist nicht verfügbar. Bitte wähle eine Zeit innerhalb der Arbeitszeit und der Öffnungszeiten, die sich mit keinem anderen Termin überschneidet.',
         'Um 10:00 Uhr ist Luca frei.',
         'An dem Tag frei:',
       ]
@@ -190,13 +198,13 @@ test('finding 6: every refusal the booking rules can give has German words', () 
   assert.equal(refusalIn('Some new rule says no.', 'de'), UNKNOWN_REFUSAL_DE);
 
   // A reason the assistant has no own sentence for reaches a German answer in German:
-  // here Selina's shift on Tuesday is entered the wrong way round.
+  // here Selina's hours on Tuesday are entered the wrong way round.
   const broken = salon();
   broken.shiftOverview = broken.shiftOverview.map(entry => entry.employeeId === SELINA.id
     ? { ...entry, shifts: { ...entry.shifts, [TUESDAY]: { start: '18:00', end: '09:00' } } } : entry);
   const reply = ask({ language: 'de', intent: 'availability', serviceId: HAIRCUT.id, date: TUESDAY, time: '11:00' }, broken);
-  assert.match(said(reply), /Selina: Die Schicht dieser Person an diesem Tag ist ungültig\./);
-  assert.doesNotMatch(said(reply), /invalid shift/);
+  assert.match(said(reply), /Selina: Die Arbeitszeit dieser Person an diesem Tag ist ungültig\./);
+  assert.doesNotMatch(said(reply), /invalid shift|working hours on this date are invalid/);
 });
 
 test('finding 7: a name keeps a word that is also an everyday word; the everyday word keeps its meaning elsewhere', () => {

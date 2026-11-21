@@ -17,6 +17,9 @@ import { normalizePhone, validateContact } from '../bookingData';
 import { PoweredBy } from '../components/Logo';
 import { SalonTimeNote } from '../components/SalonTimeNote';
 import { salonAddress } from '../region';
+import { ownRequestNow, type RequestOutcomes } from '../sharedRequests';
+import { hasBookableHours } from '../teamBooking';
+import { useDemoState } from '../useDemoState';
 
 export interface BookingDraft {
   serviceId: string;
@@ -78,7 +81,7 @@ export const bookingProfileUrl = (value: string): string | null => {
 
 /** How many of the coming days the date step shows as buttons. Later dates use the date field. */
 const DAYS_SHOWN = 14;
-/** Shifts are planned this far ahead, so later dates cannot have a time. */
+/** How far ahead customers can book. */
 const DAYS_BOOKABLE = 90;
 
 /**
@@ -94,7 +97,7 @@ const rememberDashboard = () => {
 };
 
 export const BookingPageView: React.FC<BookingPageViewProps> = ({
-  services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, now,
+  services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, timeBlocks, now,
   companySettings, draft, setDraft, submittedRequest, setSubmittedRequest,
   onNewBookingRequest, onUpdateBookingRequest, onCancelBookingRequest, onViewRequest,
   publicMode = false,
@@ -116,18 +119,20 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   const today = getSalonNow(timeZone, clock).date;
   const context: AvailabilityContext = {
     services, employees, bookingHours, shiftOverview, events, requests,
-    closedDates, absences, timeZone, now: clock,
+    closedDates, absences, timeBlocks, timeZone, now: clock,
   };
   const availableServices = services.filter((service) => service.onlineBooking);
   const selectedService = availableServices.find((service) => service.id === draft.serviceId);
   const eligibleEmployees = selectedService
-    ? employees.filter((employee) => isBookableEmployee(employee) && isEmployeeAssignedToService(selectedService, employee))
+    ? employees.filter((employee) => isBookableEmployee(employee) && isEmployeeAssignedToService(selectedService, employee)
+      // The same people Team calls bookable: somebody without working hours is not offered.
+      && hasBookableHours({ services, bookingHours, shiftOverview }, employee, today))
     : [];
   // A chosen specialist remains chosen when their availability changes. Never substitute another person.
   const selectedEmployee = eligibleEmployees.find((employee) => employee.id === draft.employeeId);
   // What the availability below depends on. The clock ticks every 30 seconds, so typing a name
   // does not recompute two weeks of slots on every key.
-  const availabilityInputs = [services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, timeZone, clock, selectedService?.id];
+  const availabilityInputs = [services, employees, bookingHours, shiftOverview, events, requests, closedDates, absences, timeBlocks, timeZone, clock, selectedService?.id];
   // The day the customer picked stays. Before that, the page opens on the first day that has a
   // free time for the chosen service, and follows the service when the customer changes it.
   const dateFixed = Boolean(draft.dateChosen || draft.startTime || draft.editingRequestId);
@@ -147,9 +152,12 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   const selectedStartTime = availableSlots.includes(draft.startTime) ? draft.startTime : '';
   const anyAvailableEmployee = eligibleEmployees.some((employee) => slotsFor(employee.id).length > 0);
   const dateClosed = date && date >= today ? closedReason({ bookingHours, closedDates }, date) : null;
-  const liveRequest = submittedRequest
-    ? requests.find((request) => request.id === submittedRequest.id) ?? submittedRequest
-    : null;
+  // The customer's own request as the salon holds it now. The owner answers in another tab of
+  // this browser, and both tabs read the same stored salon: a waiting request shows as the owner
+  // may have moved it, an accepted one is its appointment in the calendar, and a rejected one is
+  // noted with the salon. Which request is this customer's own stays with this tab.
+  const [requestOutcomes] = useDemoState<RequestOutcomes>('requestOutcomes', {});
+  const liveRequest = submittedRequest ? ownRequestNow(submittedRequest, { requests, events, outcomes: requestOutcomes }) : null;
   const isEditing = Boolean(draft.editingRequestId && liveRequest?.status === 'pending');
   const showForm = !liveRequest || isEditing;
   // No browser while the page is rendered by a test.
@@ -188,6 +196,23 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
       if (draft.serviceId) setNotice('Your previous service is no longer available. Please review the service and choose a specialist and time.');
     }
   }, [services, draft.serviceId, showForm, setDraft]);
+
+  // This tab remembers its request as it last stood, so the status screen is the same after a
+  // reload. A request the salon holds no trace of any more (the browser's storage was emptied, or
+  // the request could never be stored there) is let go, with a word about it: the page must not
+  // say that a request waits which the salon does not have.
+  const standing = liveRequest ? JSON.stringify(liveRequest) : null;
+  useEffect(() => {
+    if (!submittedRequest) return;
+    if (!liveRequest) {
+      setSubmittedRequest(null);
+      setDraft((previous) => previous.editingRequestId ? { ...previous, editingRequestId: undefined } : previous);
+      setNotice('The salon no longer has your earlier request. Please request your appointment again.');
+    } else if (standing !== JSON.stringify(submittedRequest)) {
+      setSubmittedRequest(liveRequest);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [standing, submittedRequest]);
 
   useEffect(() => { if (formError) errorRef.current?.focus(); }, [formError]);
   useEffect(() => { if (confirmCancellation) cancellationRef.current?.focus(); }, [confirmCancellation]);
@@ -335,13 +360,23 @@ export const BookingPageView: React.FC<BookingPageViewProps> = ({
   // While a request waits, the page says what is true wherever it was opened: an appointment was
   // asked for and is not confirmed. It does not say that the salon has the request or will answer:
   // a request made on another device does not reach the salon yet.
+  // The time the customer asked for, where the request or the appointment now stands at another one.
+  const asked = liveRequest?.movedFrom && (liveRequest.movedFrom.date !== liveRequest.date || liveRequest.movedFrom.timeStr !== liveRequest.timeStr)
+    ? `${formatDate(liveRequest.movedFrom.date)}, ${formatStoredTimeRange(liveRequest.movedFrom.timeStr)}` : null;
+  const removedBySalon = liveRequest?.status === 'cancelled' && liveRequest.cancelledBy === 'salon';
   const statusHeading = liveRequest?.status === 'accepted' ? 'Appointment confirmed'
     : liveRequest?.status === 'rejected' ? 'Request declined'
-      : liveRequest?.status === 'cancelled' ? 'Request cancelled' : 'Appointment requested';
-  const statusText = liveRequest?.status === 'accepted' ? `${salon} has confirmed your appointment. See you then!`
+      : removedBySalon ? 'Appointment cancelled'
+        : liveRequest?.status === 'cancelled' ? 'Request cancelled'
+          : asked ? 'The salon suggests another time' : 'Appointment requested';
+  const statusText = liveRequest?.status === 'accepted'
+    ? (asked ? `${salon} has confirmed your appointment at the time below. You had asked for ${asked}.` : `${salon} has confirmed your appointment. See you then!`)
     : liveRequest?.status === 'rejected' ? `Sorry, ${salon} cannot offer this time. Please choose another one.`
-      : liveRequest?.status === 'cancelled' ? 'Your request has been cancelled. The time is free again.'
-        : `Thank you! Your appointment is not confirmed yet: ${salon} must accept your request first.`;
+      : removedBySalon ? `${salon} has taken this appointment out of its calendar. Please contact the salon, or request a new time.`
+        : liveRequest?.status === 'cancelled' ? 'Your request has been cancelled. The time is free again.'
+          // Moved by the salon: the time below is the salon's suggestion, not what the customer asked for.
+          : asked ? `${salon} suggests the time below instead of the one you asked for (${asked}). It is not confirmed yet. If it does not suit you, change or cancel your request, or contact the salon.`
+            : `Thank you! Your appointment is not confirmed yet: ${salon} must accept your request first.`;
   // One line under the day buttons says what is special about the day shown.
   const dateNote = !date || date < today ? null
     : dateClosed ? `${dateClosed} Please choose another day.`

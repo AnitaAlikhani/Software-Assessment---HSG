@@ -1,4 +1,7 @@
 import { MAX_NAME_LENGTH, nameProblem, phoneAdvice } from './bookingData';
+import { weekdayName } from './format';
+import type { Employee } from './types';
+import { dateOfWeekday, isValidHours, WEEKDAY_KEYS, type Hours } from './workingHours';
 
 export function validateOptionalContact(email: string, phone: string): string | null {
   if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return 'Enter a valid email address or leave it blank.';
@@ -16,6 +19,22 @@ export function validatePersonName(name: string, who: string): string | null {
   if (issue === 'empty') return `Enter ${who} name.`;
   if (issue === 'letters') return `Enter ${who} name: it needs at least two letters.`;
   if (issue === 'long') return `This name is too long (${[...name.trim()].length} characters). Use ${MAX_NAME_LENGTH} characters or fewer.`;
+  return null;
+}
+
+/** Why the working hours of one day cannot be saved, or null when they can: the end has to lie after the start. */
+export const validateDayHours = (hours: Hours): string | null =>
+  isValidHours(hours) ? null : 'Working hours must end after they start, on the same day.';
+
+/**
+ * Checks a person's regular week before it is saved: every day they work needs an end after
+ * its start. The message names the first day that is wrong. Days off need no times.
+ */
+export function validateWeeklyHours(week: Employee['weeklyHours']): string | null {
+  for (const day of WEEKDAY_KEYS) {
+    const hours = week?.[day];
+    if (hours && !isValidHours(hours)) return `${weekdayName(dateOfWeekday(day))}: working hours must end after they start, on the same day.`;
+  }
   return null;
 }
 

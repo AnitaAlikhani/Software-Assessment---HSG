@@ -160,6 +160,14 @@ export interface AppointmentRequest {
   /** Whether AI performed the booking, independently of the contact channel. */
   isAiBooked?: boolean;
   status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
+  /**
+   * The time the customer asked for, while the request stands at another time because the salon
+   * moved it. The customer's page then shows the new time as the salon's suggestion, not as
+   * something the customer asked for. Gone again when the customer changes the request.
+   */
+  movedFrom?: { date: string; timeStr: string };
+  /** On the customer's own page only: the salon took the confirmed appointment out of its calendar. */
+  cancelledBy?: 'salon';
 }
 
 export interface CalendarEvent {
@@ -183,18 +191,28 @@ export interface CalendarEvent {
   colorTheme: 'yellow' | 'green' | 'purple' | 'blue';
   isAiBooked?: boolean;
   outsideHoursApproved?: boolean;
+  /**
+   * How a booking that the owner entered by hand came in. Only the appointment form sets it, and
+   * only to what the owner chose there: an appointment from a chat or the booking page has none.
+   */
+  source?: 'phone' | 'walk-in' | 'other';
   /** Preserve the time reserved when booked, even after service changes. */
   prepMinutes?: number;
   postMinutes?: number;
 }
 
+/**
+ * The days on which one person does not work their regular hours (Employee.weeklyHours).
+ * Who works when is asked from workingTimeOn (src/workingHours.ts), never read from here directly.
+ */
 export interface ShiftEntry {
   employeeId: string;
   employeeName: string;
   initials: string;
   avatarColor: string;
   shifts: {
-    // Explicit date-only keys (YYYY-MM-DD); missing dates are not scheduled.
+    // Exceptions by date (YYYY-MM-DD): an entry means other hours on that date, null means off
+    // that day, and a date that is missing means the regular hours of that weekday apply.
     [dayKey: string]: {
       start: string;
       end: string;
@@ -224,6 +242,8 @@ export interface Customer {
   channel?: Conversation['channel'];
   /** Their chat, so "Open conversation" finds it without comparing names. */
   conversationId?: string;
+  /** The owner's one free-text note on this person, for example an allergy or a preference. */
+  note?: string;
 }
 
 export interface Employee {
@@ -240,6 +260,12 @@ export interface Employee {
   hidden: boolean;
   /** 'Owner' for the person who runs the salon account. */
   role?: string;
+  /**
+   * The person's regular working hours per weekday; null for a weekday they do not work.
+   * Stored on the person: somebody without them has no regular hours, and nothing falls back to
+   * the opening hours. Single days that differ are in ShiftEntry.shifts.
+   */
+  weeklyHours?: Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { start: string; end: string } | null>;
 }
 
 export interface ServiceItem {
@@ -294,6 +320,20 @@ export interface ClosedDate {
   /** Inclusive date-only bounds, YYYY-MM-DD. */
   start: string;
   end: string;
+}
+
+/**
+ * Time the owner keeps free for one stylist on one day: a break, lunch, something private.
+ * Nothing can be booked in it (src/availability.ts); the rules for making one are in src/timeBlocks.ts.
+ */
+export interface TimeBlock {
+  id: string;
+  employeeId: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // "12:00"
+  endTime: string; // "13:00", on the same day
+  reason: 'Break' | 'Lunch' | 'Private' | 'Other';
+  note?: string;
 }
 
 export interface StaffAbsence {

@@ -13,8 +13,9 @@ import { initialAiSettings } from '../src/conversationData';
 import { readResearchMode, setResearchModeForTests } from '../src/flags';
 import { websiteChatUrl } from '../src/liveWhatsApp';
 import { clearDemoWorkspace, PILOT_BANNER_DISMISSED_KEY } from '../src/researchTools';
-import { demoStorageKey } from '../src/useDemoState';
+import { demoStorageKey, salonStorageKey } from '../src/useDemoState';
 import type { Conversation } from '../src/types';
+import { BrowserStandIn, inTab } from './browserStandIn';
 import { readableText, render, withScreen } from './renderHelpers';
 
 // Study tools (pilot banner, "Register interest", "Simulate incoming booking", "Reset demo data",
@@ -112,7 +113,7 @@ test('the header shows the person it is given and no checkout; the demo notice i
   assert.match(html, />Owner</);
   assert.doesNotMatch(readableText(html), /POS|cash register|checkout|demo/i);
   const study = withScreen(() => render(React.createElement(Header, header), { research: true }));
-  assert.match(study, /title="Changes stay in this browser tab"/);
+  assert.match(study, /title="Changes are kept in this browser"/);
   assert.match(readableText(study), /Demo\s+workspace\s+· sample data/);
 });
 
@@ -123,7 +124,8 @@ test('"Reset demo data" is offered only on a study link, at the end of the menu 
     assert.doesNotMatch(readableText(render(place)), /Reset demo data|simulated|demo|this tab/i);
     const study = render(place, { research: true });
     assert.match(study, />Reset demo data</);
-    assert.match(study, /Demo workspace with sample data\. Changes stay in this browser tab\./);
+    // The sample workspace is kept in the browser and shared by its tabs: the note says so.
+    assert.match(study, /Demo workspace with sample data\. Changes are kept in this browser and show in all its tabs\./);
   }
 });
 
@@ -177,25 +179,34 @@ test('the website-chat link for testers switches the study tools on for them too
   }
 });
 
-const storage = (entries: Record<string, string>) => {
-  const values = new Map(Object.entries(entries));
-  return {
-    values,
-    get length() { return values.size; },
-    key: (index: number) => Array.from(values.keys())[index] ?? null,
-    removeItem: (key: string) => { values.delete(key); },
-  };
-};
+test('"Reset demo data" starts the sample salon again and keeps the study link and the live key', () => {
+  // The salon this browser has stored, with a change in it; the salon of another build under the
+  // same address; and what the app keeps besides: the study link, the key for live chats, a chat session.
+  const changedSalon = JSON.stringify({ day: '2026-10-05', builtAt: '2026-10-05T10:00:00.000Z', changed: true, parts: { requests: [], conversations: [] } });
+  const browser = new BrowserStandIn();
+  const tab = browser.openTab();
+  browser.stored.set(salonStorageKey('/'), changedSalon);
+  browser.stored.set(salonStorageKey('/previews/x/'), changedSalon);
+  for (const [name, value] of [['slotbee-research', '1'], ['slotbee-live-key', 'key'], ['slotbee-chat-session', 'abc']]) browser.stored.set(name, value);
+  // What this tab keeps for itself: a booking that was being filled in, and "Not now" on the pilot banner.
+  tab.session.setItem(demoStorageKey('draft', '/'), JSON.stringify({ serviceId: 'srv-2', employeeId: '', date: '2026-10-06', startTime: '', name: 'Sandra Keller', phone: '' }));
+  tab.session.setItem(PILOT_BANNER_DISMISSED_KEY, 'true');
+  tab.session.setItem('slotbee-booking-from-dashboard', '1');
 
-test('"Reset demo data" forgets the sample workspace and keeps the study link and the live key', () => {
-  const session = storage({
-    [demoStorageKey('requests', '/')]: '[]',
-    [demoStorageKey('conversations', '/previews/x/')]: '[]',
-    [PILOT_BANNER_DISMISSED_KEY]: 'true',
-  });
-  const local = storage({ 'slotbee-research': '1', 'slotbee-live-key': 'key', 'slotbee-chat-session': 'abc' });
-  const blocked = { get length(): number { throw new Error('blocked'); }, key: () => null, removeItem: () => {} };
-  assert.equal(clearDemoWorkspace([session, local, null, blocked]), 3);
-  assert.equal(session.values.size, 0);
-  assert.deepEqual(Array.from(local.values.keys()), ['slotbee-research', 'slotbee-live-key', 'slotbee-chat-session']);
+  inTab(tab, () => clearDemoWorkspace());
+  // The salon starts again: nothing of it counts as changed and no part is stored any more.
+  const salon = JSON.parse(browser.stored.get(salonStorageKey('/'))!);
+  assert.equal(salon.changed, false);
+  assert.deepEqual(salon.parts, {});
+  // The tab forgot its own values, so the next participant sees an empty form and the pilot banner again.
+  assert.deepEqual(Array.from({ length: tab.session.length }, (_, index) => tab.session.key(index)), ['slotbee-booking-from-dashboard']);
+  // Everything else is as it was: the other build's salon, the study link and the live key.
+  assert.equal(browser.stored.get(salonStorageKey('/previews/x/')), changedSalon);
+  assert.deepEqual([...browser.stored.keys()].filter((name) => name.startsWith('slotbee-')), ['slotbee-research', 'slotbee-live-key', 'slotbee-chat-session']);
+
+  // The two halves, one at a time: the salon's reset is asked for once, and a blocked storage is no reason to fail.
+  let resets = 0;
+  clearDemoWorkspace(() => { resets++; }, { removeItem: () => { throw new Error('blocked'); } });
+  clearDemoWorkspace(() => { resets++; }, null);
+  assert.equal(resets, 2);
 });

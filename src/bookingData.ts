@@ -46,15 +46,36 @@ export function validateContact(name: string, phone: string): string | null {
   return advice ? `Please enter a valid phone number. ${advice}` : null;
 }
 
+// Letters that carry no separate accent sign, so taking the accents off leaves them as they are.
+const PLAIN_LETTERS: Record<string, string> = { ß: 'ss', ı: 'i', ø: 'o', ł: 'l', đ: 'd', æ: 'ae', œ: 'oe' };
+const plain = (text: string): string => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[ßıøłđæœ]/g, (letter) => PLAIN_LETTERS[letter]);
+
+/**
+ * A name as a search compares it, in the two ways people type it without its accents: the plain
+ * letters ("kunzle" for Künzle, "chloe" for Chloé, "yilmaz" for Yılmaz) and, second, German
+ * umlauts written out ("kuenzle"). A search text is compared in its first form.
+ */
+export const searchForms = (text: string): [plain: string, writtenOut: string] =>
+  // Composed first: an umlaut typed as a letter and a separate sign is the same umlaut.
+  [plain(text), plain(text.normalize('NFC').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue'))];
+
+/** Whether a search text is part of a name, whatever accents either of them carries. */
+export function nameMatches(name: string, query: string): boolean {
+  const term = searchForms(query.trim())[0];
+  return searchForms(name).some((form) => form.includes(term));
+}
+
 /**
  * Whether a search text finds a customer: part of the name or of the e-mail address, or the
  * phone number in any spelling ("079 123", "+41 79 123" and "+4179123" find the same person).
- * The header search and the filter of the customer list both ask here.
+ * A name is found with or without its accents ("chloe" finds Chloé). The header search, the
+ * filter of the customer list and the customer picker of the appointment form all ask here.
  */
 export function customerMatches(customer: Pick<Customer, 'name' | 'email' | 'phone'>, query: string): boolean {
   const term = query.trim().toLowerCase();
   if (!term) return true;
-  return customer.name.toLowerCase().includes(term) || customer.email.toLowerCase().includes(term) || phoneMatches(customer.phone, term);
+  return nameMatches(customer.name, term) || customer.email.toLowerCase().includes(term) || phoneMatches(customer.phone, term);
 }
 
 const initialsOf = (name: string): string =>
@@ -102,6 +123,12 @@ export interface ChatContact {
   language?: Customer['language'];
   channel?: Customer['channel'];
   conversationId?: string;
+  /**
+   * The customer's record itself, where the owner picked or entered it in the appointment form.
+   * It is stored exactly as it is given and nothing is looked up by name: two customers with the
+   * same name stay two, and a record's name and number are never rewritten from an appointment.
+   */
+  record?: Customer;
 }
 
 /**
@@ -122,6 +149,8 @@ export function customerForAppointment(
   const previousCustomer = previousEvent?.customerId !== undefined
     ? customers.find(customer => customer.id === previousEvent.customerId)
     : previousEvent ? uniqueMatch(previousEvent.customerName, normalizePhone(previousEvent.customerPhone ?? '')) : undefined;
+  // The appointment form names the record: there is nothing to find out.
+  if (chat?.record) return { customer: chat.record, previousCustomerId: previousCustomer?.id };
   const nameChanged = previousEvent !== undefined && nameKey(previousEvent.customerName) !== nameKey(event.customerName);
   // The editor retains appointment metadata. A different name must not inherit
   // the previous customer's ID or phone from that metadata.

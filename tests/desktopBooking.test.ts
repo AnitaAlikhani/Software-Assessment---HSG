@@ -62,15 +62,18 @@ test('manual appointments respect closures, absences, opening hours and dated sh
   assert.match(validateCalendarEvent(c, event())!, /not available/);
   assert.equal(validateCalendarEvent(c, event({ startTime: '16:30', endTime: '17:00' })), null);
   delete c.shiftOverview[0].shifts[DATE];
-  assert.match(validateCalendarEvent(c, event())!, /no shift/);
+  assert.match(validateCalendarEvent(c, event())!, /does not work/);
   c.shiftOverview[0].shifts[DATE] = { start: '08:00', end: '20:00' };
   // After closing time (18:00) a slot is refused, unless the owner approved it on purpose ...
   assert.match(validateCalendarEvent(c, event({ startTime: '18:00', endTime: '18:30' }))!, /not available/);
   assert.equal(validateCalendarEvent(c, event({ startTime: '18:00', endTime: '18:30', outsideHoursApproved: true })), null);
-  // ... and even an approved slot has to stay inside the employee's shift.
-  assert.equal(validateCalendarEvent(c, event({ startTime: '19:30', endTime: '20:00', outsideHoursApproved: true })), null);
-  assert.match(validateCalendarEvent(c, event({ startTime: '20:00', endTime: '20:30', outsideHoursApproved: true }))!, /not available/);
-  assert.match(validateCalendarEvent(c, event({ startTime: '07:30', endTime: '08:00', outsideHoursApproved: true }))!, /not available/);
+  // ... and an approved slot is not bounded by the employee's working hours either, only by the
+  // window the form offers (06:00–23:00): nobody's working hours change for it.
+  assert.equal(validateCalendarEvent(c, event({ startTime: '20:00', endTime: '20:30', outsideHoursApproved: true })), null);
+  assert.equal(validateCalendarEvent(c, event({ startTime: '07:30', endTime: '08:00', outsideHoursApproved: true })), null);
+  assert.equal(validateCalendarEvent(c, event({ startTime: '22:30', endTime: '23:00', outsideHoursApproved: true })), null);
+  assert.match(validateCalendarEvent(c, event({ startTime: '23:00', endTime: '23:30', outsideHoursApproved: true }))!, /not available/);
+  assert.match(validateCalendarEvent(c, event({ startTime: '05:30', endTime: '06:00', outsideHoursApproved: true }))!, /not available/);
   c.bookingHours[0].isOpen = false;
   assert.match(validateCalendarEvent(c, event())!, /salon is closed/);
 });

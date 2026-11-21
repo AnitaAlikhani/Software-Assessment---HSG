@@ -12,13 +12,14 @@ import {
 } from 'lucide-react';
 import { CalendarEvent, Customer } from '../types';
 import { createCsv } from '../csv';
-import { customerStatsFromCalendar, emptyCustomerStats } from '../customerStats';
+import { customerHistory, customerStatsFromCalendar, emptyCustomerStats } from '../customerStats';
 import { CUSTOMER_SORT_OPTIONS, customerSortValue, nextCustomerSort, sortCustomers, type CustomerSort, type CustomerSortKey } from '../customerSort';
 import { validateOptionalContact, validatePersonName } from '../managementValidation';
-import { formatDate } from '../scheduling';
+import { formatDate, getSalonNow } from '../scheduling';
 import { customerMatches } from '../bookingData';
 import { formatPhone, normalizePhone } from '../format';
-import { DeleteQuestion } from './DeleteQuestion';
+import { routeHash } from '../navigation';
+import { CustomerProfile } from './CustomerProfile';
 
 interface CustomersViewProps {
   customers: Customer[];
@@ -29,17 +30,25 @@ interface CustomersViewProps {
   timeZone?: string;
   /** Ids of the customers who have a chat. Only they get "Open conversation". */
   customersWithChat?: ReadonlySet<string>;
+  /** The customer whose profile is open (the address's `customerId`), or null for the list. */
   selectedCustomerId: string | null;
-  onClearSelection: () => void;
+  /** Back to the list. `replace` leaves no history entry, for a profile that is gone (deleted). */
+  onClearSelection: (options?: { replace?: boolean }) => void;
+  /** Opens a customer's profile. Without it the list opens the profile through the address. */
+  onOpenCustomer?: (customerId: string) => void;
   onAddCustomer: (customer: Omit<Customer, 'id' | 'initials'>) => void;
   onUpdateCustomer: (id: string, customer: Partial<Customer>) => void;
   onDeleteCustomer: (id: string) => void;
   /**
    * Why a customer cannot be deleted at the moment (appointments or requests still use the
-   * record), or null. The edit form then says so instead of asking whether to delete.
+   * record), or null. The profile then says so instead of asking whether to delete.
    */
   cannotDelete?: (customer: Customer) => string | null;
   onOpenChat?: (customerId: string) => void;
+  /** "New appointment" on a profile. Not offered until the app gives it. */
+  onNewAppointment?: (customerId: string) => void;
+  /** An appointment in a profile opens in the calendar. */
+  onOpenAppointment?: (event: CalendarEvent) => void;
 }
 
 /** The list grows by this many customers per "Show more". */
@@ -65,11 +74,14 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   customersWithChat,
   selectedCustomerId,
   onClearSelection,
+  onOpenCustomer,
   onAddCustomer,
   onUpdateCustomer,
   onDeleteCustomer,
   cannotDelete,
   onOpenChat,
+  onNewAppointment,
+  onOpenAppointment,
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const tableRef = useRef<HTMLDivElement>(null);
@@ -116,13 +128,43 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
   // A phone number is found in any spelling: "079 123", "+41 79 123" and "+4179123" are the same search.
-  const filteredCustomers = sortCustomers(
-    selectedCustomerId ? customers.filter(c => c.id === selectedCustomerId) : customers.filter((c) => customerMatches(c, filterQuery)),
-    statsOf, sort,
-  );
-  // A long list opens with its first 25 customers; "Show more" adds the next 25.
+  const filteredCustomers = sortCustomers(customers.filter((c) => customerMatches(c, filterQuery)), statsOf, sort);
+  // A long list opens with its first 25 customers; "Show more" adds the next 25. Opening a
+  // profile and coming back keeps the filter, the order and how far the list was opened.
   const [shownCount, setShownCount] = useState(PAGE_SIZE);
-  useEffect(() => { setShownCount(PAGE_SIZE); }, [filterQuery, sort, selectedCustomerId]);
+  useEffect(() => { setShownCount(PAGE_SIZE); }, [filterQuery, sort]);
+
+  // Back from a profile, the focus returns to that customer's name in the list, where the owner left off.
+  const lastProfile = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedCustomerId) { lastProfile.current = selectedCustomerId; return; }
+    const id = lastProfile.current;
+    lastProfile.current = null;
+    if (!id) return;
+    const frame = requestAnimationFrame(() => {
+      const link = Array.from(document.querySelectorAll<HTMLElement>(`[data-customer-link="${CSS.escape(id)}"]`)).find((item) => item.offsetParent !== null);
+      if (!link) return;
+      link.focus({ preventScroll: true });
+      link.scrollIntoView({ block: 'center' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedCustomerId]);
+
+  /** A customer's name in the list: a real link to the profile, so it can also open in a new tab. */
+  const profileLink = (customer: Customer, className: string) => (
+    <a
+      href={routeHash({ tab: 'customers', customerId: customer.id })}
+      data-customer-link={customer.id}
+      onClick={(event) => {
+        if (!onOpenCustomer || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+        event.preventDefault();
+        onOpenCustomer(customer.id);
+      }}
+      className={`${className} rounded-md hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500`}
+    >
+      {customer.name}
+    </a>
+  );
   const shownCustomers = filteredCustomers.slice(0, shownCount);
   const hiddenCount = filteredCustomers.length - shownCustomers.length;
   const showMore = hiddenCount > 0 && (
@@ -130,8 +172,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       Show {Math.min(PAGE_SIZE, hiddenCount)} more
     </button>
   );
-  // A link to one customer says in its own line when that customer is gone; an empty list says why it is empty.
-  const emptyText = selectedCustomerId ? '' : filterQuery ? `No customers found matching "${filterQuery}"` : 'No customers yet.';
+  const emptyText = filterQuery ? `No customers found matching "${filterQuery}"` : 'No customers yet.';
 
   /**
    * A column header that sorts the list. A real button, so the keyboard reaches it; the arrow
@@ -209,7 +250,29 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const today = getSalonNow(timeZone, now).date;
+
   return (
+    <>
+    {/* A customer opens into a page of its own in place of the list, on phones and laptops alike:
+        beside the list, a panel would squeeze the table, and more so with the assistant docked. */}
+    {selectedCustomerId ? (
+      <CustomerProfile
+        customer={selectedCustomer}
+        history={customerHistory(selectedCustomerId, customers, events, now, timeZone)}
+        today={today}
+        hasChat={Boolean(customersWithChat?.has(selectedCustomerId))}
+        onBack={() => onClearSelection()}
+        onEdit={() => selectedCustomer && openEditor(selectedCustomer)}
+        onSaveNote={(note) => onUpdateCustomer(selectedCustomerId, { note: note || undefined })}
+        onNewAppointment={onNewAppointment}
+        onOpenChat={onOpenChat}
+        onOpenAppointment={onOpenAppointment}
+        deleteBlocked={selectedCustomer ? cannotDelete?.(selectedCustomer) ?? null : null}
+        // The profile is gone with the customer: back to the list, and Back does not lead to it again.
+        onDelete={() => { onDeleteCustomer(selectedCustomerId); onClearSelection({ replace: true }); }}
+      />
+    ) : (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -224,7 +287,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             <input
               type="text"
               value={filterQuery}
-              onChange={(e) => { setFilterQuery(e.target.value); if (selectedCustomerId) onClearSelection(); }}
+              onChange={(e) => setFilterQuery(e.target.value)}
               aria-label="Filter customers"
               placeholder="Filter by name, email or phone"
               className="min-w-0 min-h-11 text-base sm:text-sm w-full pl-9 pr-3 py-2 bg-slate-100/90 rounded-xl border border-transparent focus:bg-white focus:border-[#5551FF]/40 focus:outline-hidden text-slate-700 placeholder-slate-400"
@@ -250,34 +313,27 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         </div>
       </div>
 
-      {selectedCustomerId && <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-slate-700">
-        <span>{selectedCustomer ? `Showing ${selectedCustomer.name}` : 'This customer is no longer available.'}</span>
-        <button onClick={() => { setFilterQuery(''); onClearSelection(); }} className="inline-flex min-h-11 items-center rounded-lg px-2 font-semibold text-[#5551FF] underline hover:bg-indigo-100/60">View all customers</button>
-      </div>}
-
       {/* Phones: one card per customer so every field is readable without sideways scrolling */}
       <div className="space-y-2 md:hidden" aria-label="Customers">
-        {/* Cards have no column headers to sort by: one list sets the order instead. A link to one customer needs none. */}
-        {!selectedCustomerId && (
-          <div className="flex items-center gap-3 pb-1">
-            <label htmlFor="customer-sort" className="shrink-0 text-xs font-semibold text-slate-600">Sort by</label>
-            <select
-              id="customer-sort"
-              value={customerSortValue(sort)}
-              onChange={(event) => setSort(CUSTOMER_SORT_OPTIONS.find((option) => option.value === event.target.value)?.sort ?? null)}
-              className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-[#5551FF] focus:outline-hidden"
-            >
-              {CUSTOMER_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </div>
-        )}
+        {/* Cards have no column headers to sort by: one list sets the order instead. */}
+        <div className="flex items-center gap-3 pb-1">
+          <label htmlFor="customer-sort" className="shrink-0 text-xs font-semibold text-slate-600">Sort by</label>
+          <select
+            id="customer-sort"
+            value={customerSortValue(sort)}
+            onChange={(event) => setSort(CUSTOMER_SORT_OPTIONS.find((option) => option.value === event.target.value)?.sort ?? null)}
+            className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-[#5551FF] focus:outline-hidden"
+          >
+            {CUSTOMER_SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
         {shownCustomers.map((cust) => (
           <div key={cust.id} className="rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-700 shadow-xs">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                 {cust.initials}
               </div>
-              <button onClick={() => openEditor(cust)} className="min-h-11 min-w-0 flex-1 text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Edit ${cust.name}`} title={`Edit ${cust.name}`}>{cust.name}</button>
+              {profileLink(cust, 'flex min-h-11 min-w-0 flex-1 items-center text-left text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]')}
               <span className={`shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold ${languageClass(cust.language)}`}>{cust.language}</span>
             </div>
             <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
@@ -330,7 +386,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[11px] shrink-0">
                     {cust.initials}
                   </div>
-                  <button onClick={() => openEditor(cust)} className="min-h-11 min-w-0 font-semibold text-slate-900 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-indigo-500" aria-label={`Edit ${cust.name}`} title={`Edit ${cust.name}`}>{cust.name}</button>
+                  {profileLink(cust, 'block min-h-11 min-w-0 truncate font-semibold leading-[2.75rem] text-slate-900')}
                 </div>
 
                 {/* Email */}
@@ -376,6 +432,9 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         <span>Showing {shownCustomers.length} of {filteredCustomers.length} customers</span>
         {showMore}
       </div>
+
+    </div>
+    )}
 
       {/* Add Customer Modal */}
       {showAddModal && (
@@ -467,21 +526,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               </button>
             </div>
 
-            {/* Deleting lives here, with the customer open, and asks first: a bin in every row of the list was one slip away. */}
-            {editingCustomer && (
-              <div className="border-t border-slate-100 pt-3">
-                <DeleteQuestion
-                  kind="customer"
-                  name={editingCustomer.name}
-                  consequence="Their contact details are removed from your customer list."
-                  blocked={cannotDelete?.(editingCustomer) ?? null}
-                  onDelete={() => { onDeleteCustomer(editingCustomer.id); setShowAddModal(false); }}
-                />
-              </div>
-            )}
+            {/* Deleting lives on the customer's profile (CustomerProfile), not here: one place, behind one question. */}
           </form>
         </dialog>
       )}
-    </div>
+    </>
   );
 };

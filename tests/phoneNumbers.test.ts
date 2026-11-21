@@ -226,7 +226,7 @@ test('every screen writes a number the same way, whatever spelling the record ho
     const calendar = render(React.createElement(CalendarView, {
       events: [appointment], services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts,
       requests: [], date: appointment.date, selectedEventId: appointment.id, timeZone: 'Europe/Zurich',
-      onSelectEvent: nothing, onDateChange: nothing, onAddEvent: () => null, onUpdateEvent: () => null, onDeleteEvent: nothing,
+      onSelectEvent: nothing, onDateChange: nothing, onOpenAppointmentForm: () => {}, onDeleteEvent: nothing,
     }));
     assert.match(shown(calendar), new RegExp(`Phone: ${GROUPED.replace('+', '\\+')}`), stored);
 

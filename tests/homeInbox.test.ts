@@ -319,8 +319,11 @@ test('an accepted chat request says where the confirmation is, and only what is 
   // What is in the chat cannot be taken back from here: no "Undo", and no word of rejecting.
   for (const html of [pending, done, failed]) assert.doesNotMatch(words(html), /undo|reject|decline/i);
   // With the appointment in the calendar, the card leads to it.
-  const booked = { ...demoEvents[0], id: 'live-appt-live-web-tom-2026-10-08-1500' };
+  const booked = { ...demoEvents[0], id: 'live-appt-live-web-tom-2026-10-08-1500', conversationId: tomsRequest.id };
   assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: [booked, ...demoEvents] }), answers: [chatAnswer('done')] }), 'Tom')), ['Open chat', 'View appointment', 'Done']);
+  // Given to another customer since (the form takes the chat off it then), it is no longer offered from Tom's card.
+  const givenAway = { ...booked, conversationId: undefined, customerId: 'cust-001', customerName: 'Petra Meier' };
+  assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: [givenAway, ...demoEvents] }), answers: [chatAnswer('done')] }), 'Tom')), ['Open chat', 'Done']);
 });
 
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MENU_GROUPS, MORE_TABS, SCREEN_NAMES, SETTINGS_TABS, TAB_BAR_TABS, TEAM_TABS, isOldAddress, parseRoute, routeForTab, routeHash } from '../src/navigation';
+import { CALENDAR_VIEWS, MENU_GROUPS, MORE_TABS, SCREEN_NAMES, SETTINGS_TABS, TAB_BAR_TABS, TEAM_TABS, calendarPlace, isOldAddress, parseRoute, routeForTab, routeHash, type AppRoute } from '../src/navigation';
 import { nextUpcomingAppointment } from '../src/dashboard';
 import { demoEvents } from './fixedClock';
 
@@ -67,6 +67,49 @@ test('Team and Settings keep their open tab in the address, and a page opens on 
   assert.equal(routeHash({ tab: 'calendar', section: 'week' }), '#/calendar');
 });
 
+test('the calendar keeps its view, day and filters in the address, and reads them back', () => {
+  assert.deepEqual(CALENDAR_VIEWS.map((view) => [view.id, view.label]), [['day', 'Day'], ['week', 'Week'], ['list', 'List']]);
+  // The address of the task: a day view, a day, a stylist and a service.
+  const full: AppRoute = { tab: 'calendar', view: 'day', date: '2026-11-19', staff: 'emp-2', service: 'srv-3' };
+  assert.equal(routeHash(full), '#/calendar?view=day&date=2026-11-19&staff=emp-2&service=srv-3');
+  assert.deepEqual(parseRoute('#/calendar?view=day&date=2026-11-19&staff=emp-2&service=srv-3'), full);
+  // Every combination comes back as it went out: reload, Back and a shared link restore it.
+  const places: AppRoute[] = [
+    { tab: 'calendar' },
+    { tab: 'calendar', view: 'week' },
+    { tab: 'calendar', view: 'list', date: '2026-12-31' },
+    { tab: 'calendar', date: '2027-01-01' },
+    { tab: 'calendar', staff: 'emp-1' },
+    { tab: 'calendar', service: 'srv-10', view: 'day' },
+    { tab: 'calendar', staff: 'name:Maria Rossi & Co.', service: 'srv 1/2' },
+    { tab: 'calendar', view: 'day', date: '2026-11-19', staff: 'emp-2', service: 'srv-3', appointmentId: 'cal-2' },
+  ];
+  for (const place of places) assert.deepEqual(parseRoute(routeHash(place)), place, routeHash(place));
+  // What the calendar decides itself is left out: the plain address is today, in the view that fits the screen.
+  assert.equal(routeHash({ tab: 'calendar' }), '#/calendar');
+  assert.equal(routeHash({ tab: 'calendar', view: undefined, date: undefined, staff: '', service: '' }), '#/calendar');
+  // An appointment's details keep their address, with or without the place around them.
+  assert.equal(routeHash({ tab: 'calendar', appointmentId: 'cal-2' }), '#/calendar?appointmentId=cal-2');
+  assert.equal(routeHash({ tab: 'calendar', view: 'week', date: '2026-11-19', appointmentId: 'cal-2' }), '#/calendar?view=week&date=2026-11-19&appointmentId=cal-2');
+  assert.deepEqual(parseRoute('#/calendar?appointmentId=cal-2&date=2026-11-19'), { tab: 'calendar', date: '2026-11-19', appointmentId: 'cal-2' });
+});
+
+test('an address may carry anything: the calendar takes only a view it has and a day that exists', () => {
+  assert.deepEqual(parseRoute('#/calendar?view=month&date=2026-11-19'), { tab: 'calendar', date: '2026-11-19' });
+  assert.deepEqual(parseRoute('#/calendar?view=Day'), { tab: 'calendar' });
+  for (const day of ['2026-02-30', '2026-13-01', '19.11.2026', '2026-11-19T10:00', 'today', '']) {
+    assert.deepEqual(parseRoute(`#/calendar?view=week&date=${encodeURIComponent(day)}`), { tab: 'calendar', view: 'week' }, day);
+  }
+  assert.deepEqual(parseRoute('#/calendar?staff=&service='), { tab: 'calendar' });
+  // The same check writes an address, so a route that holds nonsense never produces a link that cannot be read.
+  assert.equal(routeHash({ tab: 'calendar', view: 'month' as never, date: '2026-02-30' }), '#/calendar');
+  assert.deepEqual(calendarPlace({ view: 'list', date: '2026-11-19', staff: null, service: undefined }), { view: 'list', date: '2026-11-19' });
+  // The calendar's words mean nothing on other screens, in both directions.
+  assert.deepEqual(parseRoute('#/home?view=day&date=2026-11-19&staff=emp-2'), { tab: 'home' });
+  assert.deepEqual(parseRoute('#/customers?date=2026-11-19&customerId=c-1'), { tab: 'customers', customerId: 'c-1' });
+  assert.equal(routeHash({ tab: 'team', view: 'day', date: '2026-11-19', staff: 'emp-2', section: 'week' }), '#/team?tab=week');
+});
+
 test('the addresses of screens that moved lead to their new place', () => {
   const leadsTo = (old: string) => routeHash(parseRoute(old));
   assert.equal(leadsTo('#/employees'), '#/team');
@@ -105,4 +148,3 @@ test('next appointment uses salon timezone across midnight and does not mutate c
   assert.equal(nextUpcomingAppointment(events, new Date('2026-10-14T22:45:00Z')), null);
   assert.equal(events[0].id, 'tomorrow');
 });
-

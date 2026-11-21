@@ -8,10 +8,11 @@ import { initialAiSettings } from '../src/conversationData';
 import { useLiveWhatsApp } from '../src/liveWhatsApp';
 import * as startingSalon from '../src/mockData';
 import { initialBookingHours, initialCompanySettings } from '../src/mockData';
-import { demoStorageKey, forgetRetiredDemoState, RETIRED_DEMO_KEYS, useDemoState } from '../src/useDemoState';
+import { forgetRetiredDemoState, salonStorageKey, useDemoState } from '../src/useDemoState';
 import { salonContext } from '../server/ai';
 import { ALWAYS_HAND_OVER } from '../server/salonRules';
 import type { Conversation } from '../src/types';
+import { blockedStorage, BrowserStandIn, inTab } from './browserStandIn';
 import { demoConversations, demoCustomers, demoRequests, FIXED_NOW } from './fixedClock';
 import { readableText, render, TELL_WORDS } from './renderHelpers';
 
@@ -250,14 +251,20 @@ test('Settings has no demo wording and no field that changes nothing', () => {
   assert.ok(html.includes(`>${initialCompanySettings.currency}</p>`));
 });
 
-test('settings fields that nothing reads are gone, and a tab that stored them still loads', () => {
+/** The salon as a browser that used the app before has it stored: one entry with all its parts (src/demoStore.ts). */
+const storedSalon = (parts: Record<string, unknown>): string =>
+  JSON.stringify({ day: '2026-10-05', builtAt: FIXED_NOW.toISOString(), changed: true, parts });
+
+test('settings fields that nothing reads are gone, and a browser that stored them still loads', () => {
   for (const field of ['whatsappConnected', 'instagramConnected']) assert.ok(!(field in initialAiSettings), field);
   for (const field of ['state', 'industry', 'branchLanguage']) assert.ok(!(field in initialCompanySettings), field);
-  // A tab that was open before still holds the old fields in its storage, next to what the owner saved.
-  const stored: Record<string, string> = {
-    [demoStorageKey('aiSettings', '/')]: JSON.stringify({ ...initialAiSettings, ownerLanguage: 'German', whatsappConnected: true, instagramConnected: false }),
-    [demoStorageKey('companySettings', '/')]: JSON.stringify({ ...initialCompanySettings, companyName: 'Coiffeur Keller', state: 'St. Gallen', industry: 'Hair & Beauty', branchLanguage: 'English' }),
-  };
+  // A browser that stored the settings earlier still holds the old fields, next to what the owner
+  // saved. Fields the app does not know are no reason to refuse the stored settings.
+  const browser = new BrowserStandIn();
+  browser.stored.set(salonStorageKey('/'), storedSalon({
+    aiSettings: { ...initialAiSettings, ownerLanguage: 'German', whatsappConnected: true, instagramConnected: false },
+    companySettings: { ...initialCompanySettings, companyName: 'Coiffeur Keller', state: 'St. Gallen', industry: 'Hair & Beauty', branchLanguage: 'English' },
+  }));
   let saved: unknown;
   const StoredTab = () => {
     const [aiSettings] = useDemoState('aiSettings', initialAiSettings);
@@ -270,7 +277,7 @@ test('settings fields that nothing reads are gone, and a tab that stored them st
         closedDates: [], onSaveClosedDates: nothing, now: FIXED_NOW,
       }));
   };
-  const html = inBrowser({ sessionStorage: { getItem: (name: string) => stored[name] ?? null } }, () => render(React.createElement(StoredTab)));
+  const html = inTab(browser.openTab(), () => render(React.createElement(StoredTab)));
   // The stored settings are used as they are: what the owner saved is shown ...
   assert.match(html, /value="Coiffeur Keller"/);
   assert.match(html, /<option[^>]*selected=""[^>]*>German<\/option>/);
@@ -280,28 +287,32 @@ test('settings fields that nothing reads are gone, and a tab that stored them st
   assert.doesNotMatch(html, />(Connect|Connected)</);
 });
 
-test('Rooms & equipment is gone with its data, and a tab that stored its list still loads', () => {
+test('Rooms & equipment is gone with its data, and what an earlier version stored of it is taken out', () => {
   // Nothing of the screen is left in the salon a workspace starts with.
   assert.ok(!('initialResources' in startingSalon));
   assert.doesNotMatch(JSON.stringify(startingSalon), /Styling Chair|Hair Steamer|Colour Studio|res-/);
-  assert.deepEqual(RETIRED_DEMO_KEYS, ['resources']);
 
-  // A tab that was open before still holds the list, next to everything the owner did.
-  const stored = new Map<string, string>([
-    [demoStorageKey('resources', '/'), JSON.stringify([{ id: 'res-styling-chair-1', name: 'Styling Chair 1', type: 'Chair', capacity: 1, color: '#FDE047' }])],
-    [demoStorageKey('companySettings', '/'), JSON.stringify({ ...initialCompanySettings, companyName: 'Coiffeur Keller' })],
-    [demoStorageKey('resources', '/previews/x/'), '[]'],
-  ]);
-  const storage = { getItem: (name: string) => stored.get(name) ?? null, removeItem: (name: string) => { stored.delete(name); } };
-  // The app takes the list out when it starts: only that one value, and only for the place the app is served from.
-  forgetRetiredDemoState(storage, '/');
-  assert.deepEqual(Array.from(stored.keys()), [demoStorageKey('companySettings', '/'), demoStorageKey('resources', '/previews/x/')]);
-  // What the owner saved is read as before.
+  // A tab that was open before the screen went still holds its list, as the earlier version
+  // stored it: every part under a key of its own, in the tab's storage.
+  const browser = new BrowserStandIn();
+  const tab = browser.openTab();
+  tab.session.setItem('booking-demo-v3:/:resources', JSON.stringify([{ id: 'res-styling-chair-1', name: 'Styling Chair 1', type: 'Chair', capacity: 1, color: '#FDE047' }]));
+  tab.session.setItem('booking-demo-v3:/:companySettings', JSON.stringify({ ...initialCompanySettings, companyName: 'Salon before the update' }));
+  tab.session.setItem('booking-demo-v3:/previews/x/:resources', '[]');
+  tab.session.setItem('slotbee-booking-from-dashboard', '1');
+  // What the current version has stored for the salon stands next to it.
+  browser.stored.set(salonStorageKey('/'), storedSalon({ companySettings: { ...initialCompanySettings, companyName: 'Coiffeur Keller' } }));
+  // The app takes out what the earlier version left, when it starts: only for the place the app
+  // is served from, and nothing that is not its own.
+  forgetRetiredDemoState([tab.session, tab.local], '/');
+  assert.deepEqual(Array.from({ length: tab.session.length }, (_, index) => tab.session.key(index)), ['booking-demo-v3:/previews/x/:resources', 'slotbee-booking-from-dashboard']);
+  assert.deepEqual([...browser.stored.keys()], [salonStorageKey('/')]);
+  // What the owner saved with the current version is read as before; the earlier version's copy is not.
   let name = '';
   const StoredTab = () => { name = useDemoState('companySettings', initialCompanySettings)[0].companyName; return null; };
-  inBrowser({ sessionStorage: storage }, () => render(React.createElement(StoredTab)));
+  inTab(tab, () => render(React.createElement(StoredTab)));
   assert.equal(name, 'Coiffeur Keller');
   // Storage that is missing or blocked is no reason to fail.
-  forgetRetiredDemoState(null, '/');
-  forgetRetiredDemoState({ removeItem: () => { throw new Error('blocked'); } }, '/');
+  forgetRetiredDemoState([null, undefined], '/');
+  forgetRetiredDemoState([blockedStorage], '/');
 });

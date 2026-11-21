@@ -95,7 +95,7 @@ test('the card in Settings offers the address, Copy, "Open as customer" and the 
   const buttons = Array.from(html.matchAll(/<button[^>]*>(.*?)<\/button>/g), (match) => match[1].replace(/<[^>]+>/g, ''));
   assert.deepEqual(buttons, ['Copy link', 'Save picture', 'Print']);
   // Opening as a customer is a link to the address itself, in a new tab.
-  const link = /<a href="([^"]+)" target="_blank" rel="opener"[^>]*>(.*?)<\/a>/.exec(html);
+  const link = /<a href="([^"]+)" target="_blank" rel="noopener"[^>]*>(.*?)<\/a>/.exec(html);
   assert.equal(link?.[1], ADDRESS);
   assert.match(link?.[2].replace(/<[^>]+>/g, '') ?? '', /^Open as customer \(opens in a new tab\)$/);
   // The code on the card is the address.
@@ -112,10 +112,16 @@ test('the card in Settings offers the address, Copy, "Open as customer" and the 
   assert.doesNotMatch(html, /booking-link-sheet/);
 });
 
-test('on a study link the card says that the sample workspace lives in one tab', () => {
+test('on a study link the card says how far the sample workspace reaches: the tabs of this browser', () => {
   const card = React.createElement(BookingLinkCard, { address: ADDRESS, salonName: 'Bella Hair Salon' });
-  assert.doesNotMatch(render(card), /Demo workspace|every browser tab/);
-  assert.match(render(card, { research: true }), /Demo workspace: every browser tab keeps its own data\. A request sent in the tab that “Open as customer” opens is handed to this tab and shows up on Home\. Another device is not reached/);
+  assert.doesNotMatch(render(card), /Demo workspace|this browser|other tab/);
+  const note = readableText(render(card, { research: true }));
+  assert.match(note, /Demo workspace: its data are kept in this browser and shared by all its tabs\./);
+  // What is true between two tabs now: the request arrives on Home, and the customer's tab learns the answer.
+  assert.match(note, /A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject\./);
+  // Another device is still not reached, and the note does not claim it.
+  assert.match(note, /Another browser or device is not reached\./);
+  assert.doesNotMatch(note, /every browser tab keeps its own data|does not learn your answer|handed to this tab/);
 });
 
 test('the short form for Home has the address, Copy and the code behind a button', () => {

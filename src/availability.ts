@@ -7,8 +7,10 @@ import type {
   ServiceItem,
   ShiftEntry,
   StaffAbsence,
+  TimeBlock,
 } from './types';
 import { addDays, getSalonNow } from './scheduling';
+import { workingTimeOn } from './workingHours';
 
 export { getSalonNow } from './scheduling';
 
@@ -21,6 +23,8 @@ export interface AvailabilityContext {
   requests: AppointmentRequest[];
   closedDates?: ClosedDate[];
   absences?: StaffAbsence[];
+  /** Time the owner keeps free for a stylist (src/timeBlocks.ts). */
+  timeBlocks?: TimeBlock[];
   timeZone?: string;
   /** Optional clock for deterministic tests or a live form's refresh cycle. */
   now?: Date;
@@ -34,9 +38,19 @@ export interface AvailabilitySelection {
   excludeEventId?: string;
   /** Owner entry can use offline services/staff; physical availability still applies. */
   mode?: 'online' | 'owner';
-  /** Owner approved this appointment outside salon hours: only the employee's shift limits it. */
+  /**
+   * The owner booked this appointment outside the usual hours on purpose: neither the opening
+   * hours nor the stylist's working hours of that day limit it, only OUTSIDE_HOURS_WINDOW.
+   */
   outsideHoursApproved?: boolean;
 }
+
+/**
+ * The part of the day an appointment the owner books outside the usual hours may lie in: from six
+ * in the morning until eleven at night. Wide enough for an early bridal styling or a late evening,
+ * and it changes nobody's working hours, so online booking never offers a time nobody planned.
+ */
+export const OUTSIDE_HOURS_WINDOW = { start: '06:00', end: '23:00' } as const;
 
 type Interval = { start: number; end: number };
 type BufferedService = { duration: number; prep: number; post: number };
@@ -106,7 +120,14 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   if (!date) return unavailable('Choose a valid appointment date.');
   const now = context.now ?? new Date();
   const salonNow = getSalonNow(context.timeZone, now);
-  if (selection.date < salonNow.date) return unavailable('Choose today or a future appointment date.');
+  // An appointment the owner is changing keeps its own day and its own start, also when they
+  // have passed: the service, the stylist or the customer is corrected afterwards. That one
+  // start is all that is let through. The rules below still decide about it (with the one
+  // allowance of `keepsOwnPlace`), and no other time in the past opens.
+  const own = selection.mode === 'owner' && selection.excludeEventId !== undefined
+    ? context.events.find((event) => event.id === selection.excludeEventId) : undefined;
+  const ownStart = own !== undefined && own.date === selection.date ? parseTime(own.startTime) : null;
+  if (selection.date < salonNow.date && ownStart === null) return unavailable('Choose today or a future appointment date.');
 
   const service = context.services.find((item) => item.id === selection.serviceId);
   if (!service) return unavailable('This service no longer exists. Please choose another service.');
@@ -119,32 +140,48 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
   if (selection.mode !== 'owner' && !isBookableEmployee(employee)) return unavailable('This employee is not available for online booking.');
   if (!isEmployeeAssignedToService(service, employee)) return unavailable('This employee does not provide the selected service.');
 
+  // The same allowance goes one step further for an appointment that keeps its day, its start and
+  // its stylist: a closed date, an absence or other hours entered after it was booked do not take
+  // its place away (Team › Absences says existing appointments are kept). Only its own start gets
+  // through, and other bookings, waiting requests and time blocks still decide about it.
+  const keepsOwnPlace = ownStart !== null && matchesEmployee(own!, employee);
+  const ownSpan = keepsOwnPlace ? parseInterval(own!.startTime, own!.endTime) : null;
+  // What refuses the whole day. For the appointment that keeps its place it only means that no
+  // other time of that day opens.
+  let dayRefusal: AvailabilityResult | null = null;
+  let window: Interval | null = null;
+
   if (context.closedDates?.some((closure) => selection.date >= closure.start && selection.date <= closure.end)) {
-    return unavailable('The salon is closed on this date. Please choose another date.');
-  }
-  if (context.absences?.some((absence) => absence.employeeId === employee.id &&
+    dayRefusal = unavailable('The salon is closed on this date. Please choose another date.');
+  } else if (context.absences?.some((absence) => absence.employeeId === employee.id &&
       selection.date >= absence.start && selection.date <= absence.end)) {
-    return unavailable('This employee is away on this date. Please choose another date or specialist.');
+    dayRefusal = unavailable('This employee is away on this date. Please choose another date or specialist.');
   }
+  if (dayRefusal && !keepsOwnPlace) return dayRefusal;
 
-  const hours = context.bookingHours.find((day) => day.day === weekdays[date.getUTCDay()]);
   const outsideHours = selection.mode === 'owner' && selection.outsideHoursApproved === true;
-  if (!outsideHours && (!hours || !hours.isOpen)) return unavailable('The salon is closed on this date.');
-
-  const shift = context.shiftOverview.find((entry) => entry.employeeId === employee.id)?.shifts[selection.date];
-  if (!shift) return unavailable('This employee has no shift on this date.');
-  const shiftInterval = parseInterval(shift.start, shift.end);
-  if (!shiftInterval) return unavailable('This employee has an invalid shift on this date.');
-
-  // Approved outside-hours bookings (e.g. Giulia's Saturday move) are bounded by the shift only.
-  const salonInterval = outsideHours ? shiftInterval : parseInterval(hours!.from, hours!.to);
-  if (!salonInterval) return unavailable('The salon opening hours are invalid for this date.');
-
-  const window = {
-    start: Math.max(salonInterval.start, shiftInterval.start),
-    end: Math.min(salonInterval.end, shiftInterval.end),
-  };
-  if (window.end <= window.start) return unavailable('This employee has no working time during the salon opening hours.');
+  if (outsideHours) {
+    // Booked outside the usual hours on purpose: neither the opening hours nor the working hours
+    // of that day count, so nobody's working hours have to change for it.
+    window = { start: parseTime(OUTSIDE_HOURS_WINDOW.start)!, end: parseTime(OUTSIDE_HOURS_WINDOW.end)! };
+  } else {
+    const hours = context.bookingHours.find((day) => day.day === weekdays[date.getUTCDay()]);
+    const shift = workingTimeOn(context, employee.id, selection.date);
+    const shiftInterval = shift ? parseInterval(shift.start, shift.end) : null;
+    const salonInterval = hours?.isOpen ? parseInterval(hours.from, hours.to) : null;
+    if (shiftInterval && salonInterval) {
+      const overlap = { start: Math.max(salonInterval.start, shiftInterval.start), end: Math.min(salonInterval.end, shiftInterval.end) };
+      if (overlap.end > overlap.start) window = overlap;
+    }
+    const hoursRefusal = !hours || !hours.isOpen ? unavailable('The salon is closed on this date.')
+      : !shift ? unavailable('This employee does not work on this date.')
+        : !shiftInterval ? unavailable('This employee’s working hours on this date are invalid.')
+          : !salonInterval ? unavailable('The salon opening hours are invalid for this date.')
+            : !window ? unavailable('This employee has no working time during the salon opening hours.')
+              : null;
+    if (hoursRefusal && !keepsOwnPlace) return hoursRefusal;
+    dayRefusal ??= hoursRefusal;
+  }
 
   const occupied: Interval[] = [];
   const addOccupied = (record: CalendarEvent | AppointmentRequest, interval: Interval | null): boolean => {
@@ -175,19 +212,41 @@ const getAvailability = (context: AvailabilityContext, selection: AvailabilitySe
     }
   }
 
-  const slots: string[] = [];
-  const firstStart = Math.ceil((window.start + timing.prep) / 30) * 30;
-  const lastStart = window.end - timing.duration - timing.post;
+  // A block is kept free exactly from its start to its end: it has no preparation time around it.
+  for (const block of context.timeBlocks ?? []) {
+    if (block.employeeId !== employee.id || block.date !== selection.date) continue;
+    const interval = parseInterval(block.startTime, block.endTime);
+    if (interval) occupied.push(interval);
+  }
+
   const currentMinute = parseTime(salonNow.time)! + now.getUTCSeconds() / 60 + now.getUTCMilliseconds() / 60000;
-  for (let start = firstStart; start <= lastStart; start += 30) {
+  const free = (start: number): boolean => {
     const candidate = { start: start - timing.prep, end: start + timing.duration + timing.post };
     // Preparation also needs to happen in the future, not just the service start.
-    if (selection.date === salonNow.date && candidate.start < currentMinute) continue;
+    const passed = selection.date < salonNow.date || (selection.date === salonNow.date && candidate.start < currentMinute);
+    if (passed && start !== ownStart) return false;
     // Strict inequalities allow one appointment to start exactly when another ends.
-    if (!occupied.some((interval) => candidate.start < interval.end && candidate.end > interval.start)) {
-      slots.push(formatTime(start));
-    }
+    return !occupied.some((interval) => candidate.start < interval.end && candidate.end > interval.start);
+  };
+  const fits = (start: number, bounds: Interval): boolean =>
+    start - timing.prep >= bounds.start && start + timing.duration + timing.post <= bounds.end;
+
+  const starts = new Set<number>();
+  // On a day that is closed, or that the stylist is away, nothing but the own start opens.
+  if (window && !dayRefusal) {
+    for (let start = Math.ceil((window.start + timing.prep) / 30) * 30; fits(start, window); start += 30) starts.add(start);
   }
+  if (keepsOwnPlace && ownSpan && ownStart !== null) {
+    // The own start may reach as far as the hours of the day, or as far as the appointment itself
+    // reached when it was booked, whichever is wider. A day without hours any more (a day off, a
+    // weekday the salon now keeps closed) is bounded like a booking outside the usual hours. So a
+    // longer service still fits, but it never runs into another booking (see `free`).
+    const reached = { start: ownSpan.start - (own!.prepMinutes ?? timing.prep), end: ownSpan.end + (own!.postMinutes ?? timing.post) };
+    const day = window ?? { start: parseTime(OUTSIDE_HOURS_WINDOW.start)!, end: parseTime(OUTSIDE_HOURS_WINDOW.end)! };
+    const bounds = { start: Math.min(day.start, reached.start), end: Math.max(day.end, reached.end) };
+    if (fits(ownStart, bounds)) starts.add(ownStart);
+  }
+  const slots = [...starts].sort((a, b) => a - b).filter(free).map(formatTime);
   return { slots, error: null };
 };
 
@@ -242,7 +301,7 @@ export const validateCalendarEvent = (
     return `Choose a valid ${service.durationMinutes}-minute slot on the same day.`;
   }
   if (!availability.slots.includes(event.startTime)) {
-    return 'This time is not available. Choose a slot within the employee’s shift and salon hours, without overlapping another booking.';
+    return 'This time is not available. Choose a time within the employee’s working hours and the opening hours, without overlapping another booking.';
   }
   return null;
 };

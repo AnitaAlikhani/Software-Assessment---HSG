@@ -9,7 +9,10 @@ import CustomerChat from '../src/CustomerChat';
 import { setResearchModeForTests } from '../src/flags';
 import { addDays } from '../src/scheduling';
 import type { AppointmentRequest, BookingHoursDay, CalendarEvent, CompanySettingsData, Employee, ServiceItem, ShiftEntry } from '../src/types';
+import { salonStorageKey } from '../src/useDemoState';
 import { BookingPageView, createBookingDraft, type BookingDraft } from '../src/views/BookingPageView';
+import { movedRequest } from '../src/requestAnswers';
+import { BrowserStandIn, inTab } from './browserStandIn';
 import { FIXED_NOW } from './fixedClock';
 
 // A salon of its own for these tests, so they do not depend on the sample salon's people,
@@ -165,25 +168,80 @@ test('a closed day that was picked says why', () => {
   assert.match(visible(page({}, { date: '2026-10-12', dateChosen: true })), /The salon is closed on Mondays\. Please choose another day\./);
 });
 
-test('the status of a request is told in the salon\'s words', () => {
+test('the status of a request is told in the salon\'s words, from what the salon holds about it', () => {
   const request: AppointmentRequest = {
     id: 'req-1', serviceId: 's-cut', employeeId: 'e-1', customerName: 'Tamara Keller', customerPhone: '+41790000000', serviceName: 'Cut',
     date: '2026-10-06', dateStr: 'Tue, 06.10.2026', timeStr: '10:00 - 10:30', timeAgo: 'Just now', staffName: 'Mara Keller', channel: 'Web', status: 'pending',
   };
-  const status = (value: AppointmentRequest['status']) => visible(page({ submittedRequest: { ...request, status: value } }));
-  assert.match(status('pending'), /Appointment requested Thank you! Your appointment is not confirmed yet: Salon Fixture must accept your request first\./);
+  // The appointment that accepting the request puts into the calendar.
+  const appointment: CalendarEvent = {
+    id: 'cal-req-1', serviceId: 's-cut', employeeId: 'e-1', customerName: 'Tamara Keller', customerPhone: '+41790000000', serviceName: 'Cut',
+    staffName: 'Mara Keller', date: '2026-10-06', day: 'tue', dateDisplay: 'Tue 06.10.', startTime: '10:00', endTime: '10:30', colorTheme: 'yellow',
+  };
+  // The tab remembers which request is the customer's own; how it stands is read from the salon.
+  const status = (props: Partial<React.ComponentProps<typeof BookingPageView>> = {}, own: AppointmentRequest = request) =>
+    visible(page({ submittedRequest: own, ...props }));
+
+  const waiting = status({ requests: [request] });
+  assert.match(waiting, /Appointment requested Thank you! Your appointment is not confirmed yet: Salon Fixture must accept your request first\./);
   // The request is shown back in the formats of every screen, whatever form it is stored in.
-  assert.match(status('pending'), /Date and time Tue, 06\.10\.2026 10:00–10:30 Contact Tamara Keller \+41 79 000 00 00/);
+  assert.match(waiting, /Date and time Tue, 06\.10\.2026 10:00–10:30 Contact Tamara Keller \+41 79 000 00 00/);
   // A request made on another device does not reach the salon yet: while it waits, the page
   // promises neither that the salon has it nor that an answer will come.
-  assert.doesNotMatch(status('pending'), /\b(received|sent|delivered|shortly|soon)\b|has your request|will (confirm|answer|reply|contact)|get back to you/i);
-  assert.match(status('accepted'), /Appointment confirmed Salon Fixture has confirmed your appointment\. See you then!/);
-  assert.match(status('rejected'), /Request declined Sorry, Salon Fixture cannot offer this time\. Please choose another one\./);
-  assert.match(status('cancelled'), /Request cancelled Your request has been cancelled\. The time is free again\./);
-  for (const value of ['pending', 'accepted', 'rejected', 'cancelled'] as const) assert.doesNotMatch(status(value), TELLS);
+  assert.doesNotMatch(waiting, /\b(received|sent|delivered|shortly|soon)\b|has your request|will (confirm|answer|reply|contact)|get back to you/i);
+  // Only a request that still waits can be changed or withdrawn.
+  assert.match(waiting, /Edit request Cancel request/);
+  // The owner has moved it to another time: the page shows the new time as the salon's suggestion,
+  // not as something the customer asked for, and says what was asked. It can still be changed or withdrawn.
+  const moved = status({ requests: [movedRequest(request, '2026-10-06', '11:30')] });
+  assert.match(moved, /The salon suggests another time Salon Fixture suggests the time below instead of the one you asked for \(Tue, 06\.10\.2026, 10:00–10:30\)\. It is not confirmed yet\./);
+  assert.match(moved, /Date and time Tue, 06\.10\.2026 11:30–12:00/);
+  assert.match(moved, /Edit request Cancel request/);
+  assert.doesNotMatch(moved, /Appointment requested|must accept your request/);
+  // Accepted at the moved time: confirmed, with a word that it is not the time first asked for.
+  assert.match(status({ events: [{ ...appointment, startTime: '11:30', endTime: '12:00' }] }, movedRequest(request, '2026-10-06', '11:30')),
+    /Appointment confirmed Salon Fixture has confirmed your appointment at the time below\. You had asked for Tue, 06\.10\.2026, 10:00–10:30\./);
+
+  // The owner accepted in the other tab: the request has left the list and its appointment is in the calendar.
+  const accepted = status({ events: [appointment] });
+  assert.match(accepted, /Appointment confirmed Salon Fixture has confirmed your appointment\. See you then!/);
+  assert.doesNotMatch(accepted, /Edit request|Cancel request/);
+  assert.match(accepted, /To change a confirmed appointment, contact the salon\./);
+  // An appointment the owner has changed in the calendar since is shown as it is now.
+  assert.match(status({ events: [{ ...appointment, date: '2026-10-08', startTime: '14:00', endTime: '14:30', staffName: 'Jonas Frei' }] }),
+    /Appointment confirmed .* Specialist Jonas Frei Date and time Thu, 08\.10\.2026 14:00–14:30/);
+
+  // The owner rejected: the answer is noted with the stored salon, where this tab reads it.
+  const browser = new BrowserStandIn();
+  browser.stored.set(salonStorageKey('/'), JSON.stringify({ day: '2026-10-05', builtAt: FIXED_NOW.toISOString(), changed: true, parts: { requestOutcomes: { 'req-1': 'rejected' } } }));
+  const rejected = inTab(browser.openTab(), () => status());
+  assert.match(rejected, /Request declined Sorry, Salon Fixture cannot offer this time\. Please choose another one\./);
+  assert.doesNotMatch(rejected, /Edit request|Cancel request/);
+  // A tab that has seen the answer remembers it, and so it does a withdrawal of its own.
+  assert.match(status({}, { ...request, status: 'rejected' }), /Request declined Sorry, Salon Fixture cannot offer this time\./);
+  const cancelled = status({}, { ...request, status: 'cancelled' });
+  assert.match(cancelled, /Request cancelled Your request has been cancelled\. The time is free again\./);
+  assert.doesNotMatch(cancelled, /Edit request|Cancel request/);
+  // An answered request that waits again (the owner took the answer back) can be changed again.
+  assert.match(status({ requests: [request] }, { ...request, status: 'rejected' }), /Appointment requested .* Edit request Cancel request/);
+
+  // Accepted, and then the owner took the appointment out of the calendar: the page does not say
+  // that the customer cancelled a request.
+  browser.stored.set(salonStorageKey('/'), JSON.stringify({ day: '2026-10-05', builtAt: FIXED_NOW.toISOString(), changed: true, parts: { requestOutcomes: { 'req-1': 'accepted' } } }));
+  const removed = inTab(browser.openTab(), () => status({}, { ...request, status: 'accepted' }));
+  assert.match(removed, /Appointment cancelled Salon Fixture has taken this appointment out of its calendar\. Please contact the salon, or request a new time\./);
+  assert.doesNotMatch(removed, /Your request has been cancelled|Edit request|Cancel request/);
+
+  // A request the salon holds no trace of (its stored data were reset): the page does not go on
+  // saying that it waits. The form is back.
+  const gone = status();
+  assert.doesNotMatch(gone, /Appointment requested|Appointment confirmed|Edit request/);
+  assert.match(gone, /Request an appointment Choose a service, a date and a specialist\./);
+
+  for (const text of [waiting, accepted, rejected, cancelled, gone]) assert.doesNotMatch(text, TELLS);
   // A customer gets no button into the owner's app; the owner's preview has one.
-  assert.doesNotMatch(status('pending'), /View request/);
-  assert.match(visible(page({ submittedRequest: request, publicMode: false })), /View request/);
+  assert.doesNotMatch(waiting, /View request/);
+  assert.match(status({ requests: [request], publicMode: false }), /View request/);
 });
 
 test('only the owner\'s own browser tab gets a way back from the public page', () => {
@@ -257,4 +315,16 @@ test('without a working link the chat page says what to do and offers nothing el
   } finally {
     setResearchModeForTests(undefined);
   }
+});
+
+test('the booking page offers only people who have working hours, as Team says', () => {
+  // A new person with a service but no working hours yet: Team calls her "not bookable yet".
+  const nora = employee('e-3', 'Nora Ohnezeit');
+  const withNora = services.map((service) => service.id === 's-cut' ? { ...service, assignedEmployeeIds: [...service.assignedEmployeeIds!, 'e-3'] } : service);
+  const offered = visible(page({ employees: [...employees, nora], services: withNora }, { serviceId: 's-cut' }));
+  assert.match(offered, /Mara Keller/);
+  assert.doesNotMatch(offered, /Nora Ohnezeit/);
+  // With a regular week she is offered at once.
+  const working = { ...nora, weeklyHours: { mon: null, tue: { start: '09:00', end: '18:00' }, wed: null, thu: null, fri: null, sat: null, sun: null } };
+  assert.match(visible(page({ employees: [...employees, working], services: withNora }, { serviceId: 's-cut' })), /Nora Ohnezeit/);
 });

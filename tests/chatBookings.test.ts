@@ -108,12 +108,13 @@ test('whether a time is outside opening hours is read from the hours of that day
   assert.equal(isOutsideOpeningHours(initialBookingHours, '2026-10-09', '08:00', '08:30'), true);
   assert.equal(isOutsideOpeningHours(initialBookingHours, '2026-10-05', '10:00', '10:30'), true);  // Monday: closed
   assert.equal(isOutsideOpeningHours(initialBookingHours, 'not-a-date', '10:00', '10:30'), false);
-  // An appointment after closing time needs the owner's approval and still has to fit the stylist's shift.
+  // An appointment after closing time needs the owner's approval; with it, the stylist's working hours do not limit it either.
   const friday = (partial: Partial<CalendarEvent>): CalendarEvent => ({ ...demoEvents[0], id: 'late', employeeId: 'emp-1', staffName: 'Anna Weber', serviceId: 'srv-2', serviceName: 'Haircut', date: '2026-10-09', startTime: '18:30', endTime: '19:00', ...partial });
   const longShift = context({ shiftOverview: demoShifts.map((entry) => entry.employeeId === 'emp-1' ? { ...entry, shifts: { ...entry.shifts, '2026-10-09': { start: '10:00', end: '19:30' } } } : entry) });
   assert.match(validateCalendarEvent(longShift, friday({}))!, /not available/);
   assert.equal(validateCalendarEvent(longShift, friday({ outsideHoursApproved: true })), null);
-  assert.match(validateCalendarEvent(context(), friday({ outsideHoursApproved: true }))!, /not available/);
+  assert.equal(validateCalendarEvent(context(), friday({ outsideHoursApproved: true })), null);
+  assert.match(validateCalendarEvent(context(), friday({ startTime: '23:00', endTime: '23:30', outsideHoursApproved: true }))!, /not available/);
 });
 
 test('a customer created from a live chat is clean: the chat\'s language, a real phone or none, never a label', () => {

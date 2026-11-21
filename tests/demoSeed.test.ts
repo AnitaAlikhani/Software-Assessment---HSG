@@ -8,9 +8,10 @@ import { customerStatsFromCalendar } from '../src/customerStats';
 import { nextUpcomingAppointment } from '../src/dashboard';
 import { demoPeople, demoWindow, salonInstant } from '../src/demoSeed';
 import { createDemoWorkspace, type DemoWorkspace } from '../src/demoWorkspace';
-import { accountOwner, demoShiftPattern, initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData';
+import { accountOwner, initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData';
 import { addDays, getSalonNow, startOfWeek } from '../src/scheduling';
 import type { CalendarEvent } from '../src/types';
+import { workingTimeOn } from '../src/workingHours';
 import { salonContext } from '../server/ai';
 import { FIXED_NOW } from './fixedClock';
 
@@ -114,9 +115,10 @@ test('the weeks that are over look the same on every later day of the week', () 
   assert.deepEqual(before(saturday), before(tuesday));
 });
 
-test('no appointment overlaps another, lies outside a shift or the opening hours, or on a closed day', () => {
+test('no appointment overlaps another, lies outside the working hours or the opening hours, or on a closed day', () => {
   for (const now of CLOCKS) {
     const { events, shifts } = workspaceAt(now);
+    const salon = { employees: initialEmployees, shiftOverview: shifts };
     assert.equal(new Set(events.map((event) => event.id)).size, events.length, `${label(now)}: ids repeat`);
     const perStylistAndDay = new Map<string, CalendarEvent[]>();
     for (const event of events) {
@@ -136,9 +138,10 @@ test('no appointment overlaps another, lies outside a shift or the opening hours
       const hours = hoursOn(event.date);
       assert.ok(hours.isOpen, `${where} is on a closed ${hours.day}`);
       assert.ok(hours.from <= event.startTime && event.endTime <= hours.to, `${where} ${event.startTime}-${event.endTime} outside ${hours.from}-${hours.to}`);
-      // ... and inside the stylist's shift of that day.
-      const shift = shifts.find((entry) => entry.employeeId === event.employeeId)!.shifts[event.date];
-      assert.ok(shift && shift.start <= event.startTime && event.endTime <= shift.end, `${where} outside the shift`);
+      // ... and inside the hours the stylist works that day, also in the eight weeks that are over:
+      // asked from the one rule every screen asks (the regular week, unless that day was changed).
+      const shift = workingTimeOn(salon, event.employeeId!, event.date);
+      assert.ok(shift && shift.start <= event.startTime && event.endTime <= shift.end, `${where} outside the working hours`);
       const list = perStylistAndDay.get(`${event.employeeId}|${event.date}`) ?? [];
       list.push(event);
       perStylistAndDay.set(`${event.employeeId}|${event.date}`, list);
@@ -265,6 +268,44 @@ test('what the chats and requests are about to book is free, whatever day and ti
   }
 });
 
+test('the week plan starts without a single changed day: the regular hours carry the requests, the past and the chat\'s Saturday', () => {
+  for (const now of CLOCKS) {
+    const workspace = workspaceAt(now);
+    const salon = { employees: initialEmployees, shiftOverview: workspace.shifts };
+    // The plan holds only days that differ from somebody's regular week, and the sample salon needs none.
+    assert.deepEqual(workspace.shifts.map((entry) => [entry.employeeId, entry.employeeName, Object.keys(entry.shifts).length]),
+      initialEmployees.map((employee) => [employee.id, employee.name, 0]), label(now));
+    const inside = (employeeId: string, date: string, start: string, end: string) => {
+      const hours = workingTimeOn(salon, employeeId, date);
+      return hours !== null && hours.start <= start && end <= hours.end;
+    };
+    // The waiting requests lie inside their stylist's hours ...
+    for (const request of workspace.requests) {
+      const [start, end] = request.timeStr.split(' - ');
+      assert.ok(inside(request.employeeId!, request.date, start, end), `${label(now)}: ${request.id}`);
+    }
+    // ... the oldest appointment, eight weeks back, has working time behind it like every other one ...
+    const today = getSalonNow(ZONE, now).date;
+    const oldest = workspace.events.reduce((first, event) => event.date < first.date ? event : first);
+    assert.ok(oldest.date < addDays(today, -49), `${label(now)}: the calendar starts on ${oldest.date}`);
+    assert.ok(inside(oldest.employeeId!, oldest.date, oldest.startTime, oldest.endTime), `${label(now)}: ${oldest.id}`);
+    // ... and on the Saturday that Giulia's chat moves her appointment to, Selina works: at both times the chat offers.
+    const move = workspace.conversations.find((item) => item.id === 'conv-giulia')!.quickReplies![0].appointmentAction!;
+    assert.equal(WEEKDAYS[weekdayOf(move.date)], 'Saturday', label(now));
+    assert.deepEqual(workingTimeOn(salon, 'emp-2', move.date), { start: '08:00', end: '16:00' }, label(now));
+    assert.ok(inside('emp-2', move.date, '10:00', '10:30') && inside('emp-2', move.date, '11:30', '12:00'), label(now));
+  }
+  // That Saturday is what makes the move possible: without it the rules refuse the very same reply.
+  const workspace = workspaceAt(FIXED_NOW);
+  const giulia = workspace.conversations.find((item) => item.id === 'conv-giulia')!;
+  const moved = appointmentFromConversationAction(giulia.quickReplies![0].appointmentAction!, giulia, workspace.events, initialServices, initialEmployees, false)!;
+  assert.equal(validateCalendarEvent(contextOf(workspace, FIXED_NOW), moved, moved.id), null);
+  const noSaturday = initialEmployees.map((employee) => employee.id === 'emp-2' ? { ...employee, weeklyHours: { ...employee.weeklyHours!, sat: null } } : employee);
+  assert.match(validateCalendarEvent({ ...contextOf(workspace, FIXED_NOW), employees: noSaturday }, moved, moved.id)!, /does not work on this date/);
+  // The sample team is stored like anybody the owner adds: each with a regular week of their own.
+  for (const employee of initialEmployees) assert.ok(employee.weeklyHours && Object.values(employee.weeklyHours).some(Boolean), employee.name);
+});
+
 test('chats and requests come in over the web on every day, never through a channel that is not connected', () => {
   for (const now of CLOCKS) {
     const { conversations, requests, customers } = workspaceAt(now);
@@ -388,7 +429,7 @@ test('tomorrow has room: where two or more stylists are on duty, one of them is 
         const time = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
         const end = `${String(Math.floor((minute + 30) / 60)).padStart(2, '0')}:${String((minute + 30) % 60).padStart(2, '0')}`;
         const onDuty = initialEmployees.filter((employee) => {
-          const shift = demoShiftPattern[employee.id][weekdayOf(date)];
+          const shift = workingTimeOn(context, employee.id, date);
           return shift && shift.start <= time && end <= shift.end && hours.from <= time && end <= hours.to;
         });
         if (onDuty.length >= 2) assert.ok(firstFreeEmployee(context, 'srv-2', date, time), `${label(now)}: nobody free on ${date} at ${time}`);
@@ -498,7 +539,8 @@ test('the service menu keeps its linked ids and names, in half-hour steps, each 
   // Every service offered online can be booked on every open day: somebody who offers it works then.
   for (const service of initialServices.filter((item) => item.onlineBooking)) {
     for (const day of initialBookingHours.filter((item) => item.isOpen)) {
-      assert.ok(service.assignedEmployeeIds!.some((id) => demoShiftPattern[id][WEEKDAYS.indexOf(day.day)]), `${service.name} on ${day.day}`);
+      const weekday = (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)[WEEKDAYS.indexOf(day.day)];
+      assert.ok(service.assignedEmployeeIds!.some((id) => initialEmployees.find((employee) => employee.id === id)!.weeklyHours![weekday]), `${service.name} on ${day.day}`);
     }
   }
   // The salon keeps the hours of a hair salon: closed on Sunday and Monday, shorter on Saturday.

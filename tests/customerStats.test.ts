@@ -98,8 +98,10 @@ test('the customer list shows the calendar\'s figures, 25 customers at a time', 
   assert.match(html, />Next appointment</);
   assert.match(html, />Visits</);
   assert.doesNotMatch(html, /Last booking|Bookings|Actions/);
-  // The phone cards and the table each show the first 25; the name of each opens its edit form.
-  assert.equal(count(html, 'aria-label="Edit '), 50);
+  // The phone cards and the table each show the first 25; the name of each is a link to the profile.
+  assert.equal(count(html, 'data-customer-link="'), 50);
+  assert.match(html, /<a href="#\/customers\?customerId=cust-marie" data-customer-link="cust-marie"[^>]*>Marie Dupont<\/a>/);
+  assert.doesNotMatch(html, /aria-label="Edit /);
   assert.equal(count(html, `Showing 25 of ${demoCustomers.length} customers`), 2);
   assert.equal(count(html, '>Show 25 more<'), 2);
   // Marie: last visit and next appointment as in the calendar.
@@ -124,18 +126,16 @@ test('a short list has no "Show more", and a customer known only from a chat sho
   assert.equal(count(html, 'via web chat'), 2);
   assert.doesNotMatch(html, /Test visitor|Testvisitor/);
   assert.match(html, /aria-label="Open conversation with Tom"/);
-  // A link from the search opens one customer.
+  // A link to one customer opens the profile in place of the list (tests/customerProfile.test.ts).
   const one = renderToStaticMarkup(React.createElement(CustomersView, { ...viewProps, selectedCustomerId: 'cust-marie' }));
-  assert.match(one, /Showing Marie Dupont/);
-  assert.equal(count(one, 'aria-label="Edit '), 2);
-  assert.equal(count(one, 'aria-label="Edit Marie Dupont"'), 2);
-  // One customer needs no order: the phones' "Sort by" is left out.
-  assert.doesNotMatch(one, /customer-sort/);
+  assert.match(one, /<h1[^>]*>Marie Dupont<\/h1>/);
+  assert.match(one, />All customers</);
+  assert.doesNotMatch(one, /customer-sort|data-customer-link|role="table"/);
 });
 
 test('no row of the list deletes: the bin is gone, and so is the Options panel', () => {
   const html = renderToStaticMarkup(React.createElement(CustomersView, viewProps));
-  // Deleting is in the customer's edit form, behind a question (tests/deleteQuestion.test.ts).
+  // Deleting is on the customer's profile, behind a question (tests/customerProfile.test.ts, tests/deleteQuestion.test.ts).
   assert.doesNotMatch(html, /Delete|lucide-trash/i);
   assert.doesNotMatch(html, /Options|customer-options|All languages|Reset filters/);
   // What stays above the list: the filter field, the export and "Add Customer".

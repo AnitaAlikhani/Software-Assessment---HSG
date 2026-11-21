@@ -18,8 +18,9 @@ const event = (id: string, startTime: string, endTime: string): CalendarEvent =>
 const calendarProps: React.ComponentProps<typeof CalendarView> = {
   events: [], services, employees, bookingHours, shiftOverview: [], requests: [],
   date: '2030-10-07', selectedEventId: null,
-  onSelectEvent: () => {}, onDateChange: () => {}, onAddEvent: () => null,
-  onUpdateEvent: () => null, onDeleteEvent: () => {}, timeZone: 'Europe/Zurich',
+  onSelectEvent: () => {}, onDateChange: () => {}, onOpenAppointmentForm: () => {}, onDeleteEvent: () => {}, timeZone: 'Europe/Zurich',
+  // Monday 7 October 2030, 10:00 in Zurich: the calendar is drawn for this moment, not for the real clock.
+  now: new Date('2030-10-07T08:00:00Z'),
 };
 
 test('calendar hours cover opening hours and complete early/late appointments', () => {
@@ -45,24 +46,30 @@ test('week grid renders actual early and evening appointments even on closed day
   assert.match(html, />18:00</);
 });
 
-test('the calendar is shown as a list, a day or a week; there is no 3-day view', () => {
+test('the calendar is shown as a day, a week or a list; there is no 3-day view', () => {
   const html = renderToStaticMarkup(React.createElement(CalendarView, calendarProps));
-  const views = Array.from(html.matchAll(/<button aria-pressed="(true|false)"[^>]*>([^<]+)<\/button>/g), (match) => [match[2], match[1]]);
-  assert.deepEqual(views, [['List', 'false'], ['Day', 'false'], ['Week', 'true']]);
+  const views = (markup: string) => Array.from(markup.matchAll(/<button type="button" aria-pressed="(true|false)" class="[^"]*">([^<]+)<\/button>/g), (match) => [match[2], match[1]]);
+  assert.deepEqual(views(html), [['Day', 'false'], ['Week', 'true'], ['List', 'false']]);
   assert.doesNotMatch(html, /3-day/);
-  // The page opens with the week: seven columns, Monday first.
-  assert.equal(html.split('data-date="').length - 1, 7);
-  // Three views share the switcher's width on a phone.
-  assert.match(html, /<div class="grid w-full grid-cols-3 [^"]*"><button aria-pressed/);
+  // A laptop opens with the week: seven columns, Monday first.
+  const columns = Array.from(html.matchAll(/data-column="([^"]+)"/g), (match) => match[1]);
+  assert.deepEqual([columns.length, columns[0], columns[6]], [7, '2030-10-07', '2030-10-13']);
+  // A phone opens with the day, and the three views share the row with the date arrows.
+  const phone = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, phone: true }));
+  assert.deepEqual(views(phone), [['Day', 'true'], ['Week', 'false'], ['List', 'false']]);
+  assert.match(phone, /<div role="group" aria-label="View" class="grid grid-cols-3 [^"]*min-w-0 flex-1">/);
 });
 
-test('missing services or active staff explain why appointment creation is disabled', () => {
+test('missing services or active staff are explained on the page, and "Add" still leads to the form that says the same', () => {
   const noServices = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, services: [] }));
-  assert.match(noServices, /aria-label="Add appointment" disabled=""/);
   assert.match(noServices, /Add a service in Services before creating an appointment/);
   const noStaff = renderToStaticMarkup(React.createElement(CalendarView, { ...calendarProps, employees: [] }));
-  assert.match(noStaff, /aria-label="Add appointment" disabled=""/);
   assert.match(noStaff, /Add an active employee and assign them to a service/);
+  // "New appointment" in the header and "+" open the form from everywhere, so "Add" is not a dead button either.
+  for (const html of [noServices, noStaff]) {
+    assert.match(html, /aria-label="Add appointment"/);
+    assert.doesNotMatch(html, /aria-label="Add appointment"[^>]* disabled=""/);
+  }
 });
 
 test('confirmed appointment details expose an edit action alongside cancellation', () => {
@@ -71,7 +78,7 @@ test('confirmed appointment details expose an edit action alongside cancellation
     ...calendarProps, events: [appointment], selectedEventId: appointment.id,
   }));
   assert.match(html, />Edit appointment</);
-  assert.match(html, /Cancel Appointment/);
+  assert.match(html, />Cancel appointment</);
 });
 
 test('the calendar names its month and week and carries no time zone labels', () => {
@@ -81,7 +88,7 @@ test('the calendar names its month and week and carries no time zone labels', ()
   assert.match(html, />Week 51</);
   assert.match(html, />14\.–20\.12\.2026</);
   // Seven columns, Monday first, each with its short date.
-  const columns = Array.from(html.matchAll(/data-date="([^"]+)"[^>]*><span class="font-semibold">([^<]+)</g), (match) => match.slice(1));
+  const columns = Array.from(html.matchAll(/<button type="button" data-date="([^"]+)"[^>]*><span class="[^"]*">([^<]+)</g), (match) => match.slice(1));
   assert.deepEqual(columns.map(([date]) => date), ['2026-12-14', '2026-12-15', '2026-12-16', '2026-12-17', '2026-12-18', '2026-12-19', '2026-12-20']);
   assert.deepEqual(columns.map(([, label]) => label), ['Mon 14.12.', 'Tue 15.12.', 'Wed 16.12.', 'Thu 17.12.', 'Fri 18.12.', 'Sat 19.12.', 'Sun 20.12.']);
   // No offset under the days and no zone id in a sentence: whose clock the times follow is said

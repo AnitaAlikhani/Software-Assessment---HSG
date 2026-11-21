@@ -1,6 +1,6 @@
 import type { AssistantData } from '../src/assistant/execute';
 import type { InterpreterContext } from '../src/assistant/interpret';
-import { addDays, addMinutes, dayKeyForDate, formatCalendarDate } from '../src/scheduling';
+import { addMinutes, dayKeyForDate, formatCalendarDate } from '../src/scheduling';
 import type { AppointmentRequest, CalendarEvent, Customer, Employee, ServiceItem, ShiftEntry } from '../src/types';
 import { FIXED_NOW } from './fixedClock';
 
@@ -8,7 +8,8 @@ import { FIXED_NOW } from './fixedClock';
  * A small invented salon for the assistant tests, independent of the app's sample data.
  * "Today" is Monday 5 October 2026, 12:00 in Zurich (FIXED_NOW).
  *
- * Selina works Monday to Friday 09:00-18:00, Luca Wednesday to Friday 10:00-18:00.
+ * Selina works Monday to Friday 09:00-18:00, Luca Wednesday to Friday 10:00-18:00: these are
+ * their regular working hours, stored on each of them. No single day differs from them.
  * The salon is closed on Saturday and Sunday.
  */
 export const TODAY = '2026-10-05';
@@ -29,8 +30,14 @@ const customer = (id: string, name: string, phone: string): Customer => ({
   id, name, initials: name.split(' ').map(part => part[0]).join(''), email: '', phone, language: 'DE',
 });
 
-export const SELINA = employee('emp-1', 'Selina', 'Keller');
-export const LUCA = employee('emp-2', 'Luca', 'Frei');
+/** A regular week: the same hours on the given weekdays (1 = Monday ... 5 = Friday), every other day off. */
+const regularWeek = (weekdays: number[], start: string): NonNullable<Employee['weeklyHours']> => {
+  const on = (weekday: number) => (weekdays.includes(weekday) ? { start, end: '18:00' } : null);
+  return { mon: on(1), tue: on(2), wed: on(3), thu: on(4), fri: on(5), sat: on(6), sun: on(0) };
+};
+
+export const SELINA = employee('emp-1', 'Selina', 'Keller', { weeklyHours: regularWeek([1, 2, 3, 4, 5], '09:00') });
+export const LUCA = employee('emp-2', 'Luca', 'Frei', { weeklyHours: regularWeek([3, 4, 5], '10:00') });
 export const HAIRCUT = service('srv-cut', 'Haircut', 30, ['emp-1', 'emp-2'], { category: 'Haircut' });
 /** The owner books colour work herself: it is not offered online, which the assistant must not mind. */
 export const COLOURING = service('srv-colour', 'Colouring', 90, ['emp-1', 'emp-2'], { category: 'Colour', onlineBooking: false });
@@ -42,14 +49,9 @@ export const appointment = (id: string, customerName: string, item: ServiceItem,
   colorTheme: 'blue', ...partial,
 });
 
-const shifts = (staff: Employee, weekdays: number[], start: string): ShiftEntry => {
-  const days: ShiftEntry['shifts'] = {};
-  for (let offset = 0; offset < 120; offset += 1) {
-    const date = addDays(TODAY, offset);
-    days[date] = weekdays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()) ? { start, end: '18:00' } : null;
-  }
-  return { employeeId: staff.id, employeeName: staff.name, initials: staff.initials, avatarColor: '', shifts: days };
-};
+/** The week plan of one person: it holds only single days that differ from their regular week, and none does yet. */
+const noChangedDays = (staff: Employee): ShiftEntry =>
+  ({ employeeId: staff.id, employeeName: staff.name, initials: staff.initials, avatarColor: '', shifts: {} });
 
 const pendingRequest: AppointmentRequest = {
   id: 'req-tom', customerName: 'Tom Graf', serviceId: HAIRCUT.id, serviceName: HAIRCUT.name, employeeId: SELINA.id, staffName: SELINA.name,
@@ -69,7 +71,7 @@ export function salon(partial: Partial<AssistantData> = {}): AssistantData {
     ],
     bookingHours: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
       .map(day => ({ day, isOpen: day !== 'Saturday' && day !== 'Sunday', from: '09:00', to: '18:00' })),
-    shiftOverview: [shifts(SELINA, [1, 2, 3, 4, 5], '09:00'), shifts(LUCA, [3, 4, 5], '10:00')],
+    shiftOverview: [noChangedDays(SELINA), noChangedDays(LUCA)],
     events: [
       appointment('cal-lea', 'Lea Brunner', HAIRCUT, SELINA, TUESDAY, '10:00', { customerId: 'cust-lea' }),
       // Thursday 15:00 is taken with both stylists.

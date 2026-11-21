@@ -1,10 +1,10 @@
 import type { CalendarEvent, Customer, ShiftEntry } from './types.js';
 import { addDays, dayKeyForDate, formatCalendarDate, getSalonNow, startOfWeek } from './scheduling.js';
-import { demoShiftColors, demoShiftPattern, initialBookingHours, initialEmployees, initialServices } from './mockData.js';
+import { demoShiftColors, initialBookingHours, initialEmployees, initialServices } from './mockData.js';
 
 /**
  * The salon's history and bookings as they look "now": weeks of appointments, the customers
- * who had them, and the shifts they were worked in.
+ * who had them, and the days somebody works differently from their regular week.
  *
  * Nothing here reads the clock or uses random numbers. Every builder takes the moment "now" as
  * an argument, and every choice (who comes when, to whom, for what) is a fixed formula of the
@@ -77,18 +77,23 @@ const openingOnWeekday = (weekday: number) => {
   return hours?.isOpen ? hours : null;
 };
 const openingOn = (date: string) => openingOnWeekday(weekdayOf(date));
-const shiftOn = (employeeId: string, date: string) => demoShiftPattern[employeeId]?.[weekdayOf(date)] ?? null;
+// The stylists' working hours are their regular week (weeklyHours in src/mockData.ts): the one
+// place that says when they work. Appointments are placed inside it.
+const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+/** A stylist's regular hours on a weekday (0 = Sunday ... 6 = Saturday), or null for a day off. */
+const regularHours = (employeeId: string, weekday: number): { start: string; end: string } | null =>
+  initialEmployees.find((employee) => employee.id === employeeId)?.weeklyHours?.[WEEKDAY_KEYS[weekday]] ?? null;
 /** The weekdays (0 = Sunday ... 6 = Saturday) on which a stylist works. */
 const workdaysOf = (employeeId: string): number[] =>
-  Object.keys(demoShiftPattern[employeeId] ?? {}).map(Number).filter((day) => demoShiftPattern[employeeId][day]);
+  WEEKDAY_KEYS.map((_, weekday) => weekday).filter((weekday) => regularHours(employeeId, weekday));
 
 const weekdayWindows = new Map<string, { start: number; end: number } | null>();
-/** The minutes of a weekday in which a stylist can serve customers: the shift, cut to the opening hours. */
+/** The minutes of a weekday in which a stylist can serve customers: the working hours, cut to the opening hours. */
 const windowOnWeekday = (employeeId: string, weekday: number): { start: number; end: number } | null => {
   const key = `${employeeId}|${weekday}`;
   if (weekdayWindows.has(key)) return weekdayWindows.get(key)!;
   const hours = openingOnWeekday(weekday);
-  const shift = demoShiftPattern[employeeId]?.[weekday];
+  const shift = regularHours(employeeId, weekday);
   let window: { start: number; end: number } | null = null;
   if (hours && shift) {
     // Appointments start on the half hour.
@@ -111,31 +116,25 @@ export const demoWindow = (today: string): { from: string; to: string } => {
   return { from: addDays(thisWeek, -7 * DEMO_WEEKS_BACK), to: addDays(thisWeek, 7 * DEMO_WEEKS_AHEAD + 6) };
 };
 
-// ---------- shifts ----------
+// ---------- single days that differ from the regular week ----------
 
 /**
- * The shift plan from eight weeks back (so past appointments have a shift behind them) to
- * 90 days ahead, from each stylist's regular week. Days off are stored as null.
+ * The week plan a new workspace starts with. It holds only the days on which somebody works
+ * differently from their regular week (see workingTimeOn in src/workingHours.ts), and the sample
+ * salon needs none: every appointment, every waiting request and every time a chat offers lies
+ * inside the stylists' regular hours, also the Saturday Giulia's chat moves her appointment to
+ * and the appointments of the eight weeks that are over. So each stylist starts with an empty list.
+ * The time zone and the moment are taken as in every builder here: a day that the sample story
+ * needs one day would be placed from them, and no caller would have to change.
  */
-export const createDemoShifts = (timeZone?: string, now = new Date()): ShiftEntry[] => {
-  const today = getSalonNow(timeZone, now).date;
-  const { from } = demoWindow(today);
-  const end = addDays(today, 89);
-  return initialEmployees.map((employee, index) => {
-    const shifts: ShiftEntry['shifts'] = {};
-    for (let date = from; date <= end; date = addDays(date, 1)) {
-      const shift = shiftOn(employee.id, date);
-      shifts[date] = shift ? { ...shift } : null;
-    }
-    return {
-      employeeId: employee.id,
-      employeeName: employee.name,
-      initials: employee.initials,
-      avatarColor: demoShiftColors[index % demoShiftColors.length],
-      shifts,
-    };
-  });
-};
+export const createDemoShifts = (_timeZone?: string, _now?: Date): ShiftEntry[] =>
+  initialEmployees.map((employee, index) => ({
+    employeeId: employee.id,
+    employeeName: employee.name,
+    initials: employee.initials,
+    avatarColor: demoShiftColors[index % demoShiftColors.length],
+    shifts: {},
+  }));
 
 // ---------- people ----------
 
@@ -357,7 +356,13 @@ interface Habit {
   usesChat: boolean;
 }
 
-const WEEKLY_HOURS: Record<string, number> = { 'emp-1': 40, 'emp-2': 34, 'emp-3': 24 };
+/** The hours of a stylist's regular week, to the full hour: who works more has more customers. Anna 40, Selina 34, Luca 24. */
+const weeklyHoursOf = (employeeId: string): number => Math.round(
+  workdaysOf(employeeId).reduce((minutes, weekday) => {
+    const hours = regularHours(employeeId, weekday)!;
+    return minutes + toMinutes(hours.end) - toMinutes(hours.start);
+  }, 0) / 60,
+);
 // How customers spread over a stylist's working days. Friday and Saturday are the busiest days
 // all the same, because all three stylists work then.
 const DAY_WEIGHT: Record<number, number> = { 2: 22, 3: 19, 4: 20, 5: 20, 6: 21 };
@@ -380,7 +385,7 @@ const habitOf = (person: PoolPerson): Omit<Habit, 'phase'> => {
         ] as const);
   const service = serviceById(serviceId);
   const intervalWeeks = choose(`${key}:interval`, intervals);
-  const employeeId = chooseWeighted(`${key}:stylist`, (service.assignedEmployeeIds ?? []).map((id) => [id, WEEKLY_HOURS[id] ?? 20] as const));
+  const employeeId = chooseWeighted(`${key}:stylist`, (service.assignedEmployeeIds ?? []).map((id) => [id, weeklyHoursOf(id) || 20] as const));
   const weekday = chooseWeighted(`${key}:weekday`, workdaysOf(employeeId).map((day) => [day, DAY_WEIGHT[day] ?? 10] as const));
   // Any half hour of that stylist's day that leaves room for the whole service.
   // Children come after school, except on Saturdays.
@@ -489,7 +494,7 @@ export const demoRequestPlan = (today: string) => {
   const secondDate = nextWorkday('emp-1', firstDate);
   return [
     { id: 'req-1', serviceId: 'srv-1', employeeId: 'emp-2', date: firstDate, start: fit('emp-2', firstDate, '09:30', 30), minutesAgo: 12, channel: 'Web' as const },
-    // On Saturdays the owner's shift ends at 14:00, so the afternoon request moves to 13:00.
+    // On Saturdays the owner works until 14:00, so the afternoon request moves to 13:00.
     { id: 'req-2', serviceId: 'srv-2', employeeId: 'emp-1', date: secondDate, start: fit('emp-1', secondDate, weekdayOf(secondDate) === 6 ? '13:00' : '14:30', 30), minutesAgo: 47, channel: 'Web' as const },
   ];
 };
@@ -546,7 +551,7 @@ const buildEvent = (
  *
  * Each customer follows a habit (for example a men's cut every four weeks, Fridays with Luca).
  * Bookings are made some days before the visit, so the weeks ahead are only partly filled yet.
- * Appointments never overlap for a stylist, lie inside their shift and the opening hours, and on
+ * Appointments never overlap for a stylist, lie inside their working hours and the opening hours, and on
  * days with two or more stylists on duty one of them always stays free, so a new request for
  * tomorrow can be accepted. The times that the sample chats and pending requests are about stay free.
  * Sorted with the newest booking first, as the app adds new bookings to the top of the list.

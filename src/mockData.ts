@@ -8,7 +8,8 @@ import type {
 /**
  * The salon a new workspace starts with: team, services, profile and opening hours.
  * Everything here is fixed. Whatever depends on today's date (appointments, customers, chats,
- * requests, shifts) is built in src/demoSeed.ts, src/conversationData.ts and src/demoRequests.ts.
+ * requests, single days somebody works differently) is built in src/demoSeed.ts,
+ * src/conversationData.ts and src/demoRequests.ts.
  *
  * All people and contact details are invented. Phone numbers stay in the 555 block and e-mail
  * addresses on reserved example domains, so none of them can belong to anyone. Numbers are
@@ -16,6 +17,17 @@ import type {
  * The server reads this file too (server/ai.ts, server/bookingRules.ts): keep it free of imports.
  */
 
+type RegularWeek = NonNullable<Employee['weeklyHours']>;
+/** A regular week from its working days. A day that is not listed is a day off. */
+const regularWeek = (days: Partial<Record<keyof RegularWeek, [start: string, end: string]>>): RegularWeek => {
+  const hours = (day: keyof RegularWeek) => (days[day] ? { start: days[day][0], end: days[day][1] } : null);
+  return { mon: hours('mon'), tue: hours('tue'), wed: hours('wed'), thu: hours('thu'), fri: hours('fri'), sat: hours('sat'), sun: hours('sun') };
+};
+
+// Each stylist's regular week is stored on the stylist (weeklyHours), like the hours of anybody
+// the owner adds. Every working day lies inside the opening hours below, and together they cover
+// them: an early and a late stylist on weekdays. Anna 40 h, Selina 33.5 h, Luca 24 h.
+// Selina works on Saturdays: a sample chat moves an appointment with her to a Saturday.
 export const initialEmployees: Employee[] = [
   {
     id: 'emp-1',
@@ -30,6 +42,7 @@ export const initialEmployees: Employee[] = [
     canBookOnline: true,
     hidden: false,
     role: 'Owner',
+    weeklyHours: regularWeek({ tue: ['08:30', '17:00'], wed: ['08:30', '17:00'], thu: ['10:00', '18:30'], fri: ['10:00', '18:30'], sat: ['08:00', '14:00'] }),
   },
   {
     id: 'emp-2',
@@ -43,6 +56,7 @@ export const initialEmployees: Employee[] = [
     location: 'Bella Hair Salon',
     canBookOnline: true,
     hidden: false,
+    weeklyHours: regularWeek({ wed: ['10:00', '18:30'], thu: ['08:30', '17:00'], fri: ['08:30', '17:00'], sat: ['08:00', '16:00'] }),
   },
   {
     id: 'emp-3',
@@ -56,6 +70,7 @@ export const initialEmployees: Employee[] = [
     location: 'Bella Hair Salon',
     canBookOnline: true,
     hidden: false,
+    weeklyHours: regularWeek({ tue: ['10:00', '18:30'], fri: ['10:00', '18:30'], sat: ['09:00', '16:00'] }),
   },
 ];
 
@@ -91,33 +106,7 @@ export const initialServices: ServiceItem[] = [
   service('srv-10', 'Updo', 60, 110, true, seniors, 'Styling', 'Pinned-up styling for weddings and events.'),
 ];
 
-/**
- * Each stylist's regular week (0 = Sunday ... 6 = Saturday). Every shift lies inside the opening
- * hours below, and together they cover them: an early and a late stylist on weekdays.
- * Anna 40 h, Selina 33.5 h, Luca 24 h. Days that are not listed are days off.
- */
-export const demoShiftPattern: Record<string, Record<number, { start: string; end: string } | undefined>> = {
-  'emp-1': {
-    2: { start: '08:30', end: '17:00' },
-    3: { start: '08:30', end: '17:00' },
-    4: { start: '10:00', end: '18:30' },
-    5: { start: '10:00', end: '18:30' },
-    6: { start: '08:00', end: '14:00' },
-  },
-  'emp-2': {
-    3: { start: '10:00', end: '18:30' },
-    4: { start: '08:30', end: '17:00' },
-    5: { start: '08:30', end: '17:00' },
-    6: { start: '08:00', end: '16:00' },
-  },
-  'emp-3': {
-    2: { start: '10:00', end: '18:30' },
-    5: { start: '10:00', end: '18:30' },
-    6: { start: '09:00', end: '16:00' },
-  },
-};
-
-/** Avatar colours of the team in the shift plan, in the order of initialEmployees. */
+/** Avatar colours of the team in the week plan, in the order of initialEmployees. */
 export const demoShiftColors = ['bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-700', 'bg-sky-100 text-sky-700'];
 
 // The salon has no phone line, website or social pages of its own, so those fields stay empty:

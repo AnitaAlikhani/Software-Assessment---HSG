@@ -524,7 +524,8 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
 
   const renderChatAnswered = (item: Extract<InboxItem, { kind: 'chat-request-answered' }>) => {
     const { answer } = item;
-    const appointment = salon.events.find((event) => event.id === answer.appointmentId);
+    // Only while the appointment is still the chat's own: one given to another customer since is not offered from here.
+    const appointment = salon.events.find((event) => event.id === answer.appointmentId && event.conversationId === answer.id);
     // A customer can delete the chat at any time: then there is nothing to open or to try again.
     const chatIsThere = conversations.some((conversation) => conversation.id === answer.id);
     const retry = answer.delivery === 'failed' && onAcceptChatRequest && chatIsThere ? onAcceptChatRequest : null;
@@ -749,7 +750,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
                   ))}
                 </select>
                 {availableMoveSlots.length === 0 && (
-                  <p className="mt-2 text-xs text-slate-500" role="status">No available times for this employee and service on this date. Choose another date, or check the shift and the opening hours.</p>
+                  <p className="mt-2 text-xs text-slate-500" role="status">No available times for this employee and service on this date. Choose another date, or check the working hours and the opening hours.</p>
                 )}
               </div>
               {moveError && <p role="alert" className="text-xs text-rose-600 rounded-xl bg-rose-50 p-3">{moveError}</p>}

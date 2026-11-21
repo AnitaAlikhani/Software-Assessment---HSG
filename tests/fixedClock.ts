@@ -19,4 +19,10 @@ export const demoConversations = createDemoConversations('Europe/Zurich', FIXED_
 export const demoEvents = createDemoEvents('Europe/Zurich', FIXED_NOW);
 export const demoCustomers = createDemoCustomers('Europe/Zurich', FIXED_NOW, demoEvents);
 export const demoRequests = createDemoRequests('Europe/Zurich', FIXED_NOW, demoEvents);
+/**
+ * The week plan the salon starts with: one list per stylist for the single days that differ from
+ * their regular week, and none of them holds a day. Who works when comes from the stylists'
+ * regular hours (weeklyHours on initialEmployees) through workingTimeOn. A test that needs
+ * other hours or a day off on one date adds it to a copy of these lists.
+ */
 export const demoShifts = createDemoShifts('Europe/Zurich', FIXED_NOW);

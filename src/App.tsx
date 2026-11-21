@@ -11,6 +11,7 @@ import {
   BookingHoursDay,
   ClosedDate,
   StaffAbsence,
+  TimeBlock,
   ShiftEntry,
   Conversation,
   AiAssistantSettings,
@@ -40,34 +41,44 @@ import { ConversationsView } from './views/ConversationsView';
 import { AiAssistantView } from './views/AiAssistantView';
 import { PilotInterest } from './components/PilotInterest';
 import { AssistantPanel } from './components/AssistantPanel';
+import { AppointmentForm } from './components/AppointmentForm';
 import { SalonTimeNote } from './components/SalonTimeNote';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { bookingPageHead, ownerPageHead, usePageHead } from './pageHead';
-import { AppRoute, isOldAddress, parseRoute, routeForTab, routeHash, SCREEN_NAMES, type RetiredTab } from './navigation';
+import { AppRoute, calendarPlace, isOldAddress, parseRoute, routeForTab, routeHash, SCREEN_NAMES, type CalendarPlace, type RetiredTab } from './navigation';
 import { changeAddress, useBackClosesOverlays } from './backGesture';
 import { analyticsReport, type Period } from './analytics';
 import { downloadCsv } from './csv';
 import { PRODUCT_NAME } from './brand';
 import { formatDate } from './scheduling';
 import { getSalonNow, isOutsideOpeningHours, validateBookingRequest, validateCalendarEvent } from './availability';
-import { appointmentForConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
+import { dayChangesSummary, isValidDayChange, undoDayChanges, withDayChanges, withoutRegularDays, type DayChange } from './workingHours';
+import { withServicesOf } from './teamBooking';
+import { appointmentForConversation, belongsToConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
 import { answerIsShown, openRequestCount, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
 import { acceptedAppointmentState, checkRequest, movedRequest, planChatBooking } from './requestAnswers';
-import { announceRequest, applyBridgedRequest, listenForRequests } from './requestBridge';
+import { arrivedRequests, isRequestersAppointment, withOutcome, type RequestOutcomes } from './sharedRequests';
 import { BookingLinkCompact } from './components/BookingLinkCard';
 
 import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
-import { forgetRetiredDemoState, useDemoState } from './useDemoState';
+import { forgetRetiredDemoState, useDemoState, watchDemoState } from './useDemoState';
 import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
 import { chatBookingName, chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, upsertCustomer, validateContact, type ChatContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
+import { blockTitle, timeBlockProblem } from './timeBlocks';
+import { formatTimeRange } from './format';
 import { headerAccount } from './headerModels';
+import { savedMessage, type AppointmentFormRequest, type AppointmentSave } from './appointmentForm';
 
 // The starting data that depend on the date (calendar, customers, chats, requests, shifts) are
-// built together, for one moment, so that they agree. Only a tab with nothing stored needs them.
-let startingWorkspace: DemoWorkspace | null = null;
-const startingData = (): DemoWorkspace => (startingWorkspace ??= createDemoWorkspace());
+// built together, for one moment, so that they agree: the moment the stored salon was started,
+// which useDemoState hands in and every tab of this browser shares. Built once per such moment.
+let startingWorkspace: { builtAt: number; data: DemoWorkspace } | null = null;
+const startingData = (builtAt: Date): DemoWorkspace => {
+  if (startingWorkspace?.builtAt !== builtAt.getTime()) startingWorkspace = { builtAt: builtAt.getTime(), data: createDemoWorkspace(undefined, builtAt) };
+  return startingWorkspace.data;
+};
 
 export default function App() {
   const [publicMode, setPublicMode] = useState(new URLSearchParams(window.location.search).get('booking') === '1');
@@ -156,7 +167,7 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   // What the owner has just answered on Home. Home shows each answer in its request's place for a
-  // while, with "Undo". Kept with the tab's data: a phone that reloads the page after the owner
+  // while, with "Undo". Kept with the stored salon: a phone that reloads the page after the owner
   // has been in her messenger must not lose the card that says what to tell the customer.
   const [requestAnswers, setRequestAnswers] = useDemoState<RequestAnswer[]>('requestAnswers', []);
   // A confirmation that was on its way to a chat when the page was reloaded: its outcome is not
@@ -197,18 +208,17 @@ export default function App() {
   }, []);
 
   // Core application states
-  const [requests, setRequests] = useDemoState<AppointmentRequest[]>('requests', () => startingData().requests);
-  const [calendarEvents, setCalendarEvents] = useDemoState<CalendarEvent[]>('calendarEvents', () => startingData().events);
-  const [customers, setCustomers] = useDemoState<Customer[]>('customers', () => startingData().customers);
+  const [requests, setRequests] = useDemoState<AppointmentRequest[]>('requests', (builtAt) => startingData(builtAt).requests);
+  const [calendarEvents, setCalendarEvents] = useDemoState<CalendarEvent[]>('calendarEvents', (builtAt) => startingData(builtAt).events);
+  const [customers, setCustomers] = useDemoState<Customer[]>('customers', (builtAt) => startingData(builtAt).customers);
   const [employees, setEmployees] = useDemoState<Employee[]>('employees', initialEmployees);
   const [services, setServices] = useDemoState<ServiceItem[]>('services', initialServices);
   // "Rooms & equipment" is gone: a tab that was open before still holds its list, which is taken out.
   useEffect(() => forgetRetiredDemoState(), []);
-  const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', () => startingData().shifts);
+  const [shiftOverview, setShiftOverview] = useDemoState<ShiftEntry[]>('shifts', (builtAt) => startingData(builtAt).shifts);
   const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
-  const [calendarDate, setCalendarDate] = useState(() => getSalonNow(companySettings.timeZone).date);
   const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
-  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', () => startingData().conversations);
+  const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', (builtAt) => startingData(builtAt).conversations);
   // Real WhatsApp chats from the test number (only with a "?live=KEY" link); shown above the demo chats.
   // The public booking page is a customer's page: it never asks the server for them.
   const live = useLiveWhatsApp(!publicMode);
@@ -229,22 +239,53 @@ export default function App() {
 
   const [closedDates, setClosedDates] = useDemoState<ClosedDate[]>('closedDates', []);
   const [absences, setAbsences] = useDemoState<StaffAbsence[]>('absences', []);
+  // Time the owner keeps free for a stylist (a break, lunch): nothing can be booked in it.
+  const [timeBlocks, setTimeBlocks] = useDemoState<TimeBlock[]>('timeBlocks', []);
   const [bookingDraft, setBookingDraft] = useDemoState<BookingDraft>('draft', () => createBookingDraft(services, companySettings.timeZone));
   const [submittedRequest, setSubmittedRequest] = useDemoState<AppointmentRequest | null>('submittedRequest', null);
-  const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests, closedDates, absences, timeZone: companySettings.timeZone };
+  // What the owner answered to each request from the booking page. The customers' page, in
+  // another tab of this browser, reads it there: that is how it learns the answer (sharedRequests.ts).
+  const [, setRequestOutcomes] = useDemoState<RequestOutcomes>('requestOutcomes', {});
+  const availabilityContext = { services, employees, bookingHours, shiftOverview, events: calendarEvents, requests, closedDates, absences, timeBlocks, timeZone: companySettings.timeZone };
+  // The salon as it is now, for an Undo that is pressed a few seconds after its message appeared.
+  const latestSalon = useRef(availabilityContext);
+  latestSalon.current = availabilityContext;
 
   const needsAttention = allConversations.filter((c) => c.status === 'needs-attention');
   // The badge on Home counts what Home lists as requests: those from the booking page and those waiting in a chat.
   const openRequests = openRequestCount(requests, allConversations);
-  const openAppointment = (event: CalendarEvent) => {
-    setCalendarDate(event.date);
-    setSearchQuery('');
-    navigate({ tab: 'calendar', appointmentId: event.id });
-  };
+  // The calendar's day, view and filters are part of the address (src/navigation.ts), so reload,
+  // Back and a shared link restore them. An address without a day means today. While an
+  // appointment's details are open, the calendar behind them shows that appointment's day.
   const selectedCalendarEvent = calendarEvents.find(event => event.id === route.appointmentId);
-  useEffect(() => {
-    if (selectedCalendarEvent) setCalendarDate(selectedCalendarEvent.date);
-  }, [route.appointmentId, selectedCalendarEvent?.date]);
+  const salonToday = getSalonNow(companySettings.timeZone, now).date;
+  const calendarDate = selectedCalendarEvent?.date ?? route.date ?? salonToday;
+  /**
+   * Shows another day, view or filter in the calendar that is open. The address follows without
+   * a new history entry: Back leaves the calendar instead of walking through every day that was
+   * looked at. On another screen nothing happens; the calendar opens on today from there.
+   */
+  const showInCalendar = (change: CalendarPlace) => {
+    const current = openRoute.current;
+    if (current.tab !== 'calendar') return;
+    const { date, ...place } = calendarPlace({ ...current, ...change });
+    const next: AppRoute = { tab: 'calendar', ...place, ...(date && date !== getSalonNow(companySettings.timeZone).date ? { date } : {}) };
+    const hash = routeHash(next);
+    if (hash === routeHash(current)) return;
+    // At once, so that a second change in the same moment builds on this one.
+    openRoute.current = next;
+    setRoute(next);
+    // The address follows a moment later. The appointment form saves and closes in one step,
+    // and its own history entry has to be taken away first: written now, the new address would
+    // land on that entry and stay behind as a second calendar to go Back through.
+    window.setTimeout(() => { if (routeHash(openRoute.current) === hash) changeAddress(hash, true); }, 0);
+  };
+  const showCalendarDate = (date: string) => showInCalendar({ date });
+  const openAppointment = (event: CalendarEvent) => {
+    setSearchQuery('');
+    // The address names the appointment's day, so the calendar stays on it once the details are closed.
+    navigate({ tab: 'calendar', ...(event.date !== salonToday ? { date: event.date } : {}), appointmentId: event.id });
+  };
 
   const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -263,8 +304,12 @@ export default function App() {
     // Only the contact is stored. Visits and last appointments are counted from the calendar.
     setCustomers(previous => upsertCustomer(previous, customer));
     setCalendarEvents(previous => upsertAppointment(previous, saved));
-    setCalendarDate(saved.date);
-    setSubmittedRequest(previous => previous && `cal-${previous.id}` === saved.id ? {
+    // Booked beside the open calendar (the assistant in its drawer): the calendar shows the day at
+    // once. Under a form or a sheet it stays put: what covers it says where to go when it closes.
+    if (!document.querySelector('dialog[open]')) showCalendarDate(saved.date);
+    // The customers' page follows its accepted request, but only while the appointment is still
+    // that customer's: given to somebody else, it must not take over the other person's details.
+    setSubmittedRequest(previous => previous && `cal-${previous.id}` === saved.id && isRequestersAppointment(previous, saved) ? {
       ...previous, customerId: saved.customerId, customerName: saved.customerName, customerPhone: saved.customerPhone,
       date: saved.date, dateStr: formatDate(saved.date), timeStr: `${saved.startTime} - ${saved.endTime}`,
       serviceId: saved.serviceId, serviceName: saved.serviceName, employeeId: saved.employeeId, staffName: saved.staffName,
@@ -284,7 +329,7 @@ export default function App() {
 
     const newCalEvent = appointmentFromRequest(accepted, services, employees);
     setRequests((prev) => prev.filter((r) => r.id !== id));
-    setSubmittedRequest((previous) => previous?.id === id ? { ...accepted, status: 'accepted' } : previous);
+    setRequestOutcomes((previous) => withOutcome(previous, id, 'accepted'));
     commitCalendarEvent(newCalEvent);
     if (route.requestId === id) navigate({ tab: 'home' });
     setRequestAnswers((previous) => withAnswer(previous, { kind: 'request', id, outcome: 'accepted', at: Date.now(), request: accepted, index }));
@@ -296,7 +341,7 @@ export default function App() {
     if (index < 0) return;
     const request = requests[index];
     setRequests(previous => previous.filter(item => item.id !== id));
-    setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'rejected' } : previous);
+    setRequestOutcomes((previous) => withOutcome(previous, id, 'rejected'));
     if (route.requestId === id) navigate({ tab: 'home' });
     setRequestAnswers((previous) => withAnswer(previous, { kind: 'request', id, outcome: 'rejected', at: Date.now(), request, index }));
   };
@@ -324,7 +369,7 @@ export default function App() {
         : `The request cannot come back: ${why} If the customer still wants an appointment, add it by hand in the calendar.`;
       setRequests((previous) => answer.outcome === 'moved' ? previous.map((item) => item.id === id ? before : item) : restoreAt(previous, before, answer.index));
     }
-    setSubmittedRequest((previous) => previous?.id === id ? { ...before, status: 'pending' } : previous);
+    setRequestOutcomes((previous) => withOutcome(previous, id, null));
     setRequestAnswers((previous) => previous.filter((item) => item !== answer));
     return null;
   };
@@ -340,7 +385,6 @@ export default function App() {
     const { why } = checkRequest(availabilityContext, updatedRequest);
     if (why) return `${why} Choose another date or time.`;
     setRequests(previous => previous.map(item => item.id === id ? updatedRequest : item));
-    setSubmittedRequest((previous) => previous?.id === id ? updatedRequest : previous);
     // Moved twice in a row: "Undo" and the text for the customer still start from the time the
     // customer asked for. Moved back to that time: nothing is left to undo or to tell.
     const earlier = requestAnswers.find((item) => item.kind === 'request' && item.id === id && item.outcome === 'moved' && answerIsShown(item, new Date()));
@@ -351,27 +395,17 @@ export default function App() {
     return null;
   };
 
-  // The customers' page in another tab of this browser hands its requests over (requestBridge.ts):
-  // a request sent after "Open as customer" appears on Home here. The listener is set up once, so
-  // it reads the latest lists from a ref, and it writes its result back to the ref at once: two
-  // messages can arrive before the screen is drawn again, and the second must see the first.
-  const ownerLists = useRef({ requests, customers });
-  ownerLists.current = { requests, customers };
-  const calendarNow = useRef(calendarEvents);
-  calendarNow.current = calendarEvents;
-  const handedOver = useRef(new Set<string>());
+  // The customers' page in another tab of this browser ("Open as customer") shares the stored
+  // salon with this tab (useDemoState): a request sent there is in the list here by itself, and so
+  // are a change to it and its withdrawal. This tab only says that one has come in: for a request
+  // it has not shown before, never for its own changes and never for what was stored when it opened.
+  const seenRequests = useRef(new Set<string>());
+  for (const item of requests) seenRequests.current.add(item.id);
   useEffect(() => {
     if (publicMode) return;
-    return listenForRequests((message) => {
-      // Already handed over in this tab, or already an appointment: a second "new" adds nothing.
-      const answered = (id: string) => handedOver.current.has(id) || calendarNow.current.some((event) => event.id === appointmentIdForRequest(id));
-      const next = applyBridgedRequest(ownerLists.current, message, answered);
-      if (!next) return;
-      ownerLists.current = next;
-      if (message.kind === 'new') handedOver.current.add(message.request.id);
-      setRequests(next.requests);
-      setCustomers(next.customers);
-      if (message.kind === 'new') showToast(`New booking request from ${message.request.customerName}`, 'info');
+    return watchDemoState<AppointmentRequest[]>('requests', (before, after) => {
+      const arrived = arrivedRequests(before, after, seenRequests.current);
+      if (arrived.length > 0) showToast(arrived.length === 1 ? `New booking request from ${arrived[0].customerName}` : `${arrived.length} new booking requests`, 'info');
     });
   }, [publicMode]);
 
@@ -383,8 +417,6 @@ export default function App() {
     const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? new Date().toISOString() };
     setRequests((previous) => [saved, ...previous]);
     setCustomers((previous) => upsertCustomer(previous, customer));
-    // On the customers' page: hand the request to the owner's tab in this browser (requestBridge.ts).
-    if (publicMode) announceRequest({ kind: 'new', request: saved });
     showToast(`Booking request saved for ${request.customerName}`);
     return null;
   };
@@ -395,11 +427,12 @@ export default function App() {
     const error = validateContact(request.customerName, request.customerPhone ?? '') ?? validateBookingRequest(availabilityContext, request, request.id);
     if (error) return error;
     const customer = customerForRequest(customers, { ...request, customerId: existing.customerId });
-    const saved = { ...request, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? existing.createdAt };
+    // The customer's own change is a new wish: the request no longer stands at a time the salon suggested.
+    const { movedFrom: _suggestedBefore, ...wish } = request;
+    const saved = { ...wish, customerId: customer.id, customerPhone: customer.phone, isAiBooked: false, createdAt: request.createdAt ?? existing.createdAt };
     setRequests((previous) => previous.map((item) => item.id === saved.id ? saved : item));
     setCustomers((previous) => upsertCustomer(previous, customer));
     setSubmittedRequest(saved);
-    if (publicMode) announceRequest({ kind: 'updated', request: saved });
     showToast('Booking request updated');
     return null;
   };
@@ -408,7 +441,6 @@ export default function App() {
     if (!requests.some((item) => item.id === id && item.status === 'pending')) return 'This request is no longer pending.';
     setRequests((previous) => previous.filter((item) => item.id !== id));
     setSubmittedRequest((previous) => previous?.id === id ? { ...previous, status: 'cancelled' } : previous);
-    if (publicMode) announceRequest({ kind: 'cancelled', id });
     showToast('Booking request cancelled. The slot is available again.');
     return null;
   };
@@ -426,12 +458,21 @@ export default function App() {
     }
   };
 
-  // Home's "New appointment" ends in the appointment form, which lives inside the Calendar page:
-  // the page is opened with the wish to start adding, and takes it once (see CalendarView).
-  // Where no appointment can be added yet, the owner lands on the Calendar, which says why.
-  const [startNewAppointment, setStartNewAppointment] = useState(false);
-  // "New appointment" in the header and "+" in the tab bar on phones take the same way, from every screen.
-  const newAppointment = () => { if (setCurrentTab('calendar')) setStartNewAppointment(true); };
+  // The appointment form (src/components/AppointmentForm.tsx) is one form for the whole app, shown
+  // over the screen the owner is on: nothing jumps to the Calendar. Whoever wants an appointment
+  // added or changed calls openAppointmentForm, with what is known already: a customer, a place in
+  // the calendar (day, half hour, stylist, service), or the appointment to change.
+  const [appointmentForm, setAppointmentForm] = useState<{ request: AppointmentFormRequest; opening: number } | null>(null);
+  // Counted, so that every opening starts a fresh form.
+  const formOpenings = useRef(0);
+  const openAppointmentForm = (request: AppointmentFormRequest) => {
+    formOpenings.current += 1;
+    setAppointmentForm({ request, opening: formOpenings.current });
+  };
+  // "New appointment" in the header and "+" in the tab bar on phones, from every screen.
+  const newAppointment = () => openAppointmentForm({ kind: 'new' });
+  // The Calendar page still carries its own form and this wish to open it. Nothing sets the wish
+  // any more; it goes when the calendar hands its "Add" and "Edit" to openAppointmentForm.
 
   // Study tool (shown with the research switch only): a made-up request from the booking page,
   // so a study session has a fresh request to accept or decline.
@@ -480,47 +521,104 @@ export default function App() {
     };
     return { saved: commitCalendarEvent(newEv, chat) };
   };
+  /** Says that an appointment is stored. "View" opens it in the calendar, from whatever screen the owner is on. */
+  const announceAppointment = (message: string, saved: CalendarEvent) =>
+    showToast(message, 'success', { label: 'View', onClick: () => { setToast(null); openAppointment(saved); } });
   const saveCalendarEvent = (ev: Omit<CalendarEvent, 'id'>, id: string): string | null => {
+    const adding = !calendarEvents.some(event => event.id === id);
     const result = storeCalendarEvent(ev, id);
-    return 'error' in result ? result.error : null;
+    if ('error' in result) return result.error;
+    announceAppointment(`Appointment ${adding ? 'added' : 'updated'} for ${ev.customerName}`, result.saved);
+    return null;
   };
-  const handleAddCalendarEvent = (ev: Omit<CalendarEvent, 'id'>): string | null => {
-    const error = saveCalendarEvent(ev, `cal-${crypto.randomUUID()}`);
-    if (!error) showToast(`Appointment added for ${ev.customerName}`);
-    return error;
-  };
+  const handleAddCalendarEvent = (ev: Omit<CalendarEvent, 'id'>): string | null => saveCalendarEvent(ev, `cal-${crypto.randomUUID()}`);
   const handleUpdateCalendarEvent = (id: string, ev: Omit<CalendarEvent, 'id'>): string | null => {
     if (!calendarEvents.some(event => event.id === id)) return 'This appointment no longer exists.';
-    const error = saveCalendarEvent(ev, id);
-    if (!error) showToast(`Appointment updated for ${ev.customerName}`);
-    return error;
+    return saveCalendarEvent(ev, id);
+  };
+  /**
+   * Saves what the appointment form holds: the appointment with the customer's record as the
+   * owner picked or entered it. A time outside the usual hours changes nobody's working hours.
+   * Returns why it could not be saved; the form shows that.
+   */
+  const handleSaveAppointment = (save: AppointmentSave): string | null => {
+    if (save.appointmentId !== null && !calendarEvents.some(event => event.id === save.appointmentId)) {
+      return 'This appointment is no longer in the calendar. It may have been cancelled in the meantime.';
+    }
+    const result = storeCalendarEvent(save.event, save.appointmentId ?? `cal-${crypto.randomUUID()}`,
+      save.customer ? { record: save.customer } : undefined);
+    if ('error' in result) return result.error;
+    // A first number goes onto the customer's other appointments, requests and chat too, as an edit in Customers does.
+    if (save.customer && save.addsPhone) handleUpdateCustomer(save.customer.id, { phone: save.customer.phone });
+    // Last, so that this is the message that stays: the change above announces itself.
+    announceAppointment(savedMessage(save, result.saved), result.saved);
+    return null;
   };
 
   const handleDeleteCalendarEvent = (id: string) => {
-    setCalendarEvents(calendarEvents.filter((e) => e.id !== id));
+    const index = calendarEvents.findIndex((e) => e.id === id);
+    if (index < 0) return;
+    const removed = calendarEvents[index];
+    setCalendarEvents((previous) => previous.filter((e) => e.id !== id));
     setSubmittedRequest((previous) => previous && `cal-${previous.id}` === id ? { ...previous, status: 'cancelled' } : previous);
-    showToast('Appointment removed from calendar');
+    // One tap removes an appointment, so the message offers the way back, as it does for customers and blocks.
+    showToast(`Appointment of ${removed.customerName} removed from the calendar`, 'info', { label: 'Undo', onClick: () => {
+      const now = latestSalon.current;
+      if (now.events.some((event) => event.id === removed.id)) { setToast(null); return; }
+      // Somebody else may have got the time meanwhile: then the appointment cannot simply come back.
+      const sameStylist = (record: { employeeId?: string; staffName?: string }) =>
+        removed.employeeId !== undefined ? record.employeeId === removed.employeeId : record.staffName === removed.staffName;
+      const taken = now.events.some((event) => event.date === removed.date && sameStylist(event) && event.startTime < removed.endTime && event.endTime > removed.startTime)
+        || (now.timeBlocks ?? []).some((block) => block.date === removed.date && block.employeeId === removed.employeeId && block.startTime < removed.endTime && block.endTime > removed.startTime);
+      if (taken) { showToast('The appointment cannot be put back: the time has been taken meanwhile. Add it again at another time.', 'error'); return; }
+      setCalendarEvents((previous) => previous.some((event) => event.id === removed.id) ? previous : restoreAt(previous, removed, index));
+      setToast(null);
+    } });
   };
 
-  // Shifts (Team › This week)
-  const handleUpdateShift = (employeeId: string, date: string, shift: { start: string; end: string } | null) => {
-    const employee = employees.find((item) => item.id === employeeId);
-    if (!employee || (shift && shift.end <= shift.start)) return;
-    setShiftOverview((prev) => {
-      if (!prev.some((item) => item.employeeId === employeeId)) {
-        return [...prev, {
-          employeeId,
-          employeeName: employee.name,
-          initials: employee.initials,
-          avatarColor: 'bg-indigo-100 text-indigo-700',
-          shifts: { [date]: shift },
-        }];
-      }
-      return prev.map((item) => item.employeeId === employeeId
-        ? { ...item, shifts: { ...item.shifts, [date]: shift } }
-        : item);
-    });
-    showToast(shift ? `Shift saved for ${employee.name}` : `${employee.name} is unavailable on ${formatDate(date, { weekday: 'long' })}`);
+  // Time blocks (Calendar › Block time). A block is checked like a booking would be: it may not
+  // cover an appointment or a waiting request. Removing one asks nothing and offers Undo instead.
+  const handleSaveTimeBlock = (values: Omit<TimeBlock, 'id'>, original?: TimeBlock): string | null => {
+    if (original && !timeBlocks.some((item) => item.id === original.id)) return 'This block no longer exists.';
+    const problem = timeBlockProblem({ ...availabilityContext, now: new Date() }, values, original);
+    if (problem) return problem;
+    const name = employees.find((item) => item.id === values.employeeId)?.name ?? 'the stylist';
+    if (original) {
+      setTimeBlocks((previous) => previous.map((item) => item.id === original.id ? { ...values, id: original.id } : item));
+      showToast(`Block changed: ${name}, ${formatDate(values.date)}, ${formatTimeRange(values.startTime, values.endTime)}`);
+    } else {
+      setTimeBlocks((previous) => [...previous, { ...values, id: `block-${crypto.randomUUID()}` }]);
+      showToast(`${blockTitle(values)} blocked for ${name}: ${formatDate(values.date)}, ${formatTimeRange(values.startTime, values.endTime)}`);
+    }
+    return null;
+  };
+  const handleRemoveTimeBlock = (id: string) => {
+    const index = timeBlocks.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const removed = timeBlocks[index];
+    setTimeBlocks((previous) => previous.filter((item) => item.id !== id));
+    showToast('Block removed', 'info', { label: 'Undo', onClick: () => {
+      // Something may have been booked into the freed time meanwhile: then the block cannot come back.
+      const problem = timeBlockProblem({ ...latestSalon.current, now: new Date() }, removed, removed);
+      if (problem) { showToast(`The block cannot be put back. ${problem}`, 'error'); return; }
+      setTimeBlocks((previous) => restoreAt(previous, removed, index));
+      setToast(null);
+    } });
+  };
+
+  // Working hours of single days (Team › This week). A person's regular week is part of the
+  // person; what is stored here are the days that differ: other hours, or a day off. A day that
+  // is set back to its regular hours is taken out again. `note` says what happened when several
+  // days change at once ("Copy last week"); such a change can be undone in one tap.
+  const handleUpdateShift = (changes: DayChange[], note?: string) => {
+    const valid = changes.filter((change) => isValidDayChange(change) && employees.some((item) => item.id === change.employeeId));
+    if (valid.length === 0) return;
+    const before = undoDayChanges(shiftOverview, valid);
+    setShiftOverview((prev) => withDayChanges(prev, employees, valid));
+    showToast(note ?? dayChangesSummary(valid, employees), 'success', note !== undefined || valid.length > 1 ? {
+      label: 'Undo',
+      onClick: () => { setShiftOverview((prev) => withDayChanges(prev, employees, before)); setToast(null); },
+    } : undefined);
   };
 
   // Customers
@@ -561,6 +659,11 @@ export default function App() {
   const handleUpdateCustomer = (id: string, partial: Partial<Customer>) => {
     const customer = customers.find(item => item.id === id);
     if (!customer) return;
+    // The note concerns the record alone; the profile says itself that it was saved.
+    if (Object.keys(partial).every(key => key === 'note')) {
+      setCustomers(previous => previous.map(item => item.id === id ? { ...item, note: partial.note } : item));
+      return;
+    }
     const updated = { ...customer, ...partial, id };
     updated.initials = updated.name.trim().split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     setCustomers(previous => previous.map(item => item.id === id ? updated : item));
@@ -576,9 +679,12 @@ export default function App() {
   };
 
   // Employees
+  // `serviceIds`: the services ticked in the person's form. The new person's id goes back to the
+  // form, which then says what is still missing before customers can book them.
   const handleAddEmployee = (
-    emp: Omit<Employee, 'id' | 'initials' | 'name'>
-  ) => {
+    emp: Omit<Employee, 'id' | 'initials' | 'name'>,
+    serviceIds: string[] = [],
+  ): string => {
     const fullName = `${emp.firstName} ${emp.lastName}`.trim();
     const initials = `${emp.firstName[0] || ''}${emp.lastName[0] || ''}`.toUpperCase();
     const newEmployee: Employee = {
@@ -588,7 +694,9 @@ export default function App() {
       initials: initials || 'EM',
     };
     setEmployees([...employees, newEmployee]);
+    assignServices(newEmployee.id, serviceIds);
     showToast(`Employee ${fullName} added`);
+    return newEmployee.id;
   };
 
   /** Why a person cannot be deleted right now: appointments or pending requests still use them. */
@@ -608,6 +716,9 @@ export default function App() {
     setEmployees((previous) => previous.filter((e) => e.id !== id));
     setShiftOverview(previous => previous.filter(item => item.employeeId !== id));
     setAbsences(previous => previous.filter(item => item.employeeId !== id));
+    // Blocked times belong to the person: they go with them, and come back with "Undo".
+    const removedBlocks = timeBlocks.filter(block => block.employeeId === id);
+    setTimeBlocks(previous => previous.filter(block => block.employeeId !== id));
     setServices(previous => previous.map(service => {
       const assignedEmployeeIds = service.assignedEmployeeIds?.filter(employeeId => employeeId !== id);
       return { ...service, assignedEmployeeIds, assignedEmployeesCount: assignedEmployeeIds?.length ?? 0 };
@@ -617,6 +728,7 @@ export default function App() {
       setShiftOverview(previous => removedShifts.reduce((restored, { entry, index }) =>
         restored.some(item => item.employeeId === entry.employeeId) ? restored : [...restored.slice(0, index), entry, ...restored.slice(index)], previous));
       setAbsences(previous => removedAbsences.reduce((restored, { entry, index }) => restoreAt(restored, entry, index), previous));
+      setTimeBlocks(previous => [...previous, ...removedBlocks.filter(block => !previous.some(item => item.id === block.id))]);
       setServices(previous => previous.map(service => {
         const assignmentIndex = serviceAssignments.get(service.id);
         if (assignmentIndex === undefined || service.assignedEmployeeIds?.includes(id)) return service;
@@ -629,14 +741,16 @@ export default function App() {
     return null;
   };
 
-  const handleUpdateEmployee = (id: string, partial: Partial<Employee>) => {
+  const handleUpdateEmployee = (id: string, partial: Partial<Employee>, serviceIds?: string[]) => {
     const employee = employees.find(item => item.id === id);
     if (!employee) return;
+    if (serviceIds) assignServices(id, serviceIds);
     const updated = { ...employee, ...partial, id };
     updated.name = `${updated.firstName} ${updated.lastName}`.trim();
     updated.initials = `${updated.firstName[0] ?? ''}${updated.lastName[0] ?? ''}`.toUpperCase();
     setEmployees(previous => previous.map(item => item.id === id ? updated : item));
-    setShiftOverview(previous => previous.map(item => item.employeeId === id ? { ...item, employeeName: updated.name, initials: updated.initials } : item));
+    // A changed regular week can make a single day that was entered earlier regular again: such days leave the plan.
+    setShiftOverview(previous => withoutRegularDays(previous.map(item => item.employeeId === id ? { ...item, employeeName: updated.name, initials: updated.initials } : item), updated));
     const rename = <T extends AppointmentRequest | CalendarEvent>(item: T): T =>
       item.employeeId === id || (!item.employeeId && item.staffName === employee.name) ? { ...item, employeeId: id, staffName: updated.name } : item;
     setRequests(previous => previous.map(rename));
@@ -673,6 +787,10 @@ export default function App() {
     showToast('Service updated');
   };
 
+  // The services a person offers, as ticked in their form in Team. A service's own form writes the same list.
+  const assignServices = (employeeId: string, serviceIds: string[]) =>
+    setServices((previous) => withServicesOf(previous, employeeId, serviceIds));
+
   const handleDeleteService = (id: string) => {
     const index = services.findIndex((s) => s.id === id);
     if (index < 0) return;
@@ -707,9 +825,9 @@ export default function App() {
   const conversationOfCustomer = (customer: Customer) => allConversations.find((c) =>
     c.customerId === customer.id || (customer.conversationId !== undefined && c.id === customer.conversationId));
   const customersWithChat = new Set(customers.filter(conversationOfCustomer).map((customer) => customer.id));
-  /** The chat an appointment was booked or changed in, if it still exists. */
+  /** The chat an appointment was booked or changed in, if it still exists and the appointment is still its own. */
   const conversationOfAppointment = (event: CalendarEvent) => allConversations.find((c) =>
-    (event.conversationId !== undefined && c.id === event.conversationId) || c.appointmentId === event.id) ?? null;
+    (event.conversationId !== undefined && c.id === event.conversationId) || (c.appointmentId === event.id && belongsToConversation(event, c))) ?? null;
 
   const openChatForCustomer = (customerId: string) => {
     const customer = customers.find((item) => item.id === customerId);
@@ -947,7 +1065,7 @@ export default function App() {
               onAcceptChatRequest={(id) => handleConfirmLiveBooking(id, true)}
               onSimulateNewRequest={handleSimulateNewRequest}
               now={now}
-              onOpenCalendar={() => { setCalendarDate(getSalonNow(companySettings.timeZone).date); setCurrentTab('calendar'); }}
+              onOpenCalendar={() => setCurrentTab('calendar')}
               onOpenAnalytics={() => setCurrentTab('analytics')}
               conversations={allConversations}
               onOpenConversations={openConversation}
@@ -966,18 +1084,23 @@ export default function App() {
               requests={requests}
               closedDates={closedDates}
               absences={absences}
+              timeBlocks={timeBlocks}
+              onSaveTimeBlock={handleSaveTimeBlock}
+              onRemoveTimeBlock={handleRemoveTimeBlock}
               timeZone={companySettings.timeZone}
-              date={selectedCalendarEvent?.date ?? calendarDate}
+              date={calendarDate}
+              view={route.view}
+              staffFilter={route.staff}
+              serviceFilter={route.service}
+              now={now}
               selectedEventId={route.appointmentId ?? null}
-              onSelectEvent={event => event ? openAppointment(event) : navigate({ tab: 'calendar' }, { replace: true })}
-              onDateChange={date => { setCalendarDate(date); if (route.appointmentId) navigate({ tab: 'calendar' }); }}
-              onAddEvent={handleAddCalendarEvent}
-              onUpdateEvent={handleUpdateCalendarEvent}
+              onSelectEvent={event => navigate({ ...route, appointmentId: event?.id }, { replace: !event })}
+              onDateChange={showCalendarDate}
+              onPlaceChange={showInCalendar}
               onDeleteEvent={handleDeleteCalendarEvent}
               conversationFor={conversationOfAppointment}
               onOpenConversation={openConversation}
-              startAdding={startNewAppointment}
-              onStartedAdding={() => setStartNewAppointment(false)}
+              onOpenAppointmentForm={openAppointmentForm}
             />
           )}
 
@@ -991,6 +1114,11 @@ export default function App() {
               onDeleteEmployee={handleDeleteEmployee}
               deletionBlocker={employeeDeletionBlocker}
               companyName={companySettings.companyName}
+              services={services}
+              bookingHours={bookingHours}
+              events={calendarEvents}
+              requests={requests}
+              onOpenServices={() => setCurrentTab('services')}
               shiftOverview={shiftOverview}
               onUpdateShift={handleUpdateShift}
               absences={absences}
@@ -1008,12 +1136,15 @@ export default function App() {
               timeZone={companySettings.timeZone}
               customersWithChat={customersWithChat}
               selectedCustomerId={route.customerId ?? null}
-              onClearSelection={() => navigate({ tab: 'customers' })}
+              onClearSelection={(options) => navigate({ tab: 'customers' }, options)}
+              onOpenCustomer={(id) => navigate({ tab: 'customers', customerId: id })}
               onAddCustomer={handleAddCustomer}
               onUpdateCustomer={handleUpdateCustomer}
               onDeleteCustomer={handleDeleteCustomer}
               cannotDelete={(customer) => deletionDependency('customer', customer.id, customer.name, calendarEvents, requests)}
               onOpenChat={openChatForCustomer}
+              onNewAppointment={(customerId) => openAppointmentForm({ kind: 'new', customerId })}
+              onOpenAppointment={openAppointment}
             />
           )}
 
@@ -1129,10 +1260,20 @@ export default function App() {
         onAddEvent={handleAddCalendarEvent}
         onDeleteEvent={handleDeleteCalendarEvent}
         onSaveClosedDates={setClosedDates}
-        onOpenCalendar={(date) => { setCalendarDate(date); navigate({ tab: 'calendar' }); }}
+        onOpenCalendar={(date) => { if (currentTab === 'calendar') showCalendarDate(date); else navigate({ tab: 'calendar', ...(date !== salonToday ? { date } : {}) }); }}
         onResultShown={() => setToast(null)}
+      />
+
+      {/* The appointment form: one for the whole app, over whatever screen is open (see openAppointmentForm). */}
+      <AppointmentForm
+        key={appointmentForm?.opening}
+        request={appointmentForm?.request ?? null}
+        salon={availabilityContext}
+        customers={customers}
+        onSave={handleSaveAppointment}
+        onClose={() => setAppointmentForm(null)}
+        onOpenScreen={(screen) => { setAppointmentForm(null); setCurrentTab(screen); }}
       />
     </div>
   );
 }
-

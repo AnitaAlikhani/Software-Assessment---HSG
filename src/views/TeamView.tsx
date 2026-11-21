@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Check, Plus, Trash2 } from 'lucide-react';
-import { Employee, ShiftEntry, StaffAbsence, TeamSubTab } from '../types';
+import { AppointmentRequest, BookingHoursDay, CalendarEvent, Employee, ServiceItem, ShiftEntry, StaffAbsence, TeamSubTab } from '../types';
 import { TEAM_TABS } from '../navigation';
 import { formatDateRange } from '../format';
 import { dateRangeFieldClass, useDateRangeForm } from '../dateRangeForm';
 import { SectionTabs, sectionPanel } from '../components/SectionTabs';
+import type { FormSection } from '../teamBooking';
+import type { DayChange } from '../workingHours';
 import { EmployeesView } from './EmployeesView';
 import { ShiftPlanView } from './ShiftPlanView';
 
@@ -13,15 +15,27 @@ interface TeamViewProps {
   tab?: TeamSubTab;
   onTabChange?: (tab: TeamSubTab) => void;
   employees: Employee[];
-  onAddEmployee: (employee: Omit<Employee, 'id' | 'initials' | 'name'>) => void;
-  onUpdateEmployee: (id: string, employee: Partial<Employee>) => void;
+  /** Adds the person with the services ticked in their form. Gives back the new person's id where the app has one. */
+  onAddEmployee: (employee: Omit<Employee, 'id' | 'initials' | 'name'>, serviceIds: string[]) => string | void;
+  onUpdateEmployee: (id: string, employee: Partial<Employee>, serviceIds?: string[]) => void;
   /** Deletes the person, or returns why that is not possible. */
   onDeleteEmployee: (id: string) => string | null | void;
   /** Why a person cannot be deleted right now, or null. */
   deletionBlocker?: (employee: Employee) => string | null;
   companyName?: string;
+  /** The salon's services and opening hours: a person's form ticks services and starts with the opening hours. */
+  services?: ServiceItem[];
+  bookingHours?: BookingHoursDay[];
+  /** The calendar: a changed day says which appointments it leaves outside the working hours. */
+  events?: CalendarEvent[];
+  /** The waiting requests: changed hours also say which of them could no longer be accepted. */
+  requests?: AppointmentRequest[];
+  /** Leads to Services, from a person's form in a salon that has no service yet. */
+  onOpenServices?: () => void;
+  /** The single days that differ from people's regular hours. */
   shiftOverview: ShiftEntry[];
-  onUpdateShift: (employeeId: string, date: string, shift: { start: string; end: string } | null) => void;
+  /** Stores changes to single days. `note` says what happened when several days change at once. */
+  onUpdateShift: (changes: DayChange[], note?: string) => void;
   absences: StaffAbsence[];
   onSaveAbsences: (items: StaffAbsence[]) => void;
   timeZone?: string;
@@ -33,10 +47,12 @@ interface TeamViewProps {
 
 /**
  * Team: the one place that decides who works when. "People" is the list of the salon's people,
- * "This week" their shifts, "Absences" the days somebody is away.
+ * each with their regular working hours and services; "This week" shows the hours of every day
+ * and changes single days; "Absences" holds the days somebody is away.
  */
 export const TeamView: React.FC<TeamViewProps> = ({
   tab, onTabChange, employees, onAddEmployee, onUpdateEmployee, onDeleteEmployee, deletionBlocker, companyName,
+  services, bookingHours, events, requests, onOpenServices,
   shiftOverview, onUpdateShift, absences, onSaveAbsences, timeZone, now, onUnsavedChange,
 }) => {
   // Without an owner of the tab (a test, a page that does not keep it in the address) the page keeps it itself.
@@ -46,6 +62,9 @@ export const TeamView: React.FC<TeamViewProps> = ({
   // The form for one person takes the whole page: title and tabs step aside until it is closed.
   const [editingPerson, setEditingPerson] = useState(false);
   const formOpen = editingPerson && activeTab === 'people';
+  // "This week" leads to a person's regular hours: People opens with that person's form at that part.
+  const [personToOpen, setPersonToOpen] = useState<{ id: string; section: FormSection } | null>(null);
+  const editRegularHours = (id: string) => { setPersonToOpen({ id, section: 'hours' }); showTab('people'); };
 
   return (
     <div className="min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -58,10 +77,14 @@ export const TeamView: React.FC<TeamViewProps> = ({
       <div {...(formOpen ? {} : sectionPanel('team', activeTab))}>
         {activeTab === 'people' && (
           <EmployeesView employees={employees} onAddEmployee={onAddEmployee} onUpdateEmployee={onUpdateEmployee}
-            onDeleteEmployee={onDeleteEmployee} deletionBlocker={deletionBlocker} companyName={companyName} onEditingChange={setEditingPerson} onUnsavedChange={onUnsavedChange} />
+            onDeleteEmployee={onDeleteEmployee} deletionBlocker={deletionBlocker} companyName={companyName}
+            services={services} bookingHours={bookingHours} shiftOverview={shiftOverview} events={events} requests={requests} timeZone={timeZone} now={now} onOpenServices={onOpenServices}
+            open={personToOpen} onOpened={() => setPersonToOpen(null)}
+            onEditingChange={setEditingPerson} onUnsavedChange={onUnsavedChange} />
         )}
         {activeTab === 'week' && (
-          <ShiftPlanView employees={employees} shiftOverview={shiftOverview} onUpdateShift={onUpdateShift} timeZone={timeZone} now={now} />
+          <ShiftPlanView employees={employees} shiftOverview={shiftOverview} onUpdateShift={onUpdateShift} timeZone={timeZone} now={now}
+            events={events} requests={requests} absences={absences} onEditRegularHours={editRegularHours} />
         )}
         {activeTab === 'absences' && (
           <AbsencesPanel employees={employees} absences={absences} onSaveAbsences={onSaveAbsences} timeZone={timeZone} now={now} />

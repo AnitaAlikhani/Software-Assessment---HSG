@@ -122,7 +122,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({ services, employees,
           <Plus className="w-3.5 h-3.5" /><span>New Service</span>
         </button>
       </div>
-      <p className="text-sm text-slate-500">Choose which employees provide each service. Their shifts, availability and preparation time determine the bookable slots.</p>
+      <p className="text-sm text-slate-500">Choose which employees provide each service. Their working hours and the preparation time decide which times can be booked.</p>
       {/* Phones: one card per service with every setting reachable without sideways scrolling */}
       <div className="space-y-2 md:hidden" aria-label="Services">
         {services.map((service) => {

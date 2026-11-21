@@ -1,6 +1,24 @@
 import type { NavigationTab, SettingsSubTab, TeamSubTab } from './types';
 
-export interface AppRoute {
+/** The three ways the calendar shows its appointments. */
+export type CalendarViewMode = 'day' | 'week' | 'list';
+
+/**
+ * What the calendar shows: its view, its day and its filters. Each is left out while the
+ * calendar decides it itself: the day view on phones and the week on wider screens, today, and
+ * everybody's appointments for every service.
+ */
+export interface CalendarPlace {
+  view?: CalendarViewMode;
+  /** The day shown (day view), or any day of the week shown. YYYY-MM-DD. */
+  date?: string;
+  /** Only this stylist's appointments: the employee's id. */
+  staff?: string;
+  /** Only appointments for this service: the service's id. */
+  service?: string;
+}
+
+export interface AppRoute extends CalendarPlace {
   tab: NavigationTab;
   requestId?: string;
   customerId?: string;
@@ -53,6 +71,13 @@ export const SETTINGS_TABS: { id: SettingsSubTab; label: string }[] = [
 ];
 const sectionsOf: Partial<Record<NavigationTab, { id: string }[]>> = { team: TEAM_TABS, settings: SETTINGS_TABS };
 
+/** The calendar's views, in the order of its switcher. */
+export const CALENDAR_VIEWS: { id: CalendarViewMode; label: string }[] = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'list', label: 'List' },
+];
+
 /** Screens that moved or went, by the name their address had. */
 export type RetiredTab = 'employees' | 'shift-plan' | 'booking-page' | 'resources';
 
@@ -78,6 +103,29 @@ const sectionFor = (tab: NavigationTab, section: string | null | undefined): App
   return known && section && known.slice(1).some((item) => item.id === section) ? section as AppRoute['section'] : undefined;
 };
 
+const isCalendarView = (value: string | null | undefined): value is CalendarViewMode =>
+  CALENDAR_VIEWS.some((view) => view.id === value);
+
+/** True for a day that exists, written YYYY-MM-DD: an address may carry anything. */
+const isDay = (value: string | null | undefined): value is string => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === value;
+};
+
+/**
+ * The calendar's part of a route: view, day and filters, each only when it holds something the
+ * calendar can show. The same check reads an address and writes one, so what is written can
+ * always be read back.
+ */
+export const calendarPlace = (source: { view?: string | null; date?: string | null; staff?: string | null; service?: string | null }): CalendarPlace => ({
+  ...(isCalendarView(source.view) ? { view: source.view } : {}),
+  ...(isDay(source.date) ? { date: source.date } : {}),
+  ...(source.staff ? { staff: source.staff } : {}),
+  ...(source.service ? { service: source.service } : {}),
+});
+const calendarKeys = ['view', 'date', 'staff', 'service'] as const;
+
 /** True for the address of a screen that moved. The app then shows the new address in its place. */
 export const isOldAddress = (hash: string): boolean => MOVED.has(pathOf(hash));
 
@@ -93,11 +141,19 @@ export function parseRoute(hash: string): AppRoute {
   const key = targetForTab[tab as keyof typeof targetForTab];
   const id = key ? parameters.get(key) : null;
   const section = sectionFor(tab, parameters.get('tab'));
-  return { tab, ...(id ? { [key]: id } : {}), ...(section ? { section } : {}) };
+  // "#/calendar?view=day&date=2026-11-19&staff=emp-2&service=srv-2": what the calendar shows.
+  const place = tab === 'calendar'
+    ? calendarPlace({ view: parameters.get('view'), date: parameters.get('date'), staff: parameters.get('staff'), service: parameters.get('service') })
+    : {};
+  return { tab, ...place, ...(id ? { [key]: id } : {}), ...(section ? { section } : {}) };
 }
 
 export function routeHash(route: AppRoute): string {
   const parameters = new URLSearchParams();
+  if (route.tab === 'calendar') {
+    const place = calendarPlace(route);
+    for (const name of calendarKeys) if (place[name]) parameters.set(name, place[name]);
+  }
   const key = targetForTab[route.tab as keyof typeof targetForTab];
   const id = key && route[key];
   if (id) parameters.set(key, id);

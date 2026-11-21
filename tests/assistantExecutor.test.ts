@@ -147,8 +147,9 @@ test('the next free time is found by asking the rules day by day', () => {
   assert.match(said(ask({ intent: 'availability', serviceId: COLOURING.id, fromDate: '2026-10-12' }, away)),
     /is on Wednesday, 14\.10\.2026 at 10:00 with Luca\./);
 
-  const noShifts = salon({ shiftOverview: [] });
-  const none = ask({ intent: 'availability', serviceId: HAIRCUT.id }, noShifts);
+  // Nobody has working hours: nothing falls back to the opening hours.
+  const noHours = salon({ employees: [SELINA, LUCA].map(person => ({ ...person, weeklyHours: undefined })) });
+  const none = ask({ intent: 'availability', serviceId: HAIRCUT.id }, noHours);
   assert.equal(none.tone, 'problem');
   assert.match(said(none), /no free time for Haircut in the next 90 days/);
 });

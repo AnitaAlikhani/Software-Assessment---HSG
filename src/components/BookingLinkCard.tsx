@@ -163,9 +163,9 @@ export const BookingLinkCard: React.FC<BookingLinkCardProps> = ({ address: given
               {copyState === 'copied' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
               {copyState === 'copied' ? 'Copied' : 'Copy link'}
             </button>
-            {/* rel="opener": the new tab starts as a copy of what this tab holds, so the page shows
-                the salon as it is set up here (name, services, opening hours) and not the starting data. */}
-            <a href={address} target="_blank" rel="opener" className={quietButton}>
+            {/* rel="noopener": the new tab starts without what belongs to this tab alone (a reply that
+                was begun, a booking draft). The salon itself reaches it through the browser's storage. */}
+            <a href={address} target="_blank" rel="noopener" className={quietButton}>
               Open as customer<ExternalLink className="h-4 w-4" aria-hidden="true" /><span className="sr-only"> (opens in a new tab)</span>
             </a>
           </div>
@@ -173,10 +173,10 @@ export const BookingLinkCard: React.FC<BookingLinkCardProps> = ({ address: given
           <p className="rounded-xl bg-indigo-50 p-3 text-xs leading-relaxed text-indigo-900">
             Requests from this page wait on Home for your answer. Nothing is booked until you accept.
           </p>
-          {/* Study tool: the sample workspace lives in one browser tab, and a study session should know it. */}
+          {/* Study tool: the sample workspace lives in this one browser, and a study session should know how far it reaches. */}
           {researchMode() && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-              Demo workspace: every browser tab keeps its own data. A request sent in the tab that “Open as customer” opens is handed to this tab and shows up on Home. Another device is not reached, and the customer's page does not learn your answer.
+              Demo workspace: its data are kept in this browser and shared by all its tabs. A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject. Another browser or device is not reached.
             </p>
           )}
         </div>

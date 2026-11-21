@@ -133,14 +133,14 @@ export const Header: React.FC<HeaderProps> = ({
         <Logo size="compact" nameClassName="hidden" />
         <span className="min-w-0 truncate text-base font-bold tracking-tight text-slate-900">{title}</span>
         {research && (
-          <span title="Changes stay in this browser tab"
+          <span title="Changes are kept in this browser"
             className="hidden shrink-0 items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 min-[360px]:inline-flex">
             Demo
           </span>
         )}
       </div>
       {research && (
-        <span title="Changes stay in this browser tab"
+        <span title="Changes are kept in this browser"
           className="hidden shrink-0 items-center whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 lg:inline-flex">
           Demo&nbsp;workspace<span className="hidden xl:inline">&nbsp;· sample data</span>
         </span>

@@ -8,6 +8,7 @@ import { nextUpcomingAppointment } from '../dashboard';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, getSalonNow, salonTimeZone, startOfWeek } from '../scheduling';
 import type { CalendarEvent, ClosedDate, Customer, Employee, ServiceItem } from '../types';
 import { formatPhone, formatTimeRange } from '../format';
+import { workingDayOn } from '../workingHours';
 import { bookingHoursDay, dayLabel, dayPhrase, dayRange, daysBetween, shortDay, weekdayName } from './dates';
 import { fold } from './interpret';
 import { refusalIn } from './refusals';
@@ -152,7 +153,7 @@ const obstacleOf = (refusal: string): Obstacle =>
     : /closed on this date\. Please/.test(refusal) ? 'closedDate'
     : /closed on this date/.test(refusal) ? 'closedWeekday'
     : /is away/.test(refusal) ? 'away'
-    : /no shift|no working time/.test(refusal) ? 'noShift'
+    : /does not work|no working time/.test(refusal) ? 'noShift'
     : /This time is not available/.test(refusal) ? 'taken'
     : 'other';
 
@@ -180,7 +181,7 @@ function explain(data: AssistantData, date: string, service: ServiceItem, staff:
     const name = short(employee);
     if (obstacle === 'away') return de ? `${name} ist abwesend` : `${name} is away`;
     if (obstacle === 'noShift') return de ? `${name} arbeitet an dem Tag nicht` : `${name} is not working that day`;
-    // The rules do not say why a time is not offered (taken, outside the shift, already past),
+    // The rules do not say why a time is not offered (taken, outside the working hours, already past),
     // so the assistant does not claim more than "not free".
     if (obstacle === 'taken') {
       if (time) return de ? `${name} ist um ${time} Uhr nicht frei` : `${name} is not free at ${time}`;
@@ -958,8 +959,9 @@ function hours(task: AssistantTask, data: AssistantData): AssistantReply {
 /**
  * "Selina is taking Friday off": the assistant can only close the whole salon, and one person's
  * day off must never do that. It says where absences are entered, with the screens' own names
- * (Team, with its tabs "Absences" and "This week"), and what the shift plan and the calendar
- * hold for that person on that day.
+ * (Team, with its tabs "Absences" and "This week"), and what that person's working hours and
+ * the calendar hold for that day. The hours are asked where every screen asks them
+ * (src/workingHours.ts): the regular hours of the weekday, unless that one day was changed.
  */
 function absence(task: AssistantTask, data: AssistantData): AssistantReply {
   const language = task.language;
@@ -972,10 +974,12 @@ function absence(task: AssistantTask, data: AssistantData): AssistantReply {
     const date = task.date;
     const on = onDay(date, language, today);
     const away = (data.absences ?? []).some(entry => entry.employeeId === person.id && date >= entry.start && date <= entry.end);
-    const shift = data.shiftOverview.find(entry => entry.employeeId === person.id)?.shifts[date];
+    const day = workingDayOn(data, person.id, date);
+    // A day that differs from the person's regular week says so: it was entered in "This week".
+    const changed = day.kind === 'regular' ? '' : de ? ' (für diesen Tag geändert)' : ' (changed for this day)';
     if (away) facts.push(de ? `Für ${name} ist ${on} schon eine Abwesenheit eingetragen.` : `An absence is already entered for ${name} ${on}.`);
-    else if (shift) facts.push(de ? `Im Schichtplan arbeitet ${name} ${on} von ${shift.start} bis ${shift.end} Uhr.` : `In the shift plan ${name} works from ${shift.start} to ${shift.end} ${on}.`);
-    else facts.push(de ? `Im Schichtplan hat ${name} ${on} keine Schicht.` : `In the shift plan ${name} has no shift ${on}.`);
+    else if (day.hours) facts.push(de ? `${name} arbeitet ${on} von ${day.hours.start} bis ${day.hours.end} Uhr${changed}.` : `${name} works from ${day.hours.start} to ${day.hours.end} ${on}${changed}.`);
+    else facts.push(de ? `${name} arbeitet ${on} nicht${changed}.` : `${name} does not work ${on}${changed}.`);
     const booked = data.events.filter(event => event.date === date &&
       (event.employeeId !== undefined ? event.employeeId === person.id : event.staffName === person.name)).length;
     if (booked > 0) {
@@ -991,8 +995,8 @@ function absence(task: AssistantTask, data: AssistantData): AssistantReply {
         ? `Eine Abwesenheit für ${name ?? 'eine einzelne Person'} kann ich nicht eintragen. Es wurde nichts geändert, und der Salon wurde nicht geschlossen.`
         : `I cannot enter time off for ${name ?? 'one person'}. Nothing was changed, and the salon was not closed.`,
       de
-        ? 'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Schicht ändern, unter Team im Reiter This week.'
-        : 'You enter it in Team, on the tab Absences. For a single day you can also change the shift, in Team on the tab This week.',
+        ? 'Du trägst sie unter Team im Reiter Absences ein. Für einen einzelnen Tag kannst du auch die Arbeitszeit dieses Tages ändern, unter Team im Reiter This week.'
+        : 'You enter it in Team, on the tab Absences. For a single day you can also change that day’s working hours, in Team on the tab This week.',
       ...facts,
       de
         ? 'Wenn der ganze Salon geschlossen sein soll, schreibe zum Beispiel «Am Freitag geschlossen».'

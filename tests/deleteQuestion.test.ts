@@ -8,7 +8,7 @@ import { ServicesView } from '../src/views/ServicesView';
 import { demoCustomers, demoEvents, demoRequests } from './fixedClock';
 import { readableText, render, TELL_WORDS } from './renderHelpers';
 
-// Deleting a customer or a service happens in its edit form and asks first; the lists themselves
+// Deleting a customer (on the profile) or a service (in its edit form) asks first; the lists themselves
 // hold no bin. Opening a form and pressing its buttons needs a browser. These tests read what a
 // page holds before the first press on "Delete" and after it.
 

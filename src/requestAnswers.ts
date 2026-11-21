@@ -6,6 +6,8 @@ import {
 } from './availability';
 import { formatDate, formatStoredTimeRange, formatTimeRange, openingHoursDay, weekdayName } from './format';
 import { addDays, addMinutes, dayKeyForDate, formatCalendarDate } from './scheduling';
+import { workingTimeOn } from './workingHours';
+import { blockAt, blockReasonText } from './timeBlocks';
 
 /**
  * The owner's side of a booking request: may it be accepted as it stands, to which times can it
@@ -33,15 +35,15 @@ const RULE = {
   closure: 'The salon is closed on this date. Please choose another date.',
   away: 'This employee is away on this date. Please choose another date or specialist.',
   closedDay: 'The salon is closed on this date.',
-  noShift: 'This employee has no shift on this date.',
-  badShift: 'This employee has an invalid shift on this date.',
+  noShift: 'This employee does not work on this date.',
+  badShift: 'This employee’s working hours on this date are invalid.',
   badHours: 'The salon opening hours are invalid for this date.',
   shiftOutsideHours: 'This employee has no working time during the salon opening hours.',
   badAppointment: 'This employee has an appointment with invalid times. Please review the calendar.',
   badRequest: 'This employee has a pending request with invalid times. Please review the request.',
   noName: 'Enter a customer name.',
   employeeGone: 'Choose an active employee for this appointment.',
-  taken: 'This time is not available. Choose a slot within the employee’s shift and salon hours, without overlapping another booking.',
+  taken: 'This time is not available. Choose a time within the employee’s working hours and the opening hours, without overlapping another booking.',
 } as const;
 const WRONG_LENGTH = /^Choose a valid \d+-minute slot on the same day\.$/;
 
@@ -50,7 +52,7 @@ interface Obstacle {
   why: string;
   /** What would get the request through: another time of day, another day, or neither of them. */
   wants: 'time' | 'day' | 'nothing';
-  /** What the owner can change in the salon instead, as half a sentence: "add a shift for Selina Keller in Team". */
+  /** What the owner can change in the salon instead, as half a sentence: "give Selina Keller working hours for that day in Team". */
   or?: string;
 }
 
@@ -73,14 +75,14 @@ interface Facts {
 const sameEmployee = (record: Pick<AppointmentRequest, 'employeeId' | 'staffName'>, employee: Employee): boolean =>
   record.employeeId !== undefined ? record.employeeId === employee.id : record.staffName === employee.name;
 
-/** Why a time that the rules refuse is not free: the shift, the opening hours, or who has it already. */
+/** Why a time that the rules refuse is not free: the working hours, the opening hours, or who has it already. */
 function conflict(facts: Facts): Obstacle {
   const { context, employee, staff, date, start, end } = facts;
   const clock = getSalonNow(context.timeZone, context.now ?? new Date());
   if (date === clock.date && start <= clock.time) return PASSED;
   const day = formatDate(date);
   const span = formatTimeRange(start, end);
-  const shift = employee ? context.shiftOverview.find((entry) => entry.employeeId === employee.id)?.shifts[date] : null;
+  const shift = employee ? workingTimeOn(context, employee.id, date) : null;
   if (shift && (start < shift.start || end > shift.end)) {
     return { why: `${staff} works ${formatTimeRange(shift.start, shift.end)} on ${day}, not at ${span}.`, wants: 'time' };
   }
@@ -99,6 +101,12 @@ function conflict(facts: Facts): Obstacle {
   }) : undefined;
   if (asked) {
     return { why: `${asked.customerName} has asked ${staff} for ${formatStoredTimeRange(asked.timeStr)} on ${day} as well.`, wants: 'time' };
+  }
+  // Time the owner keeps free for the stylist (a break, lunch): named with its reason.
+  const blocked = employee ? blockAt(context.timeBlocks, employee.id, date, start, end) : undefined;
+  if (blocked) {
+    const reason = blockReasonText(blocked);
+    return { why: `${staff} is not available ${formatTimeRange(blocked.startTime, blocked.endTime)} on ${day}${reason ? ` (${reason})` : ''}.`, wants: 'time' };
   }
   // What is left: the time needed before or after a neighbouring booking, or a start off the half hour.
   return { why: `${span} on ${day} is not free for ${staff}.`, wants: 'time' };
@@ -123,9 +131,9 @@ function obstacleFor(rule: string, facts: Facts): Obstacle | null {
     }
     case RULE.closedDay: return { why: `The salon is closed on ${weekdayName(date)}s.`, wants: 'day' };
     case RULE.away: return { why: `${staff} is away on ${day}.`, wants: 'day' };
-    case RULE.noShift: return { why: `${staff} has no shift on ${day}.`, wants: 'day', or: `add a shift for ${staff} in Team` };
-    case RULE.badShift: return { why: `The shift of ${staff} on ${day} has invalid times.`, wants: 'day', or: 'correct the shift in Team' };
-    case RULE.shiftOutsideHours: return { why: `The shift of ${staff} on ${day} lies outside the opening hours.`, wants: 'day', or: 'change the shift in Team' };
+    case RULE.noShift: return { why: `${staff} does not work on ${day}.`, wants: 'day', or: `give ${staff} working hours for that day in Team` };
+    case RULE.badShift: return { why: `The working hours of ${staff} on ${day} have invalid times.`, wants: 'day', or: 'correct them in Team' };
+    case RULE.shiftOutsideHours: return { why: `The working hours of ${staff} on ${day} lie outside the opening hours.`, wants: 'day', or: 'change them in Team' };
     case RULE.badHours: return { why: `The opening hours for ${weekdayName(date)}s have invalid times.`, wants: 'day', or: 'correct them in Settings' };
     case RULE.badAppointment: return { why: `${staff} has an appointment with invalid times on ${day}.`, wants: 'day', or: 'correct that appointment in the calendar' };
     case RULE.badRequest: return { why: `${staff} has another request with invalid times on ${day}.`, wants: 'day', or: 'reject that request first' };
@@ -242,7 +250,12 @@ export function nextFreeDayForRequest(context: AvailabilityContext, request: App
 /** The request at another time. It keeps its length, whatever length the service has today. */
 export function movedRequest(request: AppointmentRequest, date: string, startTime: string): AppointmentRequest {
   const minutes = requestTimes(request)?.minutes ?? 30;
-  return { ...request, date, dateStr: formatDate(date), timeStr: `${startTime} - ${addMinutes(startTime, minutes)}` };
+  const { movedFrom, ...rest } = request;
+  const moved: AppointmentRequest = { ...rest, date, dateStr: formatDate(date), timeStr: `${startTime} - ${addMinutes(startTime, minutes)}` };
+  // What the customer asked for stays with the request, however often the salon moves it. Back at
+  // that time, nothing is moved any more.
+  const asked = movedFrom ?? { date: request.date, timeStr: request.timeStr };
+  return asked.date === moved.date && asked.timeStr === moved.timeStr ? moved : { ...moved, movedFrom: asked };
 }
 
 /**

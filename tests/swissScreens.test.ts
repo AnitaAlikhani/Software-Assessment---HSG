@@ -240,7 +240,7 @@ const screens = (): Record<string, string> => {
   };
   const calendarProps = {
     events: demoEvents, services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts,
-    requests: demoRequests, timeZone: ZONE, onSelectEvent: nothing, onDateChange: nothing, onAddEvent: () => null, onUpdateEvent: () => null, onDeleteEvent: nothing,
+    requests: demoRequests, timeZone: ZONE, now: FIXED_NOW, onSelectEvent: nothing, onDateChange: nothing, onOpenAppointmentForm: () => {}, onDeleteEvent: nothing,
   };
   const bookingProps = {
     ...context, companySettings: initialCompanySettings, setDraft: nothing, setSubmittedRequest: nothing,
@@ -271,6 +271,11 @@ const screens = (): Record<string, string> => {
     customers: render(React.createElement(CustomersView, {
       customers: demoCustomers, events: demoEvents, now: FIXED_NOW, timeZone: ZONE, selectedCustomerId: null,
       onClearSelection: nothing, onAddCustomer: nothing, onUpdateCustomer: nothing, onDeleteCustomer: nothing,
+    })),
+    'customer profile': render(React.createElement(CustomersView, {
+      customers: demoCustomers, events: demoEvents, now: FIXED_NOW, timeZone: ZONE, selectedCustomerId: 'cust-002',
+      onClearSelection: nothing, onAddCustomer: nothing, onUpdateCustomer: nothing, onDeleteCustomer: nothing,
+      onOpenAppointment: nothing, onNewAppointment: nothing,
     })),
     employees: render(React.createElement(EmployeesView, { employees: initialEmployees, onAddEmployee: nothing, onUpdateEmployee: nothing, onDeleteEmployee: nothing })),
     services: render(React.createElement(ServicesView, { services: initialServices, employees: initialEmployees, onAddService: nothing, onUpdateService: nothing, onDeleteService: nothing })),
@@ -334,8 +339,9 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   assert.match(home, /This month October 2026 · past and upcoming appointments/);
   // Calendar: month, calendar week and the week's span as its title; an appointment with date, range and number.
   const calendar = shown(all.calendar);
-  assert.match(calendar, /Calendar October 2026 Week 41 Today 05\.–11\.10\.2026/);
-  assert.match(calendar, /Time Mon 05\.10\. Tue 06\.10\. Wed 07\.10\. Thu 08\.10\. Fri 09\.10\. Sat 10\.10\. Sun 11\.10\./);
+  assert.match(calendar, /Calendar October 2026 Week 41 Day Week List Add Today 05\.–11\.10\.2026/);
+  // The week's columns: each day with its short date and how many appointments it has. Monday 5 October is today, and closed.
+  assert.match(calendar, /Mon 05\.10\. Today Tue 06\.10\. \d+ appointments Wed 07\.10\. \d+ appointments Thu 08\.10\. \d+ appointments Fri 09\.10\. \d+ appointments Sat 10\.10\. \d+ appointments Sun 11\.10\./);
   assert.match(shown(all['calendar, an appointment open']), /Time: Thu, 08\.10\.2026, 13:30–14:00 .*Phone: \+41 79 555 61 12/);
   // Conversations: a booking request collected in a chat.
   assert.match(shown(all['conversations, a booking request']), /Haircut · Thu, 08\.10\.2026 · 15:00 · Tom/);
@@ -347,10 +353,10 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   assert.match(shown(all['booking page']), /Opening hours Tuesday–Friday 08:30–18:30 Saturday 08:00–16:00 Monday and Sunday Closed/);
   assert.match(shown(all['booking page, a specialist chosen']), /Free times with Anna Weber on Tuesday, 06\.10\.2026: 08:30–09:00 09:00–09:30/);
   assert.match(shown(all['booking page, a request sent']), /Date and time Wed, 07\.10\.2026 10:00–10:30 Contact .*? \+41 7\d 555 \d\d \d\d/);
-  // Shift plan: the week as a span, the days as short dates, the shifts as ranges.
+  // The week in Team: the week as a span, the days as short dates (today marked), the working hours as ranges.
   const shifts = shown(all['shift plan']);
   assert.match(shifts, /05\.–11\.10\.2026/);
-  assert.match(shifts, /Employee Mon 05\.10\. Tue 06\.10\./);
+  assert.match(shifts, /Employee Mon 05\.10\. Today Tue 06\.10\./);
   assert.match(shifts, /08:30–17:00/);
   // Analytics: the period, and the days of the chart's table.
   assert.match(shown(all.analytics), /appointments October 2026/);
@@ -360,7 +366,7 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   // Settings: a closure of two days. Team: an absence of one, and the week as the shift plan writes it.
   assert.match(shown(all['settings, closed dates']), /Team day 08\.–09\.10\.2026/);
   assert.match(shown(all['team, absences']), /Selina Keller: Course Tue, 13\.10\.2026/);
-  assert.match(shown(all['team, this week']), /05\.–11\.10\.2026 .*Employee Mon 05\.10\. Tue 06\.10\./);
+  assert.match(shown(all['team, this week']), /05\.–11\.10\.2026 .*Employee Mon 05\.10\. Today Tue 06\.10\./);
 });
 
 test('the header finds appointments by the date as the screens write it', () => {

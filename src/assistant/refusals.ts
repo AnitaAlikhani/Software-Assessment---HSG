@@ -22,14 +22,16 @@ const GERMAN: Record<string, string> = {
   'The salon is closed on this date. Please choose another date.': 'An diesem Tag ist der Salon geschlossen. Bitte wähle einen anderen Tag.',
   'This employee is away on this date. Please choose another date or specialist.': 'Diese Person ist an diesem Tag abwesend. Bitte wähle einen anderen Tag oder jemand anderen.',
   'The salon is closed on this date.': 'An diesem Tag ist der Salon geschlossen.',
-  'This employee has no shift on this date.': 'Diese Person hat an diesem Tag keine Schicht.',
-  'This employee has an invalid shift on this date.': 'Die Schicht dieser Person an diesem Tag ist ungültig.',
+  // "Shift" in the rules' wording means the hours a person works on a date: their regular hours
+  // of that weekday, or what was entered for that one day (src/workingHours.ts).
+  'This employee does not work on this date.': 'Diese Person arbeitet an diesem Tag nicht.',
+  'This employee’s working hours on this date are invalid.': 'Die Arbeitszeit dieser Person an diesem Tag ist ungültig.',
   'The salon opening hours are invalid for this date.': 'Die Öffnungszeiten des Salons für diesen Tag sind ungültig.',
   'This employee has no working time during the salon opening hours.': 'Diese Person arbeitet an diesem Tag nicht während der Öffnungszeiten des Salons.',
   'This employee has an appointment with invalid times. Please review the calendar.': 'Bei dieser Person ist ein Termin mit ungültigen Zeiten eingetragen. Bitte prüfe den Kalender.',
   'This employee has a pending request with invalid times. Please review the request.': 'Bei dieser Person wartet eine Anfrage mit ungültigen Zeiten. Bitte prüfe die Anfrage.',
-  'This time is not available. Choose a slot within the employee’s shift and salon hours, without overlapping another booking.':
-    'Diese Zeit ist nicht verfügbar. Bitte wähle eine Zeit innerhalb der Schicht und der Öffnungszeiten, die sich mit keinem anderen Termin überschneidet.',
+  'This time is not available. Choose a time within the employee’s working hours and the opening hours, without overlapping another booking.':
+    'Diese Zeit ist nicht verfügbar. Bitte wähle eine Zeit innerhalb der Arbeitszeit und der Öffnungszeiten, die sich mit keinem anderen Termin überschneidet.',
 };
 /** The one refusal that carries a number: the length of the service. */
 const SLOT_LENGTH = /^Choose a valid (\d+)-minute slot on the same day\.$/;
