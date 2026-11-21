@@ -4,6 +4,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { initialAiSettings } from '../src/conversationData';
+import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { isLiveConversation } from '../src/liveWhatsApp';
 import { ConversationsView } from '../src/views/ConversationsView';
 import { salonContext, salonNow } from '../server/ai';
@@ -234,11 +235,15 @@ test('a valid AI booking request asks the owner to confirm; the reply is only st
     onOwnerReply: () => true,
     aiSettings: initialAiSettings,
     onOpenAiSettings: () => {},
-    onConfirmBooking: () => {},
+    // The owner's page checks the request against the salon's calendar (empty here) and answers it.
+    salon: { services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: [], events: [], requests: [], timeZone: 'Europe/Zurich', now: new Date('2026-11-16T18:19:00Z') },
+    onChatBooking: () => null,
     liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=1' },
   }));
-  assert.match(html, /Booking request from the AI/);
-  assert.match(html, /Confirm booking/);
+  assert.match(html, /Ana wants to book/);
+  assert.match(html, />Confirm</);
+  assert.match(html, /Suggest another time/);
+  assert.match(html, />Decline</);
   assert.match(html, /via Telegram</);
   // The strip with the tester links is a study tool: a normal visitor does not get it.
   assert.doesNotMatch(html, /Live test is on/);

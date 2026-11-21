@@ -98,13 +98,15 @@ test('every tab opened on the same day shows the same calendar, customers, reque
     }
   }
   // Just after midnight "three hours ago" is shortened, so the chats of today stay chats of today.
+  // (Giulia's chat also holds her booking of nine days ago: what she wrote today is its last part.)
   const night = workspaceAt(at('2026-11-19', '00:05'));
-  for (const id of ['conv-camille', 'conv-chloe', 'conv-giulia', 'conv-marie']) {
+  for (const id of ['conv-sabrina', 'conv-reto', 'conv-chloe', 'conv-giulia', 'conv-marie']) {
     const conversation = night.conversations.find((item) => item.id === id)!;
-    assert.equal(getSalonNow(ZONE, new Date(conversation.messages[0].sentAt!)).date, '2026-11-19', id);
+    const today = conversation.messages.filter((message) => getSalonNow(ZONE, new Date(message.sentAt!)).date === '2026-11-19');
+    assert.equal(today.length, id === 'conv-giulia' ? 2 : conversation.messages.length, id);
   }
   assert.deepEqual(night.conversations.map((conversation) => conversation.id),
-    ['conv-camille', 'conv-chloe', 'conv-giulia', 'conv-marie', 'conv-lea', 'conv-john']);
+    ['conv-sabrina', 'conv-reto', 'conv-chloe', 'conv-giulia', 'conv-marie', 'conv-lara', 'conv-john']);
 });
 
 test('the weeks that are over look the same on every later day of the week', () => {
@@ -205,7 +207,7 @@ test('every appointment has a customer record, and every customer is in the cale
 test('the appointments the chats talk about exist, on the weekday and at the time the chat names', () => {
   const mentioned = [
     { chat: 'conv-marie', appointment: 'cal-2', weekday: 'Thursday', start: '13:30', serviceId: 'srv-2', bookedByAi: true },
-    { chat: 'conv-lea', appointment: 'cal-3', weekday: 'Friday', start: '11:00', serviceId: 'srv-3', bookedByAi: true },
+    { chat: 'conv-lara', appointment: 'cal-3', weekday: 'Friday', start: '11:00', serviceId: 'srv-3', bookedByAi: true },
     { chat: 'conv-john', appointment: 'cal-john', weekday: 'Wednesday', start: '15:00', serviceId: 'srv-2', bookedByAi: true },
     { chat: 'conv-giulia', appointment: 'cal-giulia', weekday: 'Thursday', start: '15:00', serviceId: 'srv-2', bookedByAi: false },
   ];
@@ -224,20 +226,39 @@ test('the appointments the chats talk about exist, on the weekday and at the tim
       assert.equal(event.customerId, conversation.customerId, where);
       assert.equal(event.conversationId, conversation.id, where);
       assert.equal(event.isAiBooked === true, expected.bookedByAi, where);
-      // The appointment follows the chat: it is on the first such weekday after the last message,
-      // so it is never further away than a week.
-      const chatDay = getSalonNow(ZONE, new Date(conversation.lastMessageAt!)).date;
-      assert.ok(event.date > chatDay && event.date <= addDays(chatDay, 7), `${where}: ${event.date} after a chat on ${chatDay}`);
+      // The appointment follows the chat: it is on the first such weekday after the customer asked
+      // (today, or nine days ago for Giulia's first booking), so it is never further away than a week
+      // from that day, and it was made with the salon's confirmation in the chat.
+      const confirmation = conversation.messages.find((message) => message.sender === 'owner')!;
+      const askedOn = getSalonNow(ZONE, new Date(confirmation.sentAt!)).date;
+      assert.ok(event.date > askedOn && event.date <= addDays(askedOn, expected.chat === 'conv-giulia' ? 16 : 7), `${where}: ${event.date} after a chat on ${askedOn}`);
+      assert.equal(event.createdAt, confirmation.sentAt, where);
+      // The chat shows the booking it confirmed: the same service, day, time and stylist.
+      const booking = expected.chat === 'conv-giulia' ? conversation.bookingRequest!.previous! : conversation.bookingRequest!;
+      assert.deepEqual([booking.date, booking.time], [event.date, event.startTime], where);
+      if (expected.chat !== 'conv-giulia') {
+        assert.equal(conversation.status, 'booked', where);
+        assert.deepEqual([conversation.bookingRequest!.status, conversation.bookingRequest!.serviceId, conversation.bookingRequest!.employeeId], ['confirmed', event.serviceId, event.employeeId], where);
+      }
     }
     // Giulia asks to move an appointment that is still to come.
     const giulia = events.find((item) => item.id === 'cal-giulia')!;
     assert.ok(`${giulia.date} ${giulia.startTime}` > `${salonNow.date} ${salonNow.time}`, label(now));
-    // No chat links to an appointment that does not exist, and Camille has none yet: hers is still to be booked.
+    // A chat is "booked" only with its appointment, and every chat that names one finds it: an
+    // appointment of the chat's customer that names the chat in return.
     for (const conversation of conversations) {
-      if (conversation.appointmentId) assert.ok(events.some((event) => event.id === conversation.appointmentId), conversation.id);
+      assert.equal(conversation.status === 'booked', Boolean(conversation.appointmentId) && conversation.bookingRequest?.status === 'confirmed', `${label(now)}: ${conversation.id}`);
+      if (!conversation.appointmentId) continue;
+      const event = events.find((item) => item.id === conversation.appointmentId);
+      assert.ok(event, `${label(now)}: ${conversation.id}`);
+      assert.equal(event.conversationId, conversation.id);
+      assert.equal(event.customerId, conversation.customerId);
     }
-    assert.equal(conversations.find((item) => item.id === 'conv-camille')!.appointmentId, undefined);
-    assert.equal(events.some((event) => event.id === 'cal-camille'), false);
+    // The requests that wait are not in the calendar yet: the owner has not confirmed them.
+    for (const id of ['conv-sabrina', 'conv-reto', 'conv-chloe']) {
+      assert.equal(conversations.find((item) => item.id === id)!.appointmentId, undefined, id);
+      assert.ok(!events.some((event) => event.conversationId === id), id);
+    }
   }
 });
 
@@ -258,13 +279,21 @@ test('what the chats and requests are about to book is free, whatever day and ti
         assert.ok(appointment, `${label(now)}: ${conversation.id}`);
         assert.equal(validateCalendarEvent(context, appointment, appointment.id), null, `${label(now)}: ${conversation.id} ${action.type} on ${action.date} at ${action.startTime}`);
       }
+      // A request that waits in a chat can be confirmed as it stands, with the stylist it names.
+      const request = conversation.bookingRequest;
+      if (request?.status === 'requested') {
+        const exclude = request.kind === 'change' ? conversation.appointmentId : undefined;
+        const slots = getAvailableSlots(context, { date: request.date, serviceId: request.serviceId!, employeeId: request.employeeId ?? 'emp-1', mode: 'owner', excludeEventId: exclude });
+        assert.ok(slots.includes(request.time), `${label(now)}: ${conversation.id} asks for ${request.date} ${request.time}`);
+      }
     }
-    // The times the AI offers in the other two chats are free as well: Giulia's second choice and Chloé's last Friday slot.
-    const giuliaMove = workspace.conversations.find((item) => item.id === 'conv-giulia')!.quickReplies![0].appointmentAction!;
-    assert.ok(getAvailableSlots(context, { date: giuliaMove.date, serviceId: 'srv-2', employeeId: 'emp-2', mode: 'owner', excludeEventId: 'cal-giulia' }).includes('11:30'), label(now));
-    const chloeFriday = addDays(getSalonNow(ZONE, new Date(workspace.conversations.find((item) => item.id === 'conv-chloe')!.lastMessageAt!)).date, 0);
-    const friday = addDays(chloeFriday, ((5 - weekdayOf(chloeFriday) + 6) % 7) + 1);
+    // The times the owner can offer Chloé instead of 19:00 are free as well: Friday 18:00 and Saturday 11:30.
+    const chloe = workspace.conversations.find((item) => item.id === 'conv-chloe')!;
+    const chloeDay = getSalonNow(ZONE, new Date(chloe.lastMessageAt!)).date;
+    const friday = addDays(chloeDay, ((5 - weekdayOf(chloeDay) + 6) % 7) + 1);
+    const saturday = addDays(chloeDay, ((6 - weekdayOf(chloeDay) + 6) % 7) + 1);
     assert.ok(getAvailableSlots(context, { date: friday, serviceId: 'srv-2', employeeId: 'emp-1', mode: 'owner' }).includes('18:00'), `${label(now)}: Friday ${friday} 18:00`);
+    assert.ok(getAvailableSlots(context, { date: saturday, serviceId: 'srv-2', employeeId: 'emp-2', mode: 'owner' }).includes('11:30'), `${label(now)}: Saturday ${saturday} 11:30`);
   }
 });
 
@@ -289,16 +318,20 @@ test('the week plan starts without a single changed day: the regular hours carry
     const oldest = workspace.events.reduce((first, event) => event.date < first.date ? event : first);
     assert.ok(oldest.date < addDays(today, -49), `${label(now)}: the calendar starts on ${oldest.date}`);
     assert.ok(inside(oldest.employeeId!, oldest.date, oldest.startTime, oldest.endTime), `${label(now)}: ${oldest.id}`);
-    // ... and on the Saturday that Giulia's chat moves her appointment to, Selina works: at both times the chat offers.
-    const move = workspace.conversations.find((item) => item.id === 'conv-giulia')!.quickReplies![0].appointmentAction!;
+    // ... and on the Saturday that Giulia asks to move her appointment to, Selina works, at that time
+    // and at the time the owner can offer Chloé; Luca works at the time Reto asks for.
+    const move = workspace.conversations.find((item) => item.id === 'conv-giulia')!.bookingRequest!;
     assert.equal(WEEKDAYS[weekdayOf(move.date)], 'Saturday', label(now));
     assert.deepEqual(workingTimeOn(salon, 'emp-2', move.date), { start: '08:00', end: '16:00' }, label(now));
     assert.ok(inside('emp-2', move.date, '10:00', '10:30') && inside('emp-2', move.date, '11:30', '12:00'), label(now));
+    const reto = workspace.conversations.find((item) => item.id === 'conv-reto')!.bookingRequest!;
+    assert.ok(inside('emp-3', reto.date, reto.time, '09:30'), label(now));
   }
-  // That Saturday is what makes the move possible: without it the rules refuse the very same reply.
+  // That Saturday is what makes the move possible: without it the rules refuse the very same change.
   const workspace = workspaceAt(FIXED_NOW);
   const giulia = workspace.conversations.find((item) => item.id === 'conv-giulia')!;
-  const moved = appointmentFromConversationAction(giulia.quickReplies![0].appointmentAction!, giulia, workspace.events, initialServices, initialEmployees, false)!;
+  const change = { type: 'reschedule' as const, appointmentId: giulia.appointmentId!, date: giulia.bookingRequest!.date, startTime: giulia.bookingRequest!.time };
+  const moved = appointmentFromConversationAction(change, giulia, workspace.events, initialServices, initialEmployees, false)!;
   assert.equal(validateCalendarEvent(contextOf(workspace, FIXED_NOW), moved, moved.id), null);
   const noSaturday = initialEmployees.map((employee) => employee.id === 'emp-2' ? { ...employee, weeklyHours: { ...employee.weeklyHours!, sat: null } } : employee);
   assert.match(validateCalendarEvent({ ...contextOf(workspace, FIXED_NOW), employees: noSaturday }, moved, moved.id)!, /does not work on this date/);
@@ -327,7 +360,7 @@ test('chats and requests come in over the web on every day, never through a chan
 test('chats are recent, never in the future, newest first, and labelled from their time stamps', () => {
   for (const now of CLOCKS) {
     const { conversations } = workspaceAt(now);
-    assert.equal(conversations[0].id, 'conv-camille', label(now));
+    assert.equal(conversations[0].id, 'conv-sabrina', label(now));
     const lastTimes = conversations.map((conversation) => conversation.lastMessageAt!);
     assert.deepEqual([...lastTimes].sort().reverse(), lastTimes, `${label(now)}: not newest first`);
     for (const conversation of conversations) {
@@ -344,7 +377,7 @@ test('chats are recent, never in the future, newest first, and labelled from the
   }
   // At noon the list reads like a messenger: clock times for today, "Yesterday" for last evening.
   assert.deepEqual(workspaceAt(FIXED_NOW).conversations.map((conversation) => conversation.lastTime),
-    ['11:54', '11:18', '10:25', '09:00', 'Yesterday', 'Yesterday']);
+    ['11:54', '11:32', '11:18', '10:25', '09:02', 'Yesterday', 'Yesterday']);
   assert.equal(chatTimeLabel('2026-10-01T08:00:00Z', FIXED_NOW, ZONE), 'Thu 01.10.');
 });
 

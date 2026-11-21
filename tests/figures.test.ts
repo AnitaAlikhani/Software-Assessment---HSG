@@ -319,7 +319,10 @@ test('Home\'s inbox lists every chat that waits, live ones included, and counts 
   // A chat that waits for nobody is not listed.
   assert.doesNotMatch(withLive, />Visitor two</);
   // Whoever has waited longest comes first; the live chat wrote a minute ago and stands last among the chats.
-  const order = [...sampleWaiting].sort((a, b) => a.lastMessageAt!.localeCompare(b.lastMessageAt!)).map((chat) => chat.customerName);
+  // (A chat with a booking request is listed as that request, by the day it asks for: tests/homeInbox.test.ts.)
+  const order = sampleWaiting.filter((chat) => chat.bookingRequest?.status !== 'requested')
+    .sort((a, b) => a.lastMessageAt!.localeCompare(b.lastMessageAt!)).map((chat) => chat.customerName);
+  assert.ok(order.length > 0);
   const positions = [...order, 'Visitor one'].map((name) => withLive.indexOf(`>${name}<`));
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
 
@@ -328,7 +331,7 @@ test('Home\'s inbox lists every chat that waits, live ones included, and counts 
   assert.equal(counted(withoutLive), sampleWaiting.length + demoRequests.length);
   assert.doesNotMatch(withoutLive, /Visitor/);
   // Nobody waiting: the chats are not listed, the requests still are.
-  const handled = demoConversations.map((chat) => ({ ...chat, status: 'ai-handled' as const }));
+  const handled = demoConversations.map((chat) => ({ ...chat, status: 'ai-handled' as const, bookingRequest: undefined }));
   const calm = home(demoEvents, handled);
   assert.equal(counted(calm), demoRequests.length);
   assert.doesNotMatch(calm, new RegExp(`>${handled[0].customerName}<`));

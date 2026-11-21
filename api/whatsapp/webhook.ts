@@ -1,18 +1,14 @@
 import process from 'node:process';
-import { analyzeIncoming } from '../../server/ai.js';
+import { cleanName } from '../../server/bookingRules.js';
+import { applyAi, askAi, recordDelivery, storeIncoming } from '../../server/chatFlow.js';
 import { sendFirstNoticeIfDue } from '../../server/firstNotice.js';
-import { recordAnalysis } from '../../server/recordAnalysis.js';
-import { claimMessage, deletedSince, deleteOwnChat, loadForUpdate, saveConversation, storeConfigured } from '../../server/store.js';
+import { claimMessage, deleteOwnChat, loadConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
-import { addCustomerMessage, addReply, needsOwner, parseWebhook, stateFor, verifySignature } from '../../server/whatsappCore.js';
-import type { LiveConversation } from '../../server/whatsappCore.js';
+import { parseWebhook, verifySignature } from '../../server/whatsappCore.js';
 import { usesLiveData } from '../../server/environment.js';
 import { chatDeletedNotice, chatNotDeletedNotice } from '../../src/customerNotice.js';
 import { initialCompanySettings } from '../../src/mockData.js';
 import type { ChatLanguage } from '../../src/types.js';
-
-/** What the owner reads on a chat whose last message got no answer. */
-const UNANSWERED = 'The AI could not answer this message. Please reply yourself.';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {
@@ -55,46 +51,34 @@ export async function POST(request: Request) {
 
   for (const message of incoming) {
     if (!(await claimMessage(message.id))) continue; // Meta retried a webhook we already handled
-    const { conversation: existing, version } = await loadForUpdate(message.waId);
     if (message.text.trim().toLowerCase() === '/delete') {
-      await deleteChat(message.waId, existing?.language ?? 'EN');
+      await deleteChat(message.waId, (await loadConversation(message.waId))?.language ?? 'EN');
       continue;
     }
-    const state = stateFor(existing);
-    const earlier = existing?.messages ?? [];
-    let conversation: LiveConversation;
-    let reply: ReturnType<typeof recordAnalysis>['reply'] = null;
-    try {
-      const analysis = await analyzeIncoming(earlier, message.text);
-      ({ conversation, reply } = recordAnalysis(state, message, analysis));
-    } catch (error) {
-      // Keep the message visible even when the AI fails, so the owner can still reply.
-      console.error(error);
-      // The language is unknown when the AI did not answer: the chat keeps the one it had, and a
-      // new chat gets English, the fallback everywhere else.
-      conversation = state.processedIds.includes(message.id)
-        ? state.conversations.find(item => item.waId === message.waId)!
-        : addCustomerMessage(state, message, { original: message.text, translation: message.text }, existing?.language ?? 'EN', existing?.languageLabel);
-      needsOwner(conversation, UNANSWERED);
-    }
-    // The AI took its time. A customer who sent /delete meanwhile has been told that the chat is
-    // gone: they get nothing more from it, and nothing of it is stored again. (When nothing is
-    // about to be sent, the save below finds out by itself.)
-    if ((reply || !conversation.noticeSent) && await deletedSince(message.waId, version)) continue;
+    // The message is stored before the AI runs, so a slow or failing AI never loses it.
+    const stored = await storeIncoming({ ...message, name: cleanName(message.name) || 'WhatsApp customer' });
+    if (!stored) continue;
+    const analysis = await askAi(stored.conversation, message.id);
+    // Applied to the chat as it is now. A customer who sent /delete meanwhile has been told that
+    // the chat is gone: they get nothing more from it, and nothing of it is stored again. A chat
+    // the owner took over meanwhile gets no AI reply.
+    const answered = await applyAi(stored, message.id, analysis, false);
+    if (!answered) continue;
+    const { conversation, reply } = answered;
     // A notice that cannot be sent must not cost the customer the answer: it is tried again next time.
+    const noticeBefore = conversation.noticeSent;
     await sendFirstNoticeIfDue(conversation);
+    let delivered = false;
     if (reply) {
       try {
         await sendWhatsAppText(message.waId, reply.original);
-        addReply(conversation, 'ai', reply);
+        delivered = true;
       } catch (error) {
         // WhatsApp did not take the answer. The owner sees the message and that nobody answered it.
         console.error(error);
-        needsOwner(conversation, UNANSWERED);
       }
     }
-    // Saving checks for a deletion once more, in one step with the write.
-    await saveConversation(conversation, version);
+    await recordDelivery(answered, reply, delivered, Boolean(conversation.noticeSent && !noticeBefore));
   }
   return new Response('OK');
 }

@@ -90,6 +90,7 @@ export function chatCopy(study: boolean, salon: string, phone: string, earlier =
     greeting: (name: string) => `Hello${name ? ` ${name}` : ''}! How can we help you? You can write in any language.`,
     studyHint: 'Say hello in any language, for example “Bonjour, avez-vous un rendez-vous jeudi ?”',
     aiBusy: 'The assistant is busy right now. The salon has your message and will answer here.',
+    teamAnswers: `The ${salon} team is answering this chat now, so a reply can take a little longer.`,
     notSent: `Your message was not sent. Please check your connection and try again${orCall}.`,
     notDeleted: earlier > 0 ? 'Not all of your chats could be deleted. Please try again.' : 'Your chat could not be deleted. Please try again.',
     deleted: 'Your chat has been deleted.',
@@ -122,6 +123,8 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [chatFull, setChatFull] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Who answers now, as the salon says: the AI assistant, or the team once the owner took the chat over.
+  const [answeredBy, setAnsweredBy] = useState<'assistant' | 'team' | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -158,13 +161,15 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
     if (!key || !session) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
+    setAnsweredBy(null);
     const poll = async () => {
       const sentBefore = sends.current;
       try {
         const response = await fetch(`/api/chat?session=${session}`, { headers: { 'x-live-key': key }, cache: 'no-store' });
         if (response.status === 401) { done(response); if (!stopped) setLinkWorks(false); return; }
         if (response.ok) {
-          const data = (await response.json()) as { messages: VisitorMessage[] };
+          const data = (await response.json()) as { messages: VisitorMessage[]; answeredBy?: 'assistant' | 'team' };
+          if (!stopped) setAnsweredBy(data.answeredBy ?? null);
           // While a message is on its way, keep showing it instead of the older server copy.
           // The same holds for an answer that was asked for before the last message went out.
           if (!stopped && !sendingRef.current && sentBefore === sends.current) {
@@ -357,8 +362,9 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
         body: JSON.stringify({ session, name, text }),
       });
       // A server that fell over answers with a page instead of data.
-      const data = (await response.json().catch(() => ({}))) as { messages?: VisitorMessage[]; error?: string; aiFailed?: boolean; full?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { messages?: VisitorMessage[]; error?: string; aiFailed?: boolean; full?: boolean; answeredBy?: 'assistant' | 'team' };
       if (response.ok && data.messages) {
+        setAnsweredBy(data.answeredBy ?? null);
         atSalon.current = data.messages.length;
         setMessages(data.messages);
         if (data.aiFailed) setNotice(copy.aiBusy);
@@ -507,6 +513,7 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
                   <div className="rounded-lg px-3 py-2 bg-white text-sm text-slate-500 shadow-xs">typing…</div>
                 </div>
               )}
+              {answeredBy === 'team' && messages.length > 0 && <p role="status" className="mx-auto max-w-xs text-center text-xs text-slate-700 bg-white/80 rounded-lg px-3 py-2">{copy.teamAnswers}</p>}
               {notice && <p role="status" className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-700">{notice}</p>}
               {error && (
                 <div role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-red-700">

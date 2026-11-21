@@ -11,18 +11,36 @@ export const belongsToConversation = (
 ): boolean => event.conversationId === conversation.id
   || event.customerId === undefined || conversation.customerId === undefined || event.customerId === conversation.customerId;
 
+/** The id of the appointment a chat's booking request becomes: the same for every try, so a second one cannot book twice. */
+export const chatAppointmentId = (conversationId: string, booking: { date: string; time: string }): string =>
+  `live-appt-${conversationId}-${booking.date}-${booking.time.replace(':', '')}`;
+
 /**
- * The appointment a chat booked or is about, while it is in the calendar and still the chat's
- * own: the one the chat names, else the newest one that was booked in it (new bookings are added
- * at the top of the list). Null when there is none, when it has been cancelled since, or when it
- * is somebody else's appointment now: a chat never leads to another customer's appointment.
+ * The chat's appointment, while it is in the calendar and still the chat's own. In this order:
+ *   1. the one the chat names (`appointmentId`);
+ *   2. for a confirmed request, the appointment that confirmation was for: the one with the id that
+ *      confirming gives (it keeps that id when the owner moves it in the calendar), else one linked
+ *      to the chat at the confirmed day and time. None of them in the calendar: none. Another
+ *      appointment booked by hand from the chat is not what the customer was told of;
+ *   3. a chat without a confirmed request: the newest appointment booked in it (new bookings are
+ *      added at the top of the list).
+ * A chat never leads to another customer's appointment.
  */
 export const appointmentForConversation = (
-  conversation: Pick<Conversation, 'id' | 'customerId' | 'appointmentId'>, events: CalendarEvent[],
-): CalendarEvent | null =>
-  events.find((event) => conversation.appointmentId !== undefined && event.id === conversation.appointmentId
-    && belongsToConversation(event, conversation))
-  ?? events.find((event) => event.conversationId === conversation.id) ?? null;
+  conversation: Pick<Conversation, 'id' | 'customerId' | 'appointmentId'> & Partial<Pick<Conversation, 'bookingRequest'>>, events: CalendarEvent[],
+): CalendarEvent | null => {
+  const named = conversation.appointmentId === undefined ? undefined
+    : events.find((event) => event.id === conversation.appointmentId && belongsToConversation(event, conversation));
+  if (named) return named;
+  const booking = conversation.bookingRequest;
+  if (booking?.status === 'confirmed') {
+    const confirmingId = chatAppointmentId(conversation.id, booking);
+    return events.find((event) => event.id === confirmingId && belongsToConversation(event, conversation))
+      ?? events.find((event) => event.conversationId === conversation.id && event.date === booking.date && event.startTime === booking.time)
+      ?? null;
+  }
+  return events.find((event) => event.conversationId === conversation.id) ?? null;
+};
 
 /** Reuse stable IDs so confirming or moving the same appointment cannot duplicate it. */
 export function upsertAppointment(events: CalendarEvent[], appointment: CalendarEvent): CalendarEvent[] {

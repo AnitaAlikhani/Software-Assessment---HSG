@@ -16,6 +16,7 @@ import { periodLabel } from '../analytics';
 import { homeFigures, latestAiBookings, todayOverview } from '../dashboard';
 import type { RequestAnswer } from '../inbox';
 import { HomeInbox, type Outcome } from './HomeInbox';
+import type { AnswerChat } from '../components/ChatBookingCards';
 
 /** One figure of "This month": the number, what it counts, and a line of detail. */
 const Figure = ({ icon, tint, value, label, detail }: {
@@ -66,8 +67,8 @@ interface HomeViewProps {
   onMoveRequest: (id: string, date: string, startTime: string) => Outcome;
   onUndoAnswer?: (id: string) => Outcome;
   onDismissAnswer?: (kind: RequestAnswer['kind'], id: string) => void;
-  /** Accepts a booking request that waits in a chat. */
-  onAcceptChatRequest?: (conversationId: string) => Outcome;
+  /** Answers a booking request or a cancellation that waits in a chat (src/App.tsx, handleChatBooking). */
+  onChatBooking?: AnswerChat;
   onSimulateNewRequest: () => void;
   onOpenAppointment: (event: CalendarEvent) => void;
   /** Leads to today in the calendar. The link is shown only when it has a target. */
@@ -94,7 +95,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onMoveRequest,
   onUndoAnswer,
   onDismissAnswer,
-  onAcceptChatRequest,
+  onChatBooking,
   onSimulateNewRequest,
   onOpenAppointment,
   onOpenCalendar,
@@ -227,7 +228,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             onMoveRequest={onMoveRequest}
             onUndoAnswer={onUndoAnswer}
             onDismissAnswer={onDismissAnswer}
-            onAcceptChatRequest={onAcceptChatRequest}
+            onChatBooking={onChatBooking}
             onOpenConversations={onOpenConversations}
             onOpenCustomer={onOpenCustomer}
             onOpenAppointment={onOpenAppointment}

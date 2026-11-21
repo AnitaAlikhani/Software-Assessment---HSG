@@ -205,8 +205,12 @@ test('the chat says how the AI works in it: automatically, after approval, or pa
   const waiting = chat({ status: 'needs-attention', attentionReason: 'The customer asked for a discount.', aiFollowUp: { original: 'Bien sûr.', translation: 'Of course.' } });
   const approval = inbox(waiting, { ...initialAiSettings, askBeforeSending: true });
   assert.match(approval, /AI asks before sending/);
-  assert.match(approval, /placeholder="Take over to reply"/);
-  assert.match(inbox(waiting), /AI replies automatically/);
+  // In the place of the reply box: take over, or look at what the AI would send.
+  assert.match(approval, /aria-label="Who answers this chat"[^>]*>.*>Take over<\/button>.*>Review AI reply<\/button><p[^>]*>[^<]*<\/p><\/div>/);
+  assert.doesNotMatch(approval, /aria-label="Reply as owner"/);
+  // A chat that waits for the owner says so in its bar; once it is answered the AI replies by itself again.
+  assert.match(inbox(waiting), /AI waits for you/);
+  assert.match(inbox(chat()), /AI replies automatically/);
 
   const takenOver = inbox(chat({
     status: 'owner-handled', takenOver: true,

@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { formatClock } from '../src/format.js';
 import type { ChatLanguage, ChatMessage, Conversation, ConversationStatus } from '../src/types.js';
 
@@ -22,6 +22,38 @@ export interface LiveConversation {
   /** A complete booking request the AI collected, waiting for the owner, or already confirmed. */
   bookingRequest?: LiveBookingRequest;
   /**
+   * The customer asked to cancel the appointment confirmed in this chat. The owner decides
+   * ('cancel-booking' or 'keep-booking'); until then the appointment stands.
+   */
+  cancellationRequest?: { service: string; date: string; time: string; customerName?: string };
+  /**
+   * Server only: the appointment confirmed in this chat. `bookingRequest` shows a change or a
+   * further request while one is open; this keeps the appointment that stands until the owner
+   * answers, so declining a change gives it back. Missing on chats confirmed before it existed:
+   * there a confirmed `bookingRequest` is the appointment.
+   */
+  confirmedBooking?: LiveBookingRequest;
+  /**
+   * Server only: further appointments confirmed in this chat before `confirmedBooking`. A customer
+   * may book twice in one chat; each one stays known, so a later wish to cancel or move is never
+   * pinned on the wrong one. Appointments in the past are dropped from it when the chat changes.
+   */
+  earlierBookings?: LiveBookingRequest[];
+  /**
+   * Server only: another time the owner offered ('suggest-time'). The AI is told, so the customer's
+   * "yes" becomes a request for exactly this time. An offer made in answer to a change keeps `kind`
+   * and `previous`, so the "yes" moves that appointment instead of booking a second one.
+   */
+  suggestion?: { service: string; serviceId?: string; date: string; time: string; employeeId?: string; staffName?: string; kind?: 'new' | 'change'; previous?: { date: string; time: string } };
+  /**
+   * Server only: what the rule check found about the open request that cannot be read from the chat
+   * later (a stylist not on the team; a move of an appointment not booked here). The owner's reason
+   * is written from these and the chat as it is (requestReason in recordAnalysis.ts).
+   */
+  requestFacts?: { unknownStylist?: string; moveNotHere?: boolean };
+  /** Server only: counts the saves of this chat, so two requests cannot overwrite each other (see changeConversation in store.ts). */
+  rev?: number;
+  /**
    * WhatsApp only: the fixed first text (who answers, what is stored) has really been sent to this
    * customer. Set after the send succeeded, never before, so a failed send is tried again.
    */
@@ -36,6 +68,12 @@ export interface LiveBookingRequest {
   time: string;
   customerName: string;
   status: 'requested' | 'confirmed';
+  /** The stylist the customer asked for (or the owner named on confirming): the id in the salon's list and the full name. */
+  employeeId?: string;
+  staffName?: string;
+  /** 'change': move the appointment confirmed in this chat, which was at `previous`, to this time. */
+  kind?: 'new' | 'change';
+  previous?: { date: string; time: string };
 }
 
 export interface LiveState {
@@ -136,13 +174,25 @@ export function addCustomerMessage(
 }
 
 export function addReply(conversation: LiveConversation, sender: 'ai' | 'owner', message: Translated, now = Date.now()) {
-  conversation.messages.push({ id: `${sender}-${now}`, sender, time: timeLabel(now), ...message });
+  // A random tail: two replies within the same millisecond (or a frozen clock) still get their own ids.
+  conversation.messages.push({ id: `${sender}-${now}-${randomUUID().slice(0, 8)}`, sender, time: timeLabel(now), ...message });
   conversation.updatedAt = now;
   if (sender === 'owner') {
     conversation.takenOver = true;
     conversation.status = 'owner-handled';
     conversation.attentionReason = undefined;
   }
+}
+
+/**
+ * A fixed message from the salon about a booking (confirmed, another time, declined, cancelled).
+ * Unlike an owner's own reply it does not pause the AI. Returns the message id.
+ */
+export function addSalonMessage(conversation: LiveConversation, message: Translated, now = Date.now()): string {
+  const id = `owner-${now}-${randomUUID().slice(0, 8)}`;
+  conversation.messages.push({ id, sender: 'owner', time: timeLabel(now), ...message });
+  conversation.updatedAt = now;
+  return id;
 }
 
 export function needsOwner(conversation: LiveConversation, reason: string) {
@@ -180,6 +230,7 @@ export function toPublicConversation(conversation: LiveConversation): Conversati
     lastMessageAt: new Date(conversation.updatedAt).toISOString(),
     messages: conversation.messages,
     bookingRequest: conversation.bookingRequest,
+    cancellationRequest: conversation.cancellationRequest,
   };
 }
 
@@ -205,6 +256,14 @@ export const visitorMessages = (conversation: LiveConversation | undefined): Vis
     text: message.original,
     time: message.time,
   }));
+
+/**
+ * Who answers the website visitor now: the AI assistant, or the salon's team once the owner has
+ * taken the chat over. The visitor's page shows it, so nobody waits for an instant answer that
+ * will not come.
+ */
+export type AnsweredBy = 'assistant' | 'team';
+export const answeredBy = (conversation: LiveConversation | null | undefined): AnsweredBy => conversation?.takenOver ? 'team' : 'assistant';
 
 export const webChatId = (sessionId: string) => `web-${sessionId}`;
 export const isValidSessionId = (value: unknown): value is string =>

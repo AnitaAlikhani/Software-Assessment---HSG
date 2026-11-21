@@ -130,11 +130,11 @@ test('setting the value it already has, or one that says the same, changes nothi
 // ---------- the version and the path ----------
 
 test('the key carries the version and the path the app is served from', () => {
-  assert.equal(DEMO_STORAGE_VERSION, 'booking-demo-v4');
-  assert.equal(SALON, 'booking-demo-v4:/:salon');
+  assert.equal(DEMO_STORAGE_VERSION, 'booking-demo-v5');
+  assert.equal(SALON, 'booking-demo-v5:/:salon');
   // github.io serves several builds under one address: each path keeps a salon of its own.
-  assert.equal(salonStorageKey('/Software-Assessment---HSG/'), 'booking-demo-v4:/Software-Assessment---HSG/:salon');
-  assert.equal(demoStorageKey('draft', '/previews/x/'), 'booking-demo-v4:/previews/x/:draft');
+  assert.equal(salonStorageKey('/Software-Assessment---HSG/'), 'booking-demo-v5:/Software-Assessment---HSG/:salon');
+  assert.equal(demoStorageKey('draft', '/previews/x/'), 'booking-demo-v5:/previews/x/:draft');
   // The same place with and without the name of its file is one place.
   assert.equal(salonStorageKey('/previews/x/index.html'), salonStorageKey('/previews/x/'));
   assert.equal(salonStorageKey('/index.html'), SALON);
@@ -153,7 +153,7 @@ test('another build under the same address and an older version keep their own d
   await settled();
   assert.equal(preview.read('companySettings', initialCompanySettings).companyName, initialCompanySettings.companyName);
   assert.equal(earlier.read('companySettings', initialCompanySettings).companyName, initialCompanySettings.companyName);
-  assert.deepEqual([...browser.stored.keys()].sort(), ['booking-demo-v3:/:salon', 'booking-demo-v4:/:salon', 'booking-demo-v4:/previews/x/:salon']);
+  assert.deepEqual([...browser.stored.keys()].sort(), ['booking-demo-v3:/:salon', 'booking-demo-v5:/:salon', 'booking-demo-v5:/previews/x/:salon']);
   assert.equal(new DemoStore({ ...setup, prefix: PREFIX }).read('companySettings', initialCompanySettings).companyName, 'Main build');
 });
 
@@ -165,11 +165,11 @@ test('what earlier versions stored for this place is taken out; everything else 
     'booking-demo-v3:/:requests', 'booking-demo-v3:/:resources', 'booking-demo-v2:/:requests', 'booking-demo-v3:/previews/x/:requests',
     demoStorageKey('draft', '/'), 'slotbee-interest-dismissed',
   ]);
-  const local = entries(['booking-demo-v3:/:salon', SALON, 'booking-demo-v5:/:salon', 'booking-demo-v3:/index.html:requests', 'slotbee-research', 'slotbee-live-key']);
+  const local = entries(['booking-demo-v3:/:salon', SALON, 'booking-demo-v6:/:salon', 'booking-demo-v3:/index.html:requests', 'slotbee-research', 'slotbee-live-key']);
   forgetRetiredDemoState([session, local, null, blockedStorage], '/index.html');
   assert.deepEqual(names(session), ['booking-demo-v3:/previews/x/:requests', demoStorageKey('draft', '/'), 'slotbee-interest-dismissed']);
   // A newer version's salon is never touched: a tab that still runs an older build must not delete it.
-  assert.deepEqual(names(local), [SALON, 'booking-demo-v5:/:salon', 'slotbee-research', 'slotbee-live-key']);
+  assert.deepEqual(names(local), [SALON, 'booking-demo-v6:/:salon', 'slotbee-research', 'slotbee-live-key']);
 });
 
 // ---------- the values that stay with one tab ----------

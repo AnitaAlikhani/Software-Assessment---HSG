@@ -13,7 +13,9 @@ import { render, TELL_WORDS } from './renderHelpers';
 // Home's inbox, "Waiting for you": what is in it, in which order, and what an entry says once
 // the owner has answered it. The moment is fixed (Monday 5 October 2026, 12:00 in Zurich): the
 // first request is Petra Meier's for Wednesday 7 October at 10:00, the second Monika Hofer's
-// for Thursday 8 October at 14:30. Three sample chats wait for the owner.
+// for Thursday 8 October at 14:30. Four of the salon's chats wait for the owner: Chloé's question
+// about a time after closing, and three booking requests the AI took (Sabrina's colouring on
+// Friday, Reto's men's cut and Giulia's move, both on Saturday).
 
 const ZONE = 'Europe/Zurich';
 const SALON = 'Bella Hair Salon';
@@ -45,10 +47,10 @@ const answered = (request: AppointmentRequest, outcome: 'accepted' | 'moved' | '
 test('the inbox lists requests, chat requests and waiting chats, each once, the oldest need first', () => {
   const all = items({ conversations: [tomsRequest, lena, ...demoConversations] });
   assert.deepEqual(keys(all), [
-    // Chats: whoever has waited longest. Giulia wrote at 10:25, Chloé at 11:18, Camille at 11:54, Lena at 11:59.
-    'chat:conv-giulia', 'chat:conv-chloe', 'chat:conv-camille', 'chat:live-web-lena',
+    // Chats: whoever has waited longest. Chloé wrote at 11:18, Lena at 11:59.
+    'chat:conv-chloe', 'chat:live-web-lena',
     // Requests: the nearest appointment first, wherever the request came from.
-    'request:req-1', 'request:req-2', 'chat:live-web-tom',
+    'request:req-1', 'request:req-2', 'chat:live-web-tom', 'chat:conv-sabrina', 'chat:conv-reto', 'chat:conv-giulia',
   ]);
   assert.ok(all.every(isWaiting));
   // The second request came in earlier (47 minutes ago, the first 12): the day asked for decides, not the age.
@@ -58,7 +60,7 @@ test('the inbox lists requests, chat requests and waiting chats, each once, the 
   // Chats nobody waits in, and a request that is confirmed, are not listed.
   const calm = items({ requests: [], conversations: [
     liveChat('done', { status: 'booked', bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' } }),
-    ...demoConversations.map((conversation) => ({ ...conversation, status: 'ai-handled' as const })),
+    ...demoConversations.map((conversation) => ({ ...conversation, status: 'ai-handled' as const, bookingRequest: conversation.bookingRequest && { ...conversation.bookingRequest, status: 'confirmed' as const } })),
   ] });
   assert.deepEqual(calm, []);
   // The owner answered in the chat without confirming: the request still waits, so it is still listed.
@@ -66,12 +68,12 @@ test('the inbox lists requests, chat requests and waiting chats, each once, the 
 });
 
 test('a request whose time has passed stands at the top, and the order follows the salon\'s clock', () => {
-  // Asked for 09:00 this morning; it is 12:00 now, and the first chat has waited since 10:25.
+  // Asked for 09:00 this morning; it is 12:00 now, and the first chat has waited since 11:18.
   const overdue: AppointmentRequest = { ...wash, id: 'req-late', date: '2026-10-05', timeStr: '09:00 - 09:30' };
   assert.equal(keys(items({ requests: [...demoRequests, overdue] }))[0], 'request:req-late');
-  // Asked for 11:00: after Giulia (10:25), before Chloé (11:18). 08:25 UTC is 10:25 in Zurich.
-  const between: AppointmentRequest = { ...overdue, timeStr: '11:00 - 11:30' };
-  assert.deepEqual(keys(items({ requests: [between] })).slice(0, 3), ['chat:conv-giulia', 'request:req-late', 'chat:conv-chloe']);
+  // Asked for 11:30: after Chloé (11:18), before Lena (11:59). 09:59 UTC is 11:59 in Zurich.
+  const between: AppointmentRequest = { ...overdue, timeStr: '11:30 - 12:00' };
+  assert.deepEqual(keys(items({ requests: [between], conversations: [lena, ...demoConversations] })).slice(0, 3), ['chat:conv-chloe', 'request:req-late', 'chat:live-web-lena']);
   // Two requests for the same minute: the one that came in first comes first.
   const twin: AppointmentRequest = { ...wash, id: 'req-twin', createdAt: '2026-10-05T09:00:00.000Z' };
   assert.deepEqual(keys(items({ requests: [wash, twin], conversations: [] })), ['request:req-twin', 'request:req-1']);
@@ -81,8 +83,9 @@ test('a request whose time has passed stands at the top, and the order follows t
 });
 
 test('open requests are counted wherever they came from', () => {
-  assert.equal(openRequestCount(demoRequests, demoConversations), 2);
-  assert.equal(openRequestCount(demoRequests, [tomsRequest, lena, ...demoConversations]), 3);
+  // Two from the booking page, three in the salon's chats (Sabrina, Reto, Giulia).
+  assert.equal(openRequestCount(demoRequests, demoConversations), 5);
+  assert.equal(openRequestCount(demoRequests, [tomsRequest, lena, ...demoConversations]), 6);
   assert.equal(openRequestCount([{ ...wash, status: 'accepted' }], [{ ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' } }]), 0);
 });
 
@@ -141,7 +144,7 @@ test('one answer per request is remembered, and old ones are dropped with the ne
 
 const chatAnswer = (delivery: 'pending' | 'done' | 'failed', problem?: string): RequestAnswer => ({
   kind: 'chat', id: tomsRequest.id, at: FIXED_NOW.getTime() - 30_000, appointmentId: 'live-appt-live-web-tom-2026-10-08-1500',
-  customerName: 'Tom', serviceName: 'Haircut', staffName: 'Anna Weber', date: '2026-10-08', startTime: '15:00', endTime: '15:30', delivery, problem,
+  customerName: 'Tom', serviceName: 'Haircut', staffName: 'Anna Weber', date: '2026-10-08', startTime: '15:00', endTime: '15:30', live: true, delivery, problem,
 });
 
 test('an accepted chat request stands in the place of the request, also before the server has answered', () => {
@@ -168,7 +171,7 @@ const home = (partial: Partial<React.ComponentProps<typeof HomeView>> = {}) => r
   requests: demoRequests, selectedRequestId: null, now: FIXED_NOW, availabilityContext: context(),
   conversations: demoConversations, customers: demoCustomers, salonName: SALON,
   onAcceptRequest: () => null, onRejectRequest: nothing, onMoveRequest: () => null, onUndoAnswer: () => null, onDismissAnswer: nothing,
-  onAcceptChatRequest: () => null, onSimulateNewRequest: nothing, onOpenAppointment: nothing, onOpenConversations: nothing, onOpenCustomer: nothing,
+  onChatBooking: () => null, onSimulateNewRequest: nothing, onOpenAppointment: nothing, onOpenConversations: nothing, onOpenCustomer: nothing,
   ...partial,
 }));
 /** The entry of the inbox that names this customer. */
@@ -194,12 +197,14 @@ test('a request from the booking page shows who, what, when, the contact and thr
   // Every button is a full tap target.
   for (const button of petra.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
   // A customer who has a chat: the request leads there too.
-  const camille = demoCustomers.find((customer) => customer.id === 'cust-camille')!;
-  const hers: AppointmentRequest = { ...wash, id: 'req-camille', customerId: camille.id, customerName: camille.name, customerPhone: camille.phone };
-  const withChat = entry(home({ requests: [hers], availabilityContext: context({ requests: [hers] }), conversations: [] }), camille.name);
-  assert.deepEqual(buttons(withChat), [camille.name, 'Accept', 'Move', 'Reject']);
-  const linked = entry(home({ requests: [hers], availabilityContext: context({ requests: [hers] }), conversations: demoConversations.filter((item) => item.id === 'conv-camille').map((item) => ({ ...item, status: 'ai-handled' as const })) }), camille.name);
-  assert.deepEqual(buttons(linked), [camille.name, 'Open chat', 'Accept', 'Move', 'Reject']);
+  const sabrina = demoCustomers.find((customer) => customer.id === 'cust-sabrina')!;
+  const hers: AppointmentRequest = { ...wash, id: 'req-sabrina', customerId: sabrina.id, customerName: sabrina.name, customerPhone: sabrina.phone };
+  const withChat = entry(home({ requests: [hers], availabilityContext: context({ requests: [hers] }), conversations: [] }), sabrina.name);
+  assert.deepEqual(buttons(withChat), [sabrina.name, 'Accept', 'Move', 'Reject']);
+  // Her chat, with nothing waiting in it (no question, no booking request).
+  const calmChat = demoConversations.filter((item) => item.id === 'conv-sabrina').map((item) => ({ ...item, status: 'ai-handled' as const, bookingRequest: undefined }));
+  const linked = entry(home({ requests: [hers], availabilityContext: context({ requests: [hers] }), conversations: calmChat }), sabrina.name);
+  assert.deepEqual(buttons(linked), [sabrina.name, 'Open chat', 'Accept', 'Move', 'Reject']);
 });
 
 test('a request that cannot be accepted says why and offers "Move" first, instead of an Accept that would fail', () => {
@@ -217,27 +222,44 @@ test('a request that cannot be accepted says why and offers "Move" first, instea
   assert.deepEqual(buttons(entry(home({ availabilityContext: context({ shiftOverview: cut }) }), 'Monika Hofer')), ['Monika Hofer', 'Accept', 'Move', 'Reject']);
 });
 
-test('a chat\'s booking request offers "Accept" and "Open chat", and nothing the server cannot do', () => {
+test('a chat\'s booking request offers the answers of the chat\'s own card: Confirm, Suggest another time, Decline', () => {
   const html = home({ conversations: [tomsRequest, lena, ...demoConversations] });
   const tom = entry(html, 'Tom');
-  assert.match(words(tom), /^.*THU 08\.10\. Booking request from a chat · 1 minute ago Tom Haircut · 15:00–15:30 with (Anna Weber|Selina Keller|Luca Frei), who is free then Website chat Accept adds it to your calendar and confirms it in the chat\. Accept Open chat$/);
-  assert.deepEqual(buttons(tom), ['Accept', 'Open chat']);
-  assert.doesNotMatch(words(tom), /reject|decline|move/i);
-  // Nobody is free at that time: the entry says so, and the chat is the way out.
+  assert.match(words(tom), /^THU 08\.10\. Booking request from a chat · 1 minute ago Tom Haircut · 15:00–15:30 with Anna Weber Website chat Anna Weber is free then\. Checked against the opening hours, the working hours, time off and your calendar\. Confirm adds it to your calendar and sends Tom the confirmation in the chat\. Confirm Suggest another time Decline Open chat$/);
+  assert.deepEqual(buttons(tom), ['Confirm', 'Suggest another time', 'Decline', 'Open chat']);
+  for (const button of tom.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
+  // Two stylists are free (an empty calendar): the owner can give it to the other one.
+  const two = entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: [], requests: [] }) }), 'Tom');
+  assert.match(two, /<label[^>]*>Stylist who is free then<\/label><select[^>]*>(<option[^>]*>[^<]*<\/option>)+<\/select>/);
+  assert.match(two, /<option value="emp-1" selected="">Anna Weber<\/option><option value="emp-2">Selina Keller<\/option>/);
+  // Nobody is free at that time: the entry says so, and offers another time or declining instead of a Confirm that would fail.
   const full = [
     { ...demoEvents[0], id: 'x-1', employeeId: 'emp-1', staffName: 'Anna Weber', date: '2026-10-08', startTime: '15:00', endTime: '15:30' },
+    { ...demoEvents[0], id: 'x-2', employeeId: 'emp-2', staffName: 'Selina Keller', date: '2026-10-08', startTime: '15:00', endTime: '15:30' },
     ...demoEvents,
   ] as CalendarEvent[];
   const blocked = entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: full }) }), 'Tom');
-  assert.match(words(blocked), /Nobody who offers Haircut is free on Thu, 08\.10\.2026 at 15:00–15:30\. Open the chat to agree a new time\. Open chat$/);
-  assert.deepEqual(buttons(blocked), ['Open chat']);
-  // Without a way to accept (a page that only shows the list), no "Accept" is drawn.
-  assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], onAcceptChatRequest: undefined }), 'Tom')), ['Open chat']);
+  assert.match(words(blocked), /Nobody who offers Haircut is free on Thu, 08\.10\.2026 at 15:00–15:30\. Suggest another time, or decline\. Suggest another time Decline Open chat$/);
+  assert.deepEqual(buttons(blocked), ['Suggest another time', 'Decline', 'Open chat']);
+  // A stylist the customer asked for is shown as such.
+  const asking = (employeeId: string, staffName: string) => ({ ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, employeeId, staffName } });
+  assert.match(words(entry(home({ conversations: [asking('emp-1', 'Anna Weber')] }), 'Tom')), /Haircut · 15:00–15:30 with Anna Weber, as asked/);
+  // Asked for a stylist who is not free: the entry says why, and who is free instead.
+  assert.match(words(entry(home({ conversations: [asking('emp-2', 'Selina Keller')] }), 'Tom')),
+    /Haircut · 15:00–15:30 asked for Selina Keller Website chat Tom asked for Selina Keller\. Selina Keller already has Giulia Rossi at 15:00–15:30 on Thu, 08\.10\.2026\. Anna Weber is free then\. Confirm with Anna Weber, suggest another time, or decline\. Stylist who is free then Anna Weber/);
+  // Without a way to answer (a page that only shows the list), only "Open chat" is drawn.
+  assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], onChatBooking: undefined }), 'Tom')), ['Open chat']);
+  // A customer's wish to cancel stands in the list as such, with its two answers.
+  const booked = { ...demoEvents[0], id: 'live-appt-live-web-tom-2026-10-08-1500', conversationId: tomsRequest.id, customerName: 'Tom', serviceName: 'Haircut', employeeId: 'emp-1', staffName: 'Anna Weber', date: '2026-10-08', startTime: '15:00', endTime: '15:30' };
+  const cancelling = { ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' as const }, cancellationRequest: { service: 'Haircut', date: '2026-10-08', time: '15:00' } };
+  const cancel = entry(home({ conversations: [cancelling], availabilityContext: context({ events: [booked, ...demoEvents] }) }), 'Tom wants to cancel');
+  assert.match(words(cancel), /^THU 08\.10\. Cancellation request from a chat · 1 minute ago Tom wants to cancel Haircut · 15:00–15:30 with Anna Weber Website chat Cancel appointment takes it out of your calendar and sends Tom the cancellation in the chat\. Keep appointment sends nothing: write to Tom yourself\. Cancel appointment Keep appointment Open chat$/);
+  assert.match(html, /Waiting for you<\/h2><span[^>]*>8</); // two requests, Tom, Lena and four of the salon's own chats
   // A chat that waits for the owner is one row that opens the chat, with the reason it waits for.
   const row = entry(html, 'Lena');
   assert.equal(row.match(/<button/g)?.length, 1);
   assert.match(words(row), /Chat · 1 minute ago Lena English The customer asked for a discount\. Open chat$/);
-  assert.match(words(entry(html, 'Giulia Rossi')), /Chat · 1 hour ago Giulia Rossi IT The customer wants to change an existing booking\./);
+  assert.match(words(entry(html, 'Chloé Favre')), /Chat · 42 minutes ago Chloé Favre DE The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\. Open chat$/);
   assert.match(words(entry(home({ conversations: [{ ...lena, attentionReason: undefined }] }), 'Lena')), /The customer is waiting for your answer\./);
 });
 
@@ -258,7 +280,7 @@ test('an accepted request says that the app does not tell the customer, shows th
   // Nothing claims that the customer was told, and the entry no longer counts as waiting.
   assert.doesNotMatch(text, CLAIMS_CONTACT);
   assert.doesNotMatch(text, TELL_WORDS);
-  assert.match(html, /Waiting for you<\/h2><span[^>]*>4</);
+  assert.match(html, /Waiting for you<\/h2><span[^>]*>5</);
   // A customer whose record says French, Italian or English gets that language.
   for (const [language, opening] of [['FR', 'Bonjour Petra Meier, votre rendez-vous chez Bella Hair Salon est confirmé'], ['IT', 'Buongiorno Petra Meier, il Suo appuntamento presso Bella Hair Salon è confermato'], ['EN', 'Hello Petra Meier, your appointment at Bella Hair Salon is confirmed']] as const) {
     const customers = demoCustomers.map((customer) => customer.id === wash.customerId ? { ...customer, language } : customer);
@@ -300,32 +322,39 @@ test('a rejected and a moved request say the same, each with its own text and it
   assert.deepEqual(buttons(bare), ['Petra Meier', 'Copy text']);
 });
 
-test('an accepted chat request says where the confirmation is, and only what is true of it', () => {
+test('an answered chat request says what was done and what the customer got, and only what is true of it', () => {
   const card = (answer: RequestAnswer, conversations: Conversation[] = [tomsRequest]) => entry(home({ conversations, answers: [answer] }), 'Tom');
-  const pending = card(chatAnswer('pending'));
-  assert.match(words(pending), /Accepted Tom Haircut · Thu, 08\.10\.2026, 15:00–15:30 · with Anna Weber The appointment is in your calendar\. The confirmation is on its way into the chat…/);
-  assert.deepEqual(buttons(pending), ['Open chat']);
   const done = card(chatAnswer('done'));
-  assert.match(words(done), /The appointment is in your calendar\. Tom has the confirmation in the chat\./);
+  assert.match(words(done), /^Confirmed Tom Haircut · Thu, 08\.10\.2026, 15:00–15:30 · with Anna Weber The appointment is in your calendar\. Tom has the confirmation in the chat\./);
   assert.deepEqual(buttons(done), ['Open chat', 'Done']);
-  // The server did not take it: the card says so, and offers to try again while the request still waits.
+  // An answer stored by an earlier build, while its confirmation was on its way or had failed.
+  assert.match(words(card(chatAnswer('pending'))), /The confirmation is on its way into the chat…/);
   const failed = card(chatAnswer('failed', 'The confirmation could not be sent. Try again.'));
   assert.match(words(failed), /The appointment is in your calendar, but the confirmation did not get into the chat\. The confirmation could not be sent\. Try again\. You can also open the chat and write to Tom yourself\. Try again Open chat Done$/);
-  assert.deepEqual(buttons(failed), ['Try again', 'Open chat', 'Done']);
-  // The customer deleted the chat meanwhile: there is nothing to open or to try again, and the card says only what happened.
-  const deleted = card(chatAnswer('failed', 'This chat was deleted by the customer.'), []);
-  assert.match(words(deleted), /did not get into the chat\. This chat was deleted by the customer\. Done$/);
-  assert.deepEqual(buttons(deleted), ['Done']);
-  // What is in the chat cannot be taken back from here: no "Undo", and no word of rejecting.
-  for (const html of [pending, done, failed]) assert.doesNotMatch(words(html), /undo|reject|decline/i);
+  // The customer deleted the chat meanwhile: there is nothing to open or to try again.
+  assert.deepEqual(buttons(card(chatAnswer('failed', 'This chat was deleted by the customer.'), [])), ['Done']);
+  // The other answers, each in its own words.
+  const other = (outcome: 'suggested' | 'declined' | 'cancelled' | 'kept', partial: Partial<Extract<RequestAnswer, { kind: 'chat' }>> = {}) =>
+    words(card({ ...chatAnswer('done'), outcome, appointmentId: '', asked: { date: '2026-10-08', time: '15:00' }, ...partial } as RequestAnswer));
+  assert.match(other('suggested', { date: '2026-10-09', startTime: '10:00', endTime: '10:30' }), /^Other time suggested Tom Haircut · Fri, 09\.10\.2026, 10:00–10:30 · with Anna Weber Tom has the suggestion in the chat\. When Tom takes it up, it comes back here as a request\./);
+  assert.match(other('declined', { staffName: '' }), /^Declined Tom Haircut · Thu, 08\.10\.2026, 15:00–15:30 Tom has the answer in the chat\. Open chat Done$/);
+  assert.match(other('cancelled'), /The appointment has left your calendar\. Tom has the cancellation in the chat\./);
+  assert.match(other('kept'), /^Appointment kept .* Nothing was sent to Tom\. Write to them in the chat yourself\./);
+  // One of the salon's own chats: the answer is in the chat, and nothing claims a message was sent.
+  assert.match(other('declined', { live: false }), /The answer is in the chat\./);
+  // What is in the chat cannot be taken back from here: no "Undo".
+  for (const html of [done, failed]) assert.doesNotMatch(words(html), /undo/i);
   // With the appointment in the calendar, the card leads to it.
   const booked = { ...demoEvents[0], id: 'live-appt-live-web-tom-2026-10-08-1500', conversationId: tomsRequest.id };
   assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: [booked, ...demoEvents] }), answers: [chatAnswer('done')] }), 'Tom')), ['Open chat', 'View appointment', 'Done']);
   // Given to another customer since (the form takes the chat off it then), it is no longer offered from Tom's card.
   const givenAway = { ...booked, conversationId: undefined, customerId: 'cust-001', customerName: 'Petra Meier' };
   assert.deepEqual(buttons(entry(home({ conversations: [tomsRequest], availabilityContext: context({ events: [givenAway, ...demoEvents] }), answers: [chatAnswer('done')] }), 'Tom')), ['Open chat', 'Done']);
+  // A new request in the same chat (the customer took up the suggestion) is listed as itself, not hidden behind the answer.
+  const suggested = { ...chatAnswer('done'), outcome: 'suggested', date: '2026-10-09', startTime: '10:00', endTime: '10:30', asked: { date: '2026-10-08', time: '15:00' } } as RequestAnswer;
+  const takenUp = { ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, date: '2026-10-09', time: '10:00' } };
+  assert.deepEqual(items({ conversations: [takenUp], requests: [], answers: [suggested] }).map((item) => item.kind), ['chat-request']);
 });
-
 
 test('an accepted request follows its appointment: a change in the calendar changes the text and takes Undo away', () => {
   // The owner accepted Petra's wash for 10:00 and then moved the appointment to 14:00 in the calendar.

@@ -1,17 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { analyzeIncoming } from '../server/ai.js';
-import { recordAnalysis } from '../server/recordAnalysis.js';
+import { cleanName } from '../server/bookingRules.js';
+import { applyAi, askAi, storeIncoming } from '../server/chatFlow.js';
 import { hasLiveAccess } from '../server/access.js';
-import { deleteOwnChat, loadConversation, loadForUpdate, saveConversation, storeConfigured } from '../server/store.js';
-import {
-  addCustomerMessage,
-  addReply,
-  isValidSessionId,
-  needsOwner,
-  stateFor,
-  visitorMessages,
-  webChatId,
-} from '../server/whatsappCore.js';
+import { deleteOwnChat, loadConversation, loadForUpdate, storeConfigured } from '../server/store.js';
+import { answeredBy, isValidSessionId, visitorMessages, webChatId } from '../server/whatsappCore.js';
 import { initialCompanySettings } from '../src/mockData.js';
 
 const MAX_TEXT = 1000;
@@ -50,7 +42,8 @@ export async function GET(request: Request) {
   if (sessionId === null) return Response.json({ messages: [] }, { headers: noStore });
   if (!isValidSessionId(sessionId)) return tryAgain();
   const conversation = await loadConversation(webChatId(sessionId));
-  return Response.json({ messages: visitorMessages(conversation ?? undefined) }, { headers: noStore });
+  // Who answers is said only for a chat that exists.
+  return Response.json({ messages: visitorMessages(conversation ?? undefined), ...(conversation ? { answeredBy: answeredBy(conversation) } : {}) }, { headers: noStore });
 }
 
 /** A visitor writes to the salon from the website chat. The AI answers like it would on WhatsApp. */
@@ -62,41 +55,32 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return tryAgain(); }
   const sessionId = body.session;
   const text = typeof body.text === 'string' ? body.text.trim().slice(0, MAX_TEXT) : '';
-  const name = (typeof body.name === 'string' ? body.name.trim().slice(0, 40) : '') || 'Website visitor';
+  // The name is shown to the owner and may end up in a message to the visitor: no markup, no line breaks.
+  const name = cleanName(body.name) || 'Website visitor';
   if (!isValidSessionId(sessionId) || !text) return tryAgain();
 
   const waId = webChatId(sessionId);
-  const { conversation: existing, version } = await loadForUpdate(waId);
-  const state = stateFor(existing);
-  if ((existing?.messages.length ?? 0) >= MAX_MESSAGES_PER_CHAT) {
+  const loaded = await loadForUpdate(waId);
+  if ((loaded.conversation?.messages.length ?? 0) >= MAX_MESSAGES_PER_CHAT) {
     return Response.json({ error: `This conversation has become long. Please start a new chat${orCall()}.`, full: true }, { status: 429 });
   }
 
-  let aiFailed = false;
+  // The message is stored first: if the AI is slow or fails, the salon has it all the same.
   const incoming = { id: `web-${randomUUID()}`, waId, name, text, timestamp: Date.now(), channel: 'Website' as const };
-  try {
-    const started = Date.now();
-    const analysis = await analyzeIncoming(existing?.messages ?? [], text);
-    console.log(`AI reply took ${Date.now() - started} ms`);
-    const { conversation, reply } = recordAnalysis(state, incoming, analysis);
-    if (reply) addReply(conversation, 'ai', reply);
-  } catch (error) {
-    // Keep the message so the owner can still answer it.
-    console.error(error);
-    aiFailed = true;
-    const conversation = state.processedIds.includes(incoming.id)
-      ? state.conversations.find(item => item.waId === waId)!
-      : addCustomerMessage(state, incoming, { original: text, translation: text }, 'EN');
-    needsOwner(conversation, 'The AI could not answer this message. Please reply yourself.');
-  }
-  const conversation = state.conversations.find(item => item.waId === waId)!;
+  const stored = await storeIncoming(incoming, loaded);
+  const analysis = stored ? await askAi(stored.conversation, incoming.id) : null;
+  // The answer is added to the chat as it is now. If the owner took it over meanwhile, no AI reply is added.
+  const answered = stored ? await applyAi(stored, incoming.id, analysis, true) : null;
   // The answer took a while. If the visitor deleted the chat meanwhile (the page can be open
   // twice), it stays deleted: nothing is stored, and neither the earlier messages nor the answer
   // go back to the page.
-  if (!(await saveConversation(conversation, version))) {
+  if (!answered) {
     return Response.json({ error: 'Your chat has been deleted, so this message was not sent. You can send it again to start a new chat.' }, { status: 410, headers: noStore });
   }
-  return Response.json({ messages: visitorMessages(conversation), aiFailed }, { headers: noStore });
+  return Response.json(
+    { messages: visitorMessages(answered.conversation), aiFailed: !analysis, answeredBy: answeredBy(answered.conversation) },
+    { headers: noStore },
+  );
 }
 
 /** A visitor deletes their own chat: the messages are gone here and for the salon. */

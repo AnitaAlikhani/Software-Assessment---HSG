@@ -146,18 +146,21 @@ export interface DemoPerson {
   email: string;
 }
 
-export type ChatPerson = 'camille' | 'chloe' | 'giulia' | 'marie' | 'lea' | 'john';
+export type ChatPerson = 'sabrina' | 'reto' | 'chloe' | 'giulia' | 'marie' | 'lara' | 'john';
 
 /**
- * The six people of the sample chats. Their appointments are the ones the chats talk about,
- * so they are placed by hand (see demoTimeline) instead of following a habit.
+ * The seven people of the salon's own chats: four write German (Reto in Swiss German, as many
+ * people here write their messages), one French, one Italian and one English, about as the
+ * salon's customers speak. Their appointments are the ones the chats talk about, so they are
+ * placed by hand (see demoTimeline) instead of following a habit.
  */
 export const demoChatPeople: Record<ChatPerson, DemoPerson> = {
-  camille: { id: 'cust-camille', name: 'Camille Bernard', language: 'FR', phone: '+41785552740', email: '' },
+  sabrina: { id: 'cust-sabrina', name: 'Sabrina Lüchinger', language: 'DE', phone: '+41785552740', email: '' },
+  reto: { id: 'cust-reto', name: 'Reto Hollenstein', language: 'DE', phone: '+41795557718', email: '' },
   chloe: { id: 'cust-chloe', name: 'Chloé Favre', language: 'DE', phone: '+41775559345', email: '' },
   giulia: { id: 'cust-giulia', name: 'Giulia Rossi', language: 'IT', phone: '+41765554078', email: '' },
   marie: { id: 'cust-marie', name: 'Marie Dupont', language: 'FR', phone: '+41795556112', email: 'marie.dupont@example.com' },
-  lea: { id: 'cust-lea', name: 'Léa Girard', language: 'FR', phone: '+41765558234', email: '' },
+  lara: { id: 'cust-lara', name: 'Lara Rüegg', language: 'DE', phone: '+41765558234', email: '' },
   john: { id: 'cust-john', name: 'John Bennett', language: 'EN', phone: '+41785551490', email: '' },
 };
 
@@ -288,7 +291,7 @@ const plainLetters = (text: string): string => text
 
 interface PoolPerson extends DemoPerson { kind: Kind }
 
-/** Every customer the salon has besides the six chat people: the same list on every day. */
+/** Every customer the salon has besides the seven chat people: the same list on every day. */
 const buildPool = (): PoolPerson[] => {
   const pool: PoolPerson[] = [];
   // Phone numbers are clearly invented (555 block). No two end on neighbouring numbers. They are
@@ -430,11 +433,12 @@ const demoHabits = (): Map<string, Habit> => {
 // ---------- the moments and dates everything else hangs on ----------
 
 /**
- * When the sample chats were written and which appointments they are about, for a given "now".
+ * When the salon's own chats were written and which appointments they are about, for a given "now".
  *
- * Four chats are from today (minutes or hours ago) and two from last evening; none is ever in
- * the future. A chat that names a weekday means the first such day after the day it was written,
- * so the appointment in the calendar is on the weekday the chat mentions, whatever day it is.
+ * Five chats are from today (minutes or hours ago) and two from last evening; none is ever in
+ * the future. Giulia's chat also holds the booking she made in it nine days ago. A chat that
+ * names a weekday means the first such day after the day it was written, so the appointment in
+ * the calendar is on the weekday the chat mentions, whatever day it is.
  * All dates depend on today's date only: every tab opened today shows the same calendar.
  */
 export const demoTimeline = (timeZone?: string, now = new Date()) => {
@@ -447,28 +451,37 @@ export const demoTimeline = (timeZone?: string, now = new Date()) => {
   const ago = (...minutes: number[]) => minutes.map((value) =>
     new Date(now.getTime() - Math.min(value, Math.floor(value * sinceMidnight / longestSpan)) * 60_000));
   const lastEvening = (...times: string[]) => times.map((time) => salonInstant(yesterday, time, timeZone));
+  // Giulia booked her haircut in her chat nine days ago; the salon's confirmation is the booking's time.
+  const giuliaBookedOn = addDays(today, -9);
   return {
     today,
+    /** When each message was sent, in the order of the chat. The salon's confirmation is the moment the appointment was made. */
     sent: {
-      camille: ago(14, 13, 6),
-      chloe: ago(42),
-      giulia: ago(95),
-      marie: ago(longestSpan, longestSpan, 181, 180),
-      lea: lastEvening('21:12', '21:12', '21:14', '21:14'),
-      john: lastEvening('17:40', '17:40', '17:42', '17:42'),
+      sabrina: ago(16, 16, 14, 14, 6),
+      reto: ago(31, 31, 28, 28),
+      chloe: ago(42, 42),
+      giulia: [...['16:04', '16:05', '16:20'].map((time) => salonInstant(giuliaBookedOn, time, timeZone)), ...ago(95, 95)],
+      marie: ago(longestSpan, longestSpan, 183, 183, 180, 178),
+      lara: lastEvening('21:10', '21:10', '21:12', '21:12', '21:14', '21:15'),
+      john: lastEvening('17:38', '17:38', '17:40', '17:40', '17:42', '17:44'),
     },
+    /** Index of the salon's confirmation among the messages of the chats whose booking is made. */
+    confirmedAt: { giulia: 2, marie: 4, lara: 4, john: 4 },
+    giuliaBookedOn,
     /** Appointments that already exist because of a chat (ids cal-2, cal-3, cal-john, cal-giulia). */
     booked: {
-      marie: { date: upcomingWeekday(4, today), start: '13:30' },     // "Thursday 13:30", booked this morning
-      lea: { date: upcomingWeekday(5, yesterday), start: '11:00' },   // "Friday 11:00", booked last evening
-      john: { date: upcomingWeekday(3, yesterday), start: '15:00' },  // "Wednesday at 15:00", booked last evening
+      marie: { date: upcomingWeekday(4, today), start: '13:30' },     // "jeudi vers 13h30", confirmed this morning
+      lara: { date: upcomingWeekday(5, yesterday), start: '11:00' },  // "Freitag um 11 Uhr", confirmed last evening
+      john: { date: upcomingWeekday(3, yesterday), start: '15:00' },  // "Wednesday at 3 pm", confirmed last evening
       giulia: { date: upcomingWeekday(4, today), start: '15:00' },    // the one she asks to move
     },
-    /** Times the chats offer or book later; the calendar keeps them free. */
+    /** Times the chats ask for or the owner can offer; the calendar keeps them free. */
     open: {
-      camille: { date: upcomingWeekday(5, today), start: '11:00' },   // colouring on "Friday"
-      giulia: { date: upcomingWeekday(6, today), start: '10:00', alternative: '11:30' }, // move to "Saturday"
-      chloe: { date: upcomingWeekday(5, today), start: '18:00' },     // the last time on "Friday"
+      sabrina: { date: upcomingWeekday(5, today), start: '11:00' },   // colouring on "Freitag"
+      reto: { date: upcomingWeekday(6, today), start: '09:00' },      // men's cut on "Samschtig" with Luca
+      giulia: { date: upcomingWeekday(6, today), start: '10:00' },    // move to "sabato"
+      // Chloé asks for Friday 19:00, after closing time. The two times the owner can offer instead.
+      chloe: { date: upcomingWeekday(5, today), start: '18:00', saturday: upcomingWeekday(6, today), saturdayStart: '11:30' },
     },
   };
 };
@@ -577,32 +590,35 @@ export const createDemoEvents = (timeZone?: string, now = new Date()): CalendarE
   // 1. Appointments placed by hand: the ones the chats are about, and earlier visits of the same people.
   const weeksAgo = (weeks: number, weekday: number) => addDays(startOfWeek(today), -7 * weeks + weekday - 1);
   const fixed: CalendarEvent[] = [
+    // The AI took these requests in the chats and the owner confirmed them there (isAiBooked: they came
+    // in through the AI receptionist, as a confirmed live chat booking does).
     buildEvent('cal-2', people.marie, 'srv-2', 'emp-1', timeline.booked.marie.date, toMinutes(timeline.booked.marie.start),
-      timeline.sent.marie[3], { isAiBooked: true, conversationId: 'conv-marie' }),
-    buildEvent('cal-3', people.lea, 'srv-3', 'emp-2', timeline.booked.lea.date, toMinutes(timeline.booked.lea.start),
-      timeline.sent.lea[3], { isAiBooked: true, conversationId: 'conv-lea' }),
+      timeline.sent.marie[timeline.confirmedAt.marie], { isAiBooked: true, conversationId: 'conv-marie' }),
+    buildEvent('cal-3', people.lara, 'srv-3', 'emp-2', timeline.booked.lara.date, toMinutes(timeline.booked.lara.start),
+      timeline.sent.lara[timeline.confirmedAt.lara], { isAiBooked: true, conversationId: 'conv-lara' }),
     buildEvent('cal-john', people.john, 'srv-2', 'emp-1', timeline.booked.john.date, toMinutes(timeline.booked.john.start),
-      timeline.sent.john[3], { isAiBooked: true, conversationId: 'conv-john' }),
+      timeline.sent.john[timeline.confirmedAt.john], { isAiBooked: true, conversationId: 'conv-john' }),
     buildEvent('cal-giulia', people.giulia, 'srv-2', 'emp-2', timeline.booked.giulia.date, toMinutes(timeline.booked.giulia.start),
-      at(addDays(today, -9), '16:20'), { conversationId: 'conv-giulia' }),
+      timeline.sent.giulia[timeline.confirmedAt.giulia], { conversationId: 'conv-giulia' }),
     buildEvent('cal-marie-earlier', people.marie, 'srv-2', 'emp-1', weeksAgo(6, 4), toMinutes('14:00'), at(weeksAgo(8, 4), '10:40')),
-    buildEvent('cal-lea-earlier', people.lea, 'srv-3', 'emp-2', weeksAgo(7, 5), toMinutes('09:30'), at(weeksAgo(8, 3), '14:05')),
+    buildEvent('cal-lara-earlier', people.lara, 'srv-3', 'emp-2', weeksAgo(7, 5), toMinutes('09:30'), at(weeksAgo(8, 3), '14:05')),
     buildEvent('cal-chloe-earlier', people.chloe, 'srv-4', 'emp-1', weeksAgo(4, 5), toMinutes('17:00'), at(weeksAgo(5, 5), '11:30')),
     buildEvent('cal-giulia-earlier', people.giulia, 'srv-2', 'emp-2', weeksAgo(5, 4), toMinutes('15:00'), at(weeksAgo(6, 6), '09:15')),
     buildEvent('cal-john-earlier', people.john, 'srv-2', 'emp-1', weeksAgo(5, 3), toMinutes('16:00'), at(weeksAgo(6, 3), '12:20')),
   ];
 
-  // 2. Times that must stay free: the chats and the pending requests book or offer them.
-  // A pending request already holds its stylist; a time a chat only offers does not yet.
+  // 2. Times that must stay free: the chats and the pending requests ask for them or offer them.
+  // A pending request on Home already holds its stylist; a request in a chat does not yet.
   const requested: Slot[] = demoRequestPlan(today).map((request) => ({
     employeeId: request.employeeId, date: request.date, start: toMinutes(request.start),
     end: toMinutes(request.start) + serviceById(request.serviceId).durationMinutes,
   }));
   const keepFree: Slot[] = [
-    { employeeId: 'emp-1', date: timeline.open.camille.date, start: toMinutes(timeline.open.camille.start), end: toMinutes(timeline.open.camille.start) + 90 },
+    { employeeId: 'emp-1', date: timeline.open.sabrina.date, start: toMinutes(timeline.open.sabrina.start), end: toMinutes(timeline.open.sabrina.start) + 90 },
     { employeeId: 'emp-2', date: timeline.open.giulia.date, start: toMinutes(timeline.open.giulia.start), end: toMinutes(timeline.open.giulia.start) + 30 },
-    { employeeId: 'emp-2', date: timeline.open.giulia.date, start: toMinutes(timeline.open.giulia.alternative), end: toMinutes(timeline.open.giulia.alternative) + 30 },
+    { employeeId: 'emp-2', date: timeline.open.chloe.saturday, start: toMinutes(timeline.open.chloe.saturdayStart), end: toMinutes(timeline.open.chloe.saturdayStart) + 30 },
     { employeeId: 'emp-1', date: timeline.open.chloe.date, start: toMinutes(timeline.open.chloe.start), end: toMinutes(timeline.open.chloe.start) + 30 },
+    { employeeId: 'emp-3', date: timeline.open.reto.date, start: toMinutes(timeline.open.reto.start), end: toMinutes(timeline.open.reto.start) + 30 },
     ...requested,
   ];
 
@@ -743,12 +759,12 @@ export const createDemoCustomers = (
 
   const customers = (Object.keys(demoChatPeople) as ChatPerson[]).map((key) =>
     customerFrom(demoChatPeople[key], { channel: DEMO_CHAT_CHANNEL, conversationId: `conv-${key}` }));
-  note(demoChatPeople.lea.id, timeline.sent.lea[3].toISOString());
-  note(demoChatPeople.john.id, timeline.sent.john[3].toISOString());
+  note(demoChatPeople.lara.id, timeline.sent.lara[timeline.sent.lara.length - 1].toISOString());
+  note(demoChatPeople.john.id, timeline.sent.john[timeline.sent.john.length - 1].toISOString());
   // Whoever wrote or sent a request today comes first, in a fixed order: the list must not
   // depend on the minute at which the tab was opened.
   const requesters = demoRequesters(events, timeline.today);
-  const todaysContacts = [demoChatPeople.camille, requesters[0], demoChatPeople.chloe, requesters[1], demoChatPeople.giulia, demoChatPeople.marie];
+  const todaysContacts = [demoChatPeople.sabrina, requesters[0], demoChatPeople.reto, demoChatPeople.chloe, requesters[1], demoChatPeople.giulia, demoChatPeople.marie];
   todaysContacts.forEach((person, index) => lastContact.set(person.id, `${timeline.today}T99:${String(59 - index).padStart(2, '0')}`));
   for (const person of demoPool()) {
     if (lastContact.has(person.id)) customers.push(customerFrom(person));

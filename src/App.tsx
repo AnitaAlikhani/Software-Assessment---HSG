@@ -19,6 +19,7 @@ import {
   TeamSubTab,
 } from './types';
 import { DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
+import { sampleChatAfterAi, sampleChatAfterOwnerReply } from './sampleChatFlow';
 import {
   initialEmployees,
   initialServices,
@@ -56,7 +57,7 @@ import { dayChangesSummary, isValidDayChange, undoDayChanges, withDayChanges, wi
 import { withServicesOf } from './teamBooking';
 import { appointmentForConversation, belongsToConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
 import { answerIsShown, openRequestCount, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
-import { acceptedAppointmentState, checkRequest, movedRequest, planChatBooking } from './requestAnswers';
+import { acceptedAppointmentState, chatOfFormBooking, checkRequest, movedRequest, restoreConfirmedBooking } from './requestAnswers';
 import { arrivedRequests, isRequestersAppointment, withOutcome, type RequestOutcomes } from './sharedRequests';
 import { BookingLinkCompact } from './components/BookingLinkCard';
 
@@ -64,12 +65,15 @@ import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
 import { forgetRetiredDemoState, useDemoState, watchDemoState } from './useDemoState';
 import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
-import { chatBookingName, chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, upsertCustomer, validateContact, type ChatContact } from './bookingData';
+import { chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, normalizePhone, upsertCustomer, validateContact, type ChatContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
 import { blockTitle, timeBlockProblem } from './timeBlocks';
 import { formatTimeRange } from './format';
 import { headerAccount } from './headerModels';
 import { savedMessage, type AppointmentFormRequest, type AppointmentSave } from './appointmentForm';
+import type { ChatBookingAction } from './chatBookingActions';
+import { answerChatBooking, chatCustomer, chatCustomerRecord } from './chatBookingAnswers';
+import { sampleChatAfter } from './sampleChatFlow';
 
 // The starting data that depend on the date (calendar, customers, chats, requests, shifts) are
 // built together, for one moment, so that they agree: the moment the stored salon was started,
@@ -195,9 +199,12 @@ export default function App() {
       setToastLift(covers ? Math.min(Math.max(window.innerHeight - replyBox.top + 8, 12), window.innerHeight - 160) : null);
     };
     place();
+    // The phone's keyboard moves the reply box (the chat screen takes the visible part of the screen).
+    const viewport = window.visualViewport;
     window.addEventListener('scroll', place, { passive: true });
     window.addEventListener('resize', place);
-    return () => { window.removeEventListener('scroll', place); window.removeEventListener('resize', place); };
+    viewport?.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place); window.removeEventListener('resize', place); viewport?.removeEventListener('resize', place); };
   }, [toast, chatOpenOnPhone]);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -545,7 +552,10 @@ export default function App() {
     if (save.appointmentId !== null && !calendarEvents.some(event => event.id === save.appointmentId)) {
       return 'This appointment is no longer in the calendar. It may have been cancelled in the meantime.';
     }
-    const result = storeCalendarEvent(save.event, save.appointmentId ?? `cal-${crypto.randomUUID()}`,
+    // Booked from a chat's "Book" for that chat's customer: the appointment belongs to the chat, so a
+    // request waiting there sees it and is not booked a second time.
+    const conversationId = chatOfFormBooking(chatFormLink.current, appointmentForm?.opening, save);
+    const result = storeCalendarEvent(conversationId ? { ...save.event, conversationId } : save.event, save.appointmentId ?? `cal-${crypto.randomUUID()}`,
       save.customer ? { record: save.customer } : undefined);
     if ('error' in result) return result.error;
     // A first number goes onto the customer's other appointments, requests and chat too, as an edit in Customers does.
@@ -561,8 +571,11 @@ export default function App() {
     const removed = calendarEvents[index];
     setCalendarEvents((previous) => previous.filter((e) => e.id !== id));
     setSubmittedRequest((previous) => previous && `cal-${previous.id}` === id ? { ...previous, status: 'cancelled' } : previous);
+    // A chat in which this appointment was confirmed: nothing goes out to the customer from here, so say so.
+    const confirmedIn = allConversations.find((chat) => (removed.conversationId === chat.id || chat.appointmentId === removed.id)
+      && chat.bookingRequest?.status === 'confirmed');
     // One tap removes an appointment, so the message offers the way back, as it does for customers and blocks.
-    showToast(`Appointment of ${removed.customerName} removed from the calendar`, 'info', { label: 'Undo', onClick: () => {
+    showToast(`Appointment of ${removed.customerName} removed from the calendar${confirmedIn ? `. ${confirmedIn.customerName} was not told.` : ''}`, 'info', { label: 'Undo', onClick: () => {
       const now = latestSalon.current;
       if (now.events.some((event) => event.id === removed.id)) { setToast(null); return; }
       // Somebody else may have got the time meanwhile: then the appointment cannot simply come back.
@@ -812,12 +825,16 @@ export default function App() {
   };
 
   // Conversations
+  // With a chat named (Home, a customer, an appointment) that chat opens; Back leads to where the
+  // owner came from. Without one, the list opens; on wide screens the chat that waits longest for
+  // the owner stands beside it. A live chat may still be loading: its address opens all the same,
+  // and the chat screen says that it is loading.
   const openConversation = (id?: string) => {
     const target = id
       ? allConversations.find((c) => c.id === id)
       : allConversations.find((c) => c.status === 'needs-attention') ?? allConversations[0];
     if (target) setSelectedConversationId(target.id);
-    navigate({ tab: 'conversations', conversationId: target?.id });
+    navigate({ tab: 'conversations', conversationId: id && (target || isLiveConversation(id)) ? id : undefined });
   };
 
   // Chats and customers are linked by id, in both directions: a sample chat names its customer,
@@ -844,7 +861,8 @@ export default function App() {
   // phone it lay over the button that hands the chat back. So only a failure gets a message.
   const handleTakeOver = (id: string) => {
     if (isLiveConversation(id)) {
-      void live.takeOver(id).then(error => { if (error) showToast(error, 'error'); });
+      // "Sending…" and a failure (with "Try again") show on the chat itself (src/liveWhatsApp.ts).
+      void live.takeOver(id);
       return;
     }
     setConversations((prev) =>
@@ -869,44 +887,103 @@ export default function App() {
   };
 
   /**
-   * A live chat's booking request: add it to the calendar (with the usual checks), then tell the
-   * customer in the chat. From Home (`fromHome`) the outcome is shown on the request itself and
-   * the function returns why it could not be done; from the chat page it is shown as a message.
+   * The owner's answer to what waits in a chat: confirm, suggest another time or decline a booking
+   * request or a change; cancel or keep an appointment the customer wants to cancel. A live chat
+   * goes through the server, and the calendar changes only once the server has taken the answer;
+   * one of the salon's own chats changes the calendar and then shows the answer (sampleChatAfter).
+   * The calendar is checked as it is at this moment (src/chatBookingAnswers.ts). Resolves to why
+   * it could not be done, or null. The cards show that; elsewhere a message says what was done.
    */
-  const handleConfirmLiveBooking = (id: string, fromHome = false): string | null => {
-    const conversation = allConversations.find((item) => item.id === id);
-    // Which service, which stylist (the first who offers it and is free) and whether it can be booked at all.
-    const plan = conversation ? planChatBooking(availabilityContext, conversation) : null;
-    if (!conversation || !plan) return fromHome ? 'This booking request is no longer waiting.' : null;
-    const refuse = (message: string) => { if (!fromHome) showToast(message, 'error'); return message; };
-    if (!plan.action || !plan.employee || !plan.endTime) return refuse(plan.refusal ?? 'This booking request cannot be accepted.');
-    const { action, booking: request, employee: stylist } = plan;
-    const customerName = chatBookingName(conversation.customerName, request.customerName);
-    const result = applyConversationAppointment({ ...conversation, customerName }, action, true);
-    if ('error' in result) return refuse(result.error);
-    if (fromHome) {
-      setRequestAnswers((previous) => withAnswer(previous, {
-        kind: 'chat', id, at: Date.now(), appointmentId: action.appointmentId, customerName, serviceName: plan.serviceName,
-        staffName: stylist.name, date: request.date, startTime: request.time, endTime: plan.endTime!, delivery: 'pending',
-      }));
-    }
-    void live.confirmBooking(id).then((sendError) => {
-      if (fromHome) {
-        setRequestAnswers((previous) => previous.map((item) => item.kind === 'chat' && item.id === id
-          ? { ...item, delivery: sendError ? 'failed' : 'done', problem: sendError ?? undefined } : item));
-        return;
-      }
-      showToast(
-        sendError ? `Added to the calendar, but the confirmation was not sent: ${sendError}` : `Booked: ${plan.serviceName}, ${request.time} with ${stylist.name}. The customer got the confirmation.`,
-        sendError ? 'error' : 'success',
-      );
+  const chatAnswersOnTheirWay = useRef(new Set<string>());
+  const latestChats = useRef({ conversations: allConversations, apply: applyConversationAppointment });
+  latestChats.current = { conversations: allConversations, apply: applyConversationAppointment };
+  const handleChatBooking = async (conversationId: string, action: ChatBookingAction): Promise<string | null> => {
+    const result = await answerChatBooking(conversationId, action, {
+      salon: () => ({ ...latestSalon.current, now: new Date() }),
+      conversation: (id) => latestChats.current.conversations.find((item) => item.id === id),
+      server: live,
+      // The AI took the request and the owner confirmed it: the appointment counts among those the
+      // AI brought in (Home, Analytics), and its chat says "Confirmed by you". A request in a chat
+      // the owner had taken over is hers alone. A time outside the opening hours is never
+      // confirmed this way: the card offers no stylist for it.
+      applyAppointment: (conversation, booking) => latestChats.current.apply(conversation, booking, !conversation.takenOver),
+      removeAppointment: (id) => setCalendarEvents((previous) => previous.filter((event) => event.id !== id)),
+      updateOwnChat: (id, answer, saved) => setConversations((previous) => previous.map((item) => item.id !== id ? item : {
+        ...sampleChatAfter(item, answer, new Date(), companySettings.timeZone, companySettings.companyName),
+        ...(saved ? { appointmentId: saved.id, customerId: saved.customerId } : {}),
+      })),
+      busy: chatAnswersOnTheirWay.current,
     });
+    if ('error' in result) return result.error;
+    const { done } = result;
+    setRequestAnswers((previous) => withAnswer(previous, {
+      kind: 'chat', id: conversationId, at: Date.now(), outcome: done.outcome, live: done.live, appointmentId: done.appointment?.id ?? '',
+      customerName: done.customerName, serviceName: done.serviceName, staffName: done.staffName,
+      date: done.date, startTime: done.startTime, endTime: done.endTime, asked: done.asked, delivery: 'done',
+    }));
+    if (done.warning) { showToast(done.warning, 'error'); return null; }
+    // Home shows the answer in the request's own place; elsewhere a message says what was done.
+    if (openRoute.current.tab === 'home') return null;
+    const when = `${formatDate(done.date)}, ${done.startTime}`;
+    const told = (what: string) => done.live ? ` ${done.customerName} has ${what} in the chat.` : '';
+    if (done.outcome === 'confirmed' && done.appointment) {
+      announceAppointment(`${done.moved ? 'Moved' : 'Booked'}: ${done.serviceName}, ${when} with ${done.staffName}.${told('the confirmation')}`, done.appointment);
+    } else {
+      showToast({
+        confirmed: `Booked: ${done.serviceName}, ${when}.`,
+        suggested: `Suggested ${when} with ${done.staffName}.${told('the suggestion')}`,
+        declined: `Request declined.${told('the answer')}`,
+        cancelled: `Appointment cancelled and removed from your calendar.${told('the cancellation')}`,
+        kept: `The appointment stays. Nothing was sent: write to ${done.customerName} yourself.`,
+      }[done.outcome]);
+    }
     return null;
   };
 
-  const handleLetAiContinue = (id: string): string | null => {
+  /**
+   * "Book for this customer" in a chat: the appointment form with the chat's customer chosen. A
+   * chat without a record yet gets one now, made from the chat and linked to it, so the booking
+   * cannot make a second record of the same person.
+   */
+  // The chat whose "Book" opened the form, for that one opening (see handleSaveAppointment).
+  const chatFormLink = useRef<{ opening: number; conversationId: string; customerId: string } | null>(null);
+  const openBookingForChat = (conversationId: string) => {
+    const conversation = allConversations.find((item) => item.id === conversationId);
+    if (!conversation) return;
+    const openFor = (customerId: string) => {
+      openAppointmentForm({ kind: 'new', customerId });
+      chatFormLink.current = { opening: formOpenings.current, conversationId, customerId };
+    };
+    const known = chatCustomer(customers, conversation, calendarEvents);
+    if (known) { openFor(known.id); return; }
+    const record = chatCustomerRecord(conversation, `cust-${crypto.randomUUID()}`, isPhoneNumber(conversation.phone) ? normalizePhone(conversation.phone) : '');
+    setCustomers((previous) => upsertCustomer(previous, record));
+    if (!isLiveConversation(conversationId)) setConversations((previous) => previous.map((item) => item.id === conversationId ? { ...item, customerId: record.id } : item));
+    openFor(record.id);
+  };
+
+  /**
+   * "Add to calendar" on a chat whose confirmed appointment was cancelled in the calendar: books the
+   * confirmed time again under the usual rules. Nothing is sent: the customer has the confirmation.
+   */
+  const handleAddConfirmedToCalendar = (conversationId: string): string | null => {
+    const conversation = allConversations.find((item) => item.id === conversationId);
+    if (!conversation) return 'This chat is no longer available.';
+    const planned = restoreConfirmedBooking({ ...latestSalon.current, now: new Date() }, conversation);
+    if ('error' in planned) return planned.error;
+    const result = applyConversationAppointment(conversation, planned.action, !conversation.takenOver);
+    if ('error' in result) return result.error;
+    if (!isLiveConversation(conversationId)) {
+      setConversations((previous) => previous.map((item) => item.id === conversationId ? { ...item, appointmentId: result.saved.id, customerId: result.saved.customerId ?? item.customerId } : item));
+    }
+    announceAppointment(`Added to your calendar: ${result.saved.serviceName}, ${formatDate(result.saved.date)}, ${result.saved.startTime} with ${result.saved.staffName}. Nothing was sent to ${conversation.customerName}.`, result.saved);
+    return null;
+  };
+
+  const handleLetAiContinue = (id: string, answerNow?: boolean): string | null => {
     if (isLiveConversation(id)) {
-      void live.letAiContinue(id).then(error => showToast(error ?? 'The AI answers new messages in this chat again.', error ? 'error' : 'success'));
+      // A failure shows on the chat with "Try again"; the AI's answer appears in the chat when it is sent.
+      void live.letAiContinue(id, answerNow).then(error => { if (!error) showToast('The AI answers in this chat again.'); });
       return null;
     }
     const conversation = conversations.find((item) => item.id === id);
@@ -921,26 +998,13 @@ export default function App() {
     const result = action ? applyConversationAppointment(conversation, action, true) : null;
     if (result && 'error' in result) { showToast(result.error, 'error'); return result.error; }
 
+    // The AI sends its prepared answer and the chat goes on as its story says (src/sampleChatFlow.ts);
+    // a booking request that waits still waits for the owner.
     const sentAt = new Date();
-    const sentLabel = getSalonNow(companySettings.timeZone, sentAt).time;
+    const booked = action && result ? { action, staffName: result.saved.staffName } : undefined;
     setConversations((prev) => prev.map((c) => c.id !== id ? c : {
-      ...c,
-      takenOver: false,
-      status: action || c.appointmentId ? 'booked' : 'ai-handled',
-      appointmentId: action?.appointmentId ?? c.appointmentId,
+      ...sampleChatAfterAi(c, sentAt, companySettings.timeZone, booked),
       customerId: result?.saved.customerId ?? c.customerId,
-      aiFollowUp: undefined,
-      messages: followUp ? [...c.messages, {
-        id: `msg-${Date.now()}`,
-        sender: 'ai' as const,
-        original: followUp.original,
-        translation: followUp.translation,
-        ...(followUp.translationDe ? { translationDe: followUp.translationDe } : {}),
-        time: sentLabel,
-        sentAt: sentAt.toISOString(),
-      }] : c.messages,
-      lastTime: followUp ? sentLabel : c.lastTime,
-      lastMessageAt: followUp ? sentAt.toISOString() : c.lastMessageAt,
     }));
     showToast('The AI is continuing this conversation');
     return null;
@@ -948,7 +1012,8 @@ export default function App() {
 
   const handleOwnerReply = (id: string, english: string, local?: string, action?: AppointmentAction) => {
     if (isLiveConversation(id)) {
-      void live.reply(id, english).then(error => error && showToast(error, 'error'));
+      // The reply shows in the chat as "Sending…" until the server has it, or as "Not sent" with "Try again".
+      void live.reply(id, english);
       return true;
     }
     const conversation = conversations.find((item) => item.id === id);
@@ -956,33 +1021,15 @@ export default function App() {
     const result = action ? applyConversationAppointment(conversation, action, false) : null;
     if (result && 'error' in result) { showToast(result.error, 'error'); return false; }
 
+    // The reply, then what follows from it (src/sampleChatFlow.ts): a reply that booked confirms the
+    // waiting request with the fixed confirmation; a suggested reply that offers a time gets the
+    // customer's answer and a request at that time. The suggestions and the AI's prepared answer
+    // are gone: they answered the customer's earlier message.
     const sentAt = new Date();
-    const sentLabel = getSalonNow(companySettings.timeZone, sentAt).time;
-    // A suggested reply brings its German text along; a typed one has none.
-    const german = local ? conversation.quickReplies?.find((reply) => reply.en === english && reply.local === local)?.de : undefined;
+    const booked = action && result ? { action, staffName: result.saved.staffName } : undefined;
     setConversations((prev) => prev.map((c) => c.id !== id ? c : {
-      ...c,
-      takenOver: true,
-      status: 'owner-handled' as const,
-      appointmentId: action?.appointmentId ?? c.appointmentId,
+      ...sampleChatAfterOwnerReply(c, { english, local }, booked, sentAt, companySettings.timeZone, companySettings.companyName),
       customerId: result?.saved.customerId ?? c.customerId,
-      // The scripted follow-up predates this reply and may now contradict the owner.
-      aiFollowUp: undefined,
-      // Suggestions answer the customer's last message; once the owner has replied they
-      // are stale, and tapping one again sent a duplicate (or re-ran the booking).
-      quickReplies: undefined,
-      messages: [...c.messages, {
-        id: `msg-${Date.now()}`,
-        sender: 'owner' as const,
-        original: local ?? english,
-        translation: english,
-        ...(german ? { translationDe: german } : {}),
-        time: sentLabel,
-        sentAt: sentAt.toISOString(),
-        untranslated: !local,
-      }],
-      lastTime: sentLabel,
-      lastMessageAt: sentAt.toISOString(),
     }));
     return true;
   };
@@ -1062,7 +1109,7 @@ export default function App() {
               onMoveRequest={handleMoveRequest}
               onUndoAnswer={handleUndoAnswer}
               onDismissAnswer={handleDismissAnswer}
-              onAcceptChatRequest={(id) => handleConfirmLiveBooking(id, true)}
+              onChatBooking={handleChatBooking}
               onSimulateNewRequest={handleSimulateNewRequest}
               now={now}
               onOpenCalendar={() => setCurrentTab('calendar')}
@@ -1166,7 +1213,7 @@ export default function App() {
               conversations={allConversations}
               selectedId={route.conversationId ?? selectedConversationId}
               mobileDetailOpen={Boolean(route.conversationId)}
-              onBackToList={() => navigate({ tab: 'conversations' })}
+              onBackToList={(viaHistory) => { if (viaHistory) window.history.back(); else navigate({ tab: 'conversations' }, { replace: true }); }}
               onSelect={id => { setSelectedConversationId(id); navigate({ tab: 'conversations', conversationId: id }); }}
               onTakeOver={handleTakeOver}
               onLetAiContinue={handleLetAiContinue}
@@ -1174,9 +1221,12 @@ export default function App() {
               aiSettings={aiSettings}
               onOpenAiSettings={() => setCurrentTab('ai-assistant')}
               liveChannels={live.channels}
-              onConfirmBooking={handleConfirmLiveBooking}
-              appointmentFor={(conversation) => appointmentForConversation(conversation, calendarEvents)}
+              liveInbox={live.inbox}
+              salon={availabilityContext}
+              onChatBooking={handleChatBooking}
+              onBookForCustomer={openBookingForChat}
               onOpenAppointment={openAppointment}
+              onAddConfirmedToCalendar={handleAddConfirmedToCalendar}
               timeZone={companySettings.timeZone}
             />
           )}

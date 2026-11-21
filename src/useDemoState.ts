@@ -4,7 +4,7 @@ import { DemoStore, SALON_KEY, type PageEvents } from './demoStore';
 // Bump the version whenever the starting data or their shape change, so that what an earlier
 // build stored is not read by the new one (v4: the salon moved from each tab's own storage to
 // the browser's lasting storage, as one entry; employees and customers got new fields).
-export const DEMO_STORAGE_VERSION = 'booking-demo-v4';
+export const DEMO_STORAGE_VERSION = 'booking-demo-v5';
 
 /**
  * The values that stay with one tab: what a customer has filled in on the booking page, which

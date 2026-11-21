@@ -1,17 +1,9 @@
-import { analyzeIncoming } from '../../server/ai.js';
-import { recordAnalysis } from '../../server/recordAnalysis.js';
+import { cleanName } from '../../server/bookingRules.js';
+import { applyAi, askAi, recordDelivery, storeIncoming } from '../../server/chatFlow.js';
 import { researchSetting } from '../../server/researchMode.js';
-import { claimMessage, deletedSince, deleteOwnChat, loadConversation, loadForUpdate, releaseMessage, saveConversation, storeConfigured } from '../../server/store.js';
+import { claimMessage, deleteOwnChat, loadConversation, releaseMessage, storeConfigured } from '../../server/store.js';
 import { sendTelegramText, sendTelegramTyping, telegramConfigured, telegramRefused, webhookSecret } from '../../server/telegramApi.js';
-import {
-  addCustomerMessage,
-  addReply,
-  needsOwner,
-  parseTelegramUpdate,
-  stateFor,
-  telegramChatId,
-  toChatLanguage,
-} from '../../server/whatsappCore.js';
+import { parseTelegramUpdate, telegramChatId, toChatLanguage } from '../../server/whatsappCore.js';
 import { PRODUCT_NAME } from '../../src/brand.js';
 import { chatDeletedNotice, chatNotDeletedNotice, telegramWelcome } from '../../src/customerNotice.js';
 import { initialCompanySettings } from '../../src/mockData.js';
@@ -78,31 +70,24 @@ export async function POST(request: Request) {
     return new Response('OK');
   }
 
-  const { conversation: existing, version } = await loadForUpdate(message.waId);
-  const state = stateFor(existing);
+  // The message is stored before the AI runs, so a slow or failing AI never loses it.
+  const stored = await storeIncoming({ ...message, name: cleanName(message.name) || 'Telegram customer' });
+  if (!stored) return new Response('OK'); // deleted in the moment it arrived
+  if (!stored.conversation.takenOver) await sendTelegramTyping(chatId).catch(error => console.error(error));
+  const analysis = await askAi(stored.conversation, message.id);
+  // Applied to the chat as it is now: a customer who sent /delete meanwhile has been told that the
+  // chat is gone (nothing is stored again and no answer follows), and a chat the owner took over
+  // meanwhile gets no AI reply.
+  const answered = await applyAi(stored, message.id, analysis, false);
+  if (!answered?.reply) return new Response('OK');
+  let delivered = false;
   try {
-    if (!existing?.takenOver) await sendTelegramTyping(chatId);
-    const analysis = await analyzeIncoming(existing?.messages ?? [], message.text);
-    const { conversation, reply } = recordAnalysis(state, message, analysis);
-    if (reply) {
-      // The AI took its time. A customer who sent /delete meanwhile has been told that the chat
-      // is gone: they get no answer from it, and nothing of it is stored again.
-      if (await deletedSince(message.waId, version)) return new Response('OK');
-      await sendTelegramText(chatId, reply.original);
-      addReply(conversation, 'ai', reply);
-    }
+    await sendTelegramText(chatId, answered.reply.original);
+    delivered = true;
   } catch (error) {
-    // Keep the message visible even when the AI or Telegram fails, so the owner can still reply.
+    // Telegram did not take the answer. The owner sees the message and that nobody answered it.
     console.error(error);
-    const conversation = state.conversations.find(item => item.waId === message.waId)
-      ?? addCustomerMessage(state, message, { original: message.text, translation: message.text }, 'EN');
-    if (!conversation.messages.some(item => item.id === message.id)) {
-      addCustomerMessage(state, message, { original: message.text, translation: message.text }, conversation.language);
-    }
-    needsOwner(conversation, 'The AI could not answer this message. Please reply yourself.');
   }
-  const conversation = state.conversations.find(item => item.waId === message.waId);
-  // Saving checks for a deletion once more, in one step with the write.
-  if (conversation) await saveConversation(conversation, version);
+  await recordDelivery(answered, answered.reply, delivered, false);
   return new Response('OK');
 }

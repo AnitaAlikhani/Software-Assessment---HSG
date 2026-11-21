@@ -139,9 +139,14 @@ export class FakeStore {
    * else runs between the steps of one script.
    */
   private script(script: string, keys: string[], args: string[]): unknown {
-    if (script === SAVE_SCRIPT && keys.length === 2 && args.length === 3) {
+    if (script === SAVE_SCRIPT && keys.length === 2 && args.length === 4) {
       const marker = this.execute(['GET', keys[1]]);
       if (marker !== null && marker !== args[0]) return 0;
+      if (args[3] !== 'any') {
+        const current = this.execute(['GET', keys[0]]);
+        const rev = typeof current === 'string' ? (/^\{"rev":(\d+),/.exec(current)?.[1] ?? '0') : '0';
+        if (rev !== args[3]) return 2;
+      }
       this.execute(['SET', keys[0], args[1], 'EX', args[2]]);
       return 1;
     }

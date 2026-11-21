@@ -72,8 +72,8 @@ test('the figures add up to the calendar, and appointments without a customer id
   assert.equal(stats.get('cust-marie')!.nextAppointment?.id, 'cal-2');
   assert.equal(stats.get('cust-marie')!.lastVisit?.id, 'cal-marie-earlier');
   assert.equal(stats.get('cust-marie')!.visits, 1);
-  // Camille has never been to the salon and has nothing booked yet.
-  assert.deepEqual(stats.get('cust-camille'), { visits: 0, lastVisit: null, nextAppointment: null });
+  // Sabrina has never been to the salon and has nothing booked yet.
+  assert.deepEqual(stats.get('cust-sabrina'), { visits: 0, lastVisit: null, nextAppointment: null });
 
   const anna: Customer = { id: 'a1', name: 'Anna Muster', initials: 'AM', email: '', phone: '', language: 'DE' };
   const legacy: CalendarEvent = { ...demoEvents[0], id: 'legacy', customerId: undefined, customerName: ' anna  MUSTER ', date: '2026-09-01', startTime: '10:00', endTime: '10:30' };
@@ -87,7 +87,7 @@ test('the figures add up to the calendar, and appointments without a customer id
 
 const viewProps: React.ComponentProps<typeof CustomersView> = {
   customers: demoCustomers, events: demoEvents, now: FIXED_NOW, timeZone: ZONE,
-  customersWithChat: new Set(['cust-camille', 'cust-marie']), selectedCustomerId: null,
+  customersWithChat: new Set(['cust-sabrina', 'cust-marie']), selectedCustomerId: null,
   onClearSelection: () => {}, onAddCustomer: () => {}, onUpdateCustomer: () => {}, onDeleteCustomer: () => {}, onOpenChat: () => {},
 };
 const count = (html: string, text: string) => html.split(text).length - 1;
@@ -112,7 +112,7 @@ test('the customer list shows the calendar\'s figures, 25 customers at a time', 
   assert.doesNotMatch(html, /font-mono|\+41795556112/);
   // "Open conversation" only for customers who have a chat.
   assert.equal(count(html, 'aria-label="Open conversation with '), 4);
-  assert.match(html, /aria-label="Open conversation with Camille Bernard"/);
+  assert.match(html, /aria-label="Open conversation with Sabrina Lüchinger"/);
   assert.match(html, /aria-label="Open conversation with Marie Dupont"/);
 });
 
@@ -161,7 +161,7 @@ test('the headers of name, last visit, next appointment and visits sort the tabl
   // The list opens as it is kept (most recent contact first): no header claims an order yet.
   assert.doesNotMatch(html, /aria-sort/);
   assert.match(html, /lucide-arrow-up-down/);
-  assert.ok(html.indexOf('>Camille Bernard<') < html.indexOf('>Marie Dupont<'));
+  assert.ok(html.indexOf('>Sabrina Lüchinger<') < html.indexOf('>Marie Dupont<'));
 
   // Phones show cards without headers: one labelled list holds every column in both directions.
   const select = /<label for="customer-sort"[^>]*>Sort by<\/label><select id="customer-sort"[^>]*>(.*?)<\/select>/.exec(html)?.[1] ?? '';

@@ -91,12 +91,24 @@ export const DELETE_SCRIPT = [
 ].join('\n');
 /**
  * Saving: write the chat (KEYS[1]) unless the marker (KEYS[2]) shows a deletion the request has
- * not seen (ARGV[1] is the marker it saw). A marker that has run out meanwhile is no new
- * deletion: a new one would still be there, as markers live longer than any request.
+ * not seen (ARGV[1] is the marker it saw), or unless another request saved the chat after this
+ * one read it (ARGV[4] is the revision it read; "any" skips that check). A marker that has run
+ * out meanwhile is no new deletion: a new one would still be there, as markers live longer than
+ * any request.
+ *
+ * The revision is the number every stored chat starts with ('{"rev":12,...'). A chat stored
+ * before revisions existed has none and counts as revision 0, like a chat that does not exist.
+ * Answers 1 (saved), 0 (deleted meanwhile) or 2 (changed meanwhile: read it again).
  */
 export const SAVE_SCRIPT = [
   "local marker = redis.call('GET', KEYS[2])",
   'if marker and marker ~= ARGV[1] then return 0 end',
+  "if ARGV[4] ~= 'any' then",
+  "  local current = redis.call('GET', KEYS[1])",
+  "  local rev = '0'",
+  "  if current then rev = string.match(current, '^{\"rev\":(%d+),') or '0' end",
+  '  if rev ~= ARGV[4] then return 2 end',
+  'end',
   "redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])",
   'return 1',
 ].join('\n');
@@ -115,7 +127,11 @@ async function redis(command: unknown[]) {
 
 const parse = (value: unknown): StoredChat | null => {
   if (typeof value !== 'string') return null;
-  try { return JSON.parse(value) as StoredChat; } catch { return null; }
+  try {
+    const chat = JSON.parse(value) as StoredChat;
+    // A chat stored before revisions existed is revision 0 (see SAVE_SCRIPT).
+    return { ...chat, rev: typeof chat.rev === 'number' ? chat.rev : 0 };
+  } catch { return null; }
 };
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
@@ -143,19 +159,85 @@ export async function deletedSince(waId: string, version: ChatVersion): Promise<
   return typeof marker === 'string' && marker !== version;
 }
 
+/** What a save found: stored, refused because the customer deleted the chat, or refused because another request saved it first. */
+export type SaveOutcome = 'saved' | 'deleted' | 'changed';
+
+/**
+ * Saves a chat that was read at revision `expectedRev` ('any': whatever is stored now). The text
+ * starts with the next revision, so the next save can tell whether somebody else saved in between.
+ * On success the chat object carries its new revision.
+ */
+async function saveAt(conversation: LiveConversation, version: ChatVersion, expectedRev: number | 'any', now: number): Promise<SaveOutcome> {
+  const rev = (typeof expectedRev === 'number' ? expectedRev : conversation.rev ?? 0) + 1;
+  // The revision goes first: the save script reads it from the start of the text.
+  const { rev: _old, keptUntil: _kept, ...rest } = conversation as StoredChat;
+  const stored = { rev, ...rest, keptUntil: now + RETENTION_SECONDS * 1000 };
+  // A caller outside the type check that hands in no version has seen no deletion.
+  const seen = typeof version === 'string' && version !== '' ? version : NO_DELETION_SEEN;
+  const { result } = await redis(['EVAL', SAVE_SCRIPT, 2, chatKey(conversation.waId), markerKey(conversation.waId), seen, JSON.stringify(stored), RETENTION_SECONDS, String(expectedRev)]);
+  if (result === 0) return 'deleted';
+  if (result !== 1) return 'changed';
+  conversation.rev = rev;
+  await cleanEarlierList(now);
+  return 'saved';
+}
+
 /**
  * Saves a chat for the storage period and nothing else. Returns false, and stores nothing, when
  * the chat was deleted after the request loaded it: a deleted chat must not come back because an
  * answer to an earlier message was still on its way.
+ *
+ * A chat that was loaded carries its revision, and is not saved over a newer one (that counts as
+ * not saved, too). Code that changes a chat other requests may change at the same moment uses
+ * changeConversation instead, which reads the newer chat and applies its change again.
  */
 export async function saveConversation(conversation: LiveConversation, version: ChatVersion, now = Date.now()): Promise<boolean> {
-  const stored: StoredChat = { ...conversation, keptUntil: now + RETENTION_SECONDS * 1000 };
-  // A caller outside the type check that hands in no version has seen no deletion.
-  const seen = typeof version === 'string' && version !== '' ? version : NO_DELETION_SEEN;
-  const { result } = await redis(['EVAL', SAVE_SCRIPT, 2, chatKey(conversation.waId), markerKey(conversation.waId), seen, JSON.stringify(stored), RETENTION_SECONDS]);
-  if (result !== 1) return false;
-  await cleanEarlierList(now);
-  return true;
+  // A copy: the caller's object keeps the revision it was loaded with.
+  return (await saveAt({ ...conversation }, version, conversation.rev ?? 'any', now)) === 'saved';
+}
+
+/** How often a change is applied again to a chat somebody else saved first, before the request gives up. */
+const CHANGE_TRIES = 5;
+
+/** A chat as one request knows it: what it read, the deletion marker it saw then. */
+export interface LoadedChat { conversation: LiveConversation | null; version: ChatVersion }
+
+export type ChangeOutcome<T> =
+  | { status: 'saved' | 'unchanged'; conversation: LiveConversation | null; value: T; loaded: LoadedChat }
+  | { status: 'deleted' };
+
+/**
+ * Changes one chat without losing what other requests write at the same moment: a customer's
+ * second message, the AI's answer to the first, the owner's action.
+ *
+ * `change` gets a copy of the chat as it is stored now (null when there is none) and changes it
+ * in place, or returns `conversation: null` to store nothing. The save goes through only when
+ * nobody saved the chat since it was read; otherwise the chat is read again and the change is
+ * applied to the newer chat. So a change must be written as "add this to the chat as it is", and
+ * it may run more than once. In the usual case nobody else wrote, and this costs one save and no
+ * read: the chat was read already (`loaded`).
+ *
+ * The deletion marker stays the one the request saw first: a chat its customer deleted while the
+ * request was busy stays deleted, however often the change is tried.
+ */
+export async function changeConversation<T>(
+  loaded: LoadedChat,
+  change: (conversation: LiveConversation | null) => { conversation: LiveConversation | null; value: T },
+  now = Date.now(),
+): Promise<ChangeOutcome<T>> {
+  let current = loaded.conversation;
+  for (let attempt = 1; ; attempt += 1) {
+    const copy = current ? structuredClone(current) : null;
+    const { conversation, value } = change(copy);
+    if (!conversation) return { status: 'unchanged', conversation: current, value, loaded: { conversation: current, version: loaded.version } };
+    const outcome = await saveAt(conversation, loaded.version, current?.rev ?? 0, now);
+    if (outcome === 'saved') return { status: 'saved', conversation, value, loaded: { conversation, version: loaded.version } };
+    if (outcome === 'deleted') return { status: 'deleted' };
+    if (attempt >= CHANGE_TRIES) throw new Error(`The chat changed ${CHANGE_TRIES} times while this request was saving it.`);
+    const again = await loadForUpdate(conversation.waId);
+    if (again.version !== loaded.version) return { status: 'deleted' };
+    current = again.conversation;
+  }
 }
 
 /** When this running instance last looked through the earlier version's list (epoch ms). */

@@ -24,6 +24,26 @@ export const aiAnswer = (overrides: Record<string, unknown> = {}) => ({
   needsOwner: false, reason: '', bookingRequest: { service: '', date: '', time: '', customerName: '' }, ...overrides,
 });
 
+/** The AI's answer when it has a complete booking request, in the current format (with intent and stylist). */
+export const bookingAnswer = (request: Record<string, string> = {}, overrides: Record<string, unknown> = {}) => aiAnswer({
+  intent: 'new',
+  reply: 'Haircut on Tuesday, 6 October at 10:00 for Eva. The salon will confirm here.',
+  replyEn: 'Haircut on Tuesday, 6 October at 10:00 for Eva. The salon will confirm here.',
+  replyDe: 'Haarschnitt am Dienstag, 6. Oktober um 10:00 für Eva. Der Salon bestätigt hier.',
+  bookingRequest: { service: 'Haircut', date: '2026-10-06', time: '10:00', customerName: 'Eva', staffName: '', ...request },
+  ...overrides,
+});
+
+/** A website chat as an earlier request left it in the storage. */
+export const liveChat = (overrides: Partial<LiveConversation> = {}): LiveConversation => ({
+  waId: `web-${SESSION}`, channel: 'Website', customerName: 'Eva', language: 'EN', status: 'ai-handled', takenOver: false, updatedAt: NOW,
+  messages: [{ id: 'm1', sender: 'customer', original: 'Hello', translation: 'Hello', time: '12:00' }],
+  ...overrides,
+});
+/** Puts a chat into the storage, as a chat stored by an earlier version (no revision) would be. */
+export const putChat = (store: FakeStore, chat: LiveConversation) =>
+  store.run(['SET', `slotbee:live:chat:${chat.waId}`, JSON.stringify(chat), 'EX', 14 * 24 * 60 * 60]);
+
 export interface Sent { channel: 'Telegram' | 'WhatsApp'; to: string; text: string }
 
 export interface World {
@@ -58,10 +78,12 @@ export function outsideWorld({ ai = aiAnswer(), whileAiWorks, sendFails }: World
         const { contents } = JSON.parse(body) as { contents?: string | { parts?: { text?: string }[] }[] };
         const prompt = typeof contents === 'string' ? contents : (contents ?? []).flatMap(item => item.parts ?? []).map(part => part.text ?? '').join('\n');
         world.prompts.push(prompt);
-        await whileAiWorks?.(world.prompts.length);
+        // The number of this call, taken before anything else can call the AI meanwhile.
+        const call = world.prompts.length;
+        await whileAiWorks?.(call);
         // The owner's reply is translated by the same service. Here the "translation" is the text itself, marked.
         const translating = body.includes('customerText');
-        const analysis = typeof ai === 'function' ? ai(world.prompts.length) : ai;
+        const analysis = typeof ai === 'function' ? ai(call) : ai;
         if (!analysis && !translating) throw new Error('the AI is down');
         const message = prompt.split('Message:\n').pop() ?? '';
         const answer = translating ? { customerText: `[translated] ${message}`, translationEn: message, translationDe: message } : analysis;

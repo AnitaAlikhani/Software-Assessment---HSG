@@ -31,7 +31,7 @@ test('the chat list works out its times when it is drawn, so they do not go stal
       onBackToList: nothing, onSelect: nothing, onTakeOver: nothing, onLetAiContinue: () => null, onOwnerReply: () => true,
       aiSettings: initialAiSettings, onOpenAiSettings: nothing, timeZone: ZONE, now,
     }));
-    return Array.from(html.matchAll(/<span class="text-\[11px\] text-slate-400 shrink-0">([^<]*)<\/span>/g), match => match[1]);
+    return Array.from(html.matchAll(/<span class="text-\[11px\] text-slate-500 shrink-0">([^<]*)<\/span>/g), match => match[1]);
   };
   const today = list(FIXED_NOW);
   assert.equal(today.length, demoConversations.length);

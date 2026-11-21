@@ -45,12 +45,12 @@ test('appointments made the ways the app makes them get the right source', () =>
   // A request from the booking page, accepted on Home.
   const accepted = appointmentFromRequest(demoRequests[0], initialServices, initialEmployees);
   assert.equal(bookingSource(accepted), 'booking-page');
-  // The owner confirms a booking in a chat (Camille's colouring), and the AI books one by itself.
-  const camille = demoConversations.find((item) => item.id === 'conv-camille')!;
-  const action = camille.quickReplies!.find((reply) => reply.appointmentAction)!.appointmentAction!;
-  const byOwner = { ...appointmentFromConversationAction(action, camille, demoEvents, initialServices, initialEmployees, false)!, conversationId: camille.id };
+  // The owner books in a chat with a reply (Sabrina's colouring), and a request the AI took is confirmed.
+  const sabrina = demoConversations.find((item) => item.id === 'conv-sabrina')!;
+  const action = sabrina.quickReplies!.find((reply) => reply.appointmentAction)!.appointmentAction!;
+  const byOwner = { ...appointmentFromConversationAction(action, sabrina, demoEvents, initialServices, initialEmployees, false)!, conversationId: sabrina.id };
   assert.equal(bookingSource(byOwner), 'chat');
-  const byAi = { ...appointmentFromConversationAction(action, camille, demoEvents, initialServices, initialEmployees, true)!, conversationId: camille.id };
+  const byAi = { ...appointmentFromConversationAction(action, sabrina, demoEvents, initialServices, initialEmployees, true)!, conversationId: sabrina.id };
   assert.equal(bookingSource(byAi), 'ai');
   // The salon as it starts: the appointments the sample chats are about, and the rest by hand or by the AI.
   const byId = (id: string) => bookingSource(demoEvents.find((item) => item.id === id)!);

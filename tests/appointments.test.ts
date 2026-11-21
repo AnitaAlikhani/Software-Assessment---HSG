@@ -5,6 +5,7 @@ import { addDays, addMinutes, dayKeyForDate, formatCalendarDate, formatDate, sta
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { isOutsideOpeningHours } from '../src/availability';
 import { createDemoConversations, DEFAULT_DEMO_CONVERSATION_ID, upcomingWeekday } from '../src/conversationData';
+import { chatAppointmentId } from '../src/requestAnswers';
 import { demoConversations, demoEvents, demoRequests, FIXED_NOW } from './fixedClock';
 
 // A request for Thursday 1 October 2026, the week before the fixed clock.
@@ -48,36 +49,41 @@ test('accepted requests retain their service identity after a service is renamed
   assert.equal(event.endTime, '17:30');
 });
 
-test('owner and AI booking confirmations reference one stable appointment', () => {
-  const camille = demoConversations.find((item) => item.id === 'conv-camille')!;
-  const ownerAction = camille.quickReplies!.find((reply) => reply.appointmentAction)!.appointmentAction!;
-  const aiAction = camille.aiFollowUp!.appointmentAction!;
-  const ownerBooking = appointmentFromConversationAction(ownerAction, camille, demoEvents, initialServices, initialEmployees, false)!;
-  // The sample chats are built for Monday 5 October 2026 (tests/fixedClock.ts): "Friday" is the 9th.
+test('the owner\'s reply and the request card book one and the same appointment', () => {
+  const sabrina = demoConversations.find((item) => item.id === 'conv-sabrina')!;
+  const actions = sabrina.quickReplies!.map((reply) => reply.appointmentAction!);
+  // Both answers to the discount question confirm the colouring she asked for, under one id.
+  assert.equal(new Set(actions.map((action) => JSON.stringify(action))).size, 1);
+  const ownerBooking = appointmentFromConversationAction(actions[0], sabrina, demoEvents, initialServices, initialEmployees, false)!;
+  // The chats are built for Monday 5 October 2026 (tests/fixedClock.ts): "Freitag" is the 9th.
   assert.equal(ownerBooking.date, '2026-10-09');
   assert.equal(ownerBooking.startTime, '11:00');
   assert.equal(ownerBooking.endTime, '12:30');
+  // Confirming the request on its card gives the appointment the same id: it cannot be added twice.
+  assert.equal(ownerBooking.id, chatAppointmentId(sabrina.id, sabrina.bookingRequest!));
   const events = upsertAppointment(demoEvents, ownerBooking);
-  const aiBooking = appointmentFromConversationAction(aiAction, camille, events, initialServices, initialEmployees, true)!;
-  const confirmed = upsertAppointment(events, aiBooking);
-  assert.equal(confirmed.filter((item) => item.id === ownerAction.appointmentId).length, 1);
-  assert.equal(confirmed.length, demoEvents.length + 1);
+  const again = upsertAppointment(events, appointmentFromConversationAction(actions[1], sabrina, events, initialServices, initialEmployees, true)!);
+  assert.equal(again.filter((item) => item.id === ownerBooking.id).length, 1);
+  assert.equal(again.length, demoEvents.length + 1);
 });
 
-test('rescheduling Giulia moves her existing appointment without adding another', () => {
+test('confirming Giulia\'s change moves her existing appointment without adding another', () => {
   const giulia = demoConversations.find((item) => item.id === 'conv-giulia')!;
-  const action = giulia.quickReplies![0].appointmentAction!;
+  const change = giulia.bookingRequest!;
+  assert.equal(change.kind, 'change');
+  const action = { type: 'reschedule' as const, appointmentId: giulia.appointmentId!, date: change.date, startTime: change.time };
   const original = demoEvents.find((item) => item.id === giulia.appointmentId)!;
+  assert.deepEqual(change.previous, { date: original.date, time: original.startTime });
   const moved = appointmentFromConversationAction(action, giulia, demoEvents, initialServices, initialEmployees, false)!;
   const events = upsertAppointment(demoEvents, moved);
   assert.equal(moved.id, original.id);
-  assert.equal(moved.date, '2026-10-10'); // "Saturday" as seen from Monday 5 October 2026
+  assert.equal(moved.date, '2026-10-10'); // "sabato" as seen from Monday 5 October 2026
   assert.equal(moved.day, 'sat');
   // The salon is open on Saturdays, so the move needs no approval outside opening hours.
   assert.equal(moved.outsideHoursApproved, false);
   assert.equal(isOutsideOpeningHours(initialBookingHours, moved.date, moved.startTime, moved.endTime), false);
   assert.equal(moved.customerId, original.customerId);
-  assert.equal(moved.employeeId, original.employeeId);
+  assert.equal(moved.employeeId, change.employeeId);
   assert.equal(moved.startTime, '10:00');
   assert.equal(moved.endTime, '10:30');
   assert.equal(moved.staffName, original.staffName);
@@ -86,12 +92,14 @@ test('rescheduling Giulia moves her existing appointment without adding another'
   assert.equal(appointmentFromConversationAction(action, giulia, [], initialServices, initialEmployees, false), null);
 });
 
-test('offers do not make bookings before confirmation', () => {
+test('nothing the AI or an offer says books anything before the owner confirms', () => {
+  // The AI never books by itself: no prepared AI answer carries a booking.
+  for (const conversation of demoConversations) assert.equal(conversation.aiFollowUp?.appointmentAction, undefined, conversation.id);
+  // Offering Chloé another time books nothing yet: she answers first.
   const chloe = demoConversations.find((item) => item.id === 'conv-chloe')!;
-  const giulia = demoConversations.find((item) => item.id === 'conv-giulia')!;
-  assert.equal(chloe.aiFollowUp!.appointmentAction, undefined);
-  assert.equal(chloe.quickReplies![0].appointmentAction, undefined);
-  assert.equal(giulia.aiFollowUp!.appointmentAction, undefined);
+  assert.ok(chloe.quickReplies!.length > 0);
+  for (const reply of chloe.quickReplies!) assert.equal(reply.appointmentAction, undefined);
+  assert.equal(chloe.bookingRequest, undefined);
 });
 
 test('date helpers preserve calendar dates across week, year and DST boundaries', () => {
@@ -119,12 +127,10 @@ test('chat dates point at the next weekday, one to seven days ahead, whatever da
   assert.equal(upcomingWeekday(6, '2026-12-31'), '2027-01-02'); // across the year end
 });
 
-test('the sample chats depend only on the clock they are given', () => {
+test('the salon\'s chats depend only on the clock they are given', () => {
   const zurichEvening = new Date('2026-11-18T22:30:00Z'); // 23:30 on Wednesday 18 November in Zurich
-  const friday = (list: ReturnType<typeof createDemoConversations>) =>
-    list.find((item) => item.id === 'conv-camille')!.aiFollowUp!.appointmentAction!.date;
-  const saturday = (list: ReturnType<typeof createDemoConversations>) =>
-    list.find((item) => item.id === 'conv-giulia')!.quickReplies![0].appointmentAction!.date;
+  const friday = (list: ReturnType<typeof createDemoConversations>) => list.find((item) => item.id === 'conv-sabrina')!.bookingRequest!.date;
+  const saturday = (list: ReturnType<typeof createDemoConversations>) => list.find((item) => item.id === 'conv-giulia')!.bookingRequest!.date;
   assert.equal(friday(createDemoConversations('Europe/Zurich', zurichEvening)), '2026-11-20');
   assert.equal(saturday(createDemoConversations('Europe/Zurich', zurichEvening)), '2026-11-21');
   // A day later, at the same moment, it is already Friday in Zurich and still Thursday in New York:

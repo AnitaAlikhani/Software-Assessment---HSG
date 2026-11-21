@@ -7,6 +7,11 @@ import { initialAiSettings, scriptedGerman } from '../src/conversationData';
 import { messageForOwner } from '../src/conversationPresentation';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import type { AppointmentAction, CalendarEvent, Conversation } from '../src/types';
+import { chatBookingMessage } from '../src/chatTemplates';
+import { salonInstant } from '../src/demoSeed';
+import { createDemoWorkspace } from '../src/demoWorkspace';
+import { chatAppointmentId, planChatBooking } from '../src/requestAnswers';
+import { getSalonNow } from '../src/scheduling';
 import { addCustomerMessage, emptyState, publicConversations, webChatId } from '../server/whatsappCore';
 import { demoConversations, demoCustomers, demoEvents, demoRequests, demoShifts, FIXED_NOW } from './fixedClock';
 
@@ -21,7 +26,7 @@ const actionsOf = (conversation: Conversation): { action: AppointmentAction; fro
 
 test('chat actions name services and stylists by id only', () => {
   const actions = demoConversations.flatMap(actionsOf).map(({ action }) => action);
-  assert.equal(actions.length, 3); // Camille: the AI's follow-up and the owner's reply; Giulia: the owner's reply
+  assert.equal(actions.length, 2); // Sabrina: the owner's two answers to her discount question
   for (const action of actions) {
     assert.ok(!('serviceName' in action) && !('staffName' in action));
     if (action.type === 'book') {
@@ -62,17 +67,17 @@ test('renaming every service, stylist and customer leaves the chat bookings and 
 });
 
 test('a booking whose service, stylist or appointment is gone is refused instead of guessed', () => {
-  const camille = demoConversations.find((item) => item.id === 'conv-camille')!;
+  const sabrina = demoConversations.find((item) => item.id === 'conv-sabrina')!;
   const giulia = demoConversations.find((item) => item.id === 'conv-giulia')!;
-  const book = camille.aiFollowUp!.appointmentAction!;
-  const move = giulia.quickReplies![0].appointmentAction!;
+  const book = sabrina.quickReplies![0].appointmentAction!;
+  const move = { type: 'reschedule' as const, appointmentId: 'cal-giulia', date: giulia.bookingRequest!.date, startTime: giulia.bookingRequest!.time };
   const build = (action: AppointmentAction, conversation: Conversation, partial: { events?: CalendarEvent[]; services?: typeof initialServices; employees?: typeof initialEmployees } = {}) =>
     appointmentFromConversationAction(action, conversation, partial.events ?? demoEvents, partial.services ?? initialServices, partial.employees ?? initialEmployees, true);
-  assert.ok(build(book, camille));
-  assert.equal(build(book, camille, { services: initialServices.filter((service) => service.id !== 'srv-3') }), null);
-  assert.equal(build(book, camille, { employees: initialEmployees.filter((employee) => employee.id !== 'emp-1') }), null);
+  assert.ok(build(book, sabrina));
+  assert.equal(build(book, sabrina, { services: initialServices.filter((service) => service.id !== 'srv-3') }), null);
+  assert.equal(build(book, sabrina, { employees: initialEmployees.filter((employee) => employee.id !== 'emp-1') }), null);
   // No other service or stylist with the old name is taken in its place.
-  assert.equal(build(book, camille, { services: initialServices.map((service) => service.id === 'srv-3' ? { ...service, id: 'srv-other' } : service) }), null);
+  assert.equal(build(book, sabrina, { services: initialServices.map((service) => service.id === 'srv-3' ? { ...service, id: 'srv-other' } : service) }), null);
   assert.equal(build(move, giulia, { events: demoEvents.filter((event) => event.id !== 'cal-giulia') }), null);
   // A request without a known stylist is shown as unassigned, never under somebody's name.
   const unassigned = appointmentFromRequest({ ...demoRequests[0], employeeId: undefined, staffName: undefined }, initialServices, initialEmployees);
@@ -170,31 +175,30 @@ test('a sample chat books for its own customer record and never changes that rec
       assert.deepEqual(result.customer, customer, conversation.id);
     }
   }
-  // Camille writes French: her record says so, with her number stored like every other.
-  const camille = demoCustomers.find((item) => item.id === 'cust-camille')!;
-  assert.equal(camille.language, 'FR');
-  assert.match(camille.phone, /^\+417\d555\d{4}$/);
+  // Marie writes French: her record says so, with her number stored like every other.
+  const marie = demoCustomers.find((item) => item.id === 'cust-marie')!;
+  assert.equal(marie.language, 'FR');
+  assert.match(marie.phone, /^\+417\d555\d{4}$/);
 });
 
 test('a chat leads to its appointment: the one it names, else the newest one booked in it', () => {
   const chat = (id: string) => demoConversations.find((item) => item.id === id)!;
-  for (const [id, appointmentId] of [['conv-marie', 'cal-2'], ['conv-lea', 'cal-3'], ['conv-john', 'cal-john'], ['conv-giulia', 'cal-giulia']]) {
+  for (const [id, appointmentId] of [['conv-marie', 'cal-2'], ['conv-lara', 'cal-3'], ['conv-john', 'cal-john'], ['conv-giulia', 'cal-giulia']]) {
     const appointment = appointmentForConversation(chat(id), demoEvents);
     assert.equal(appointment?.id, appointmentId, id);
     // The way back exists as well: the appointment names the chat it was booked in.
     assert.equal(appointment?.conversationId, id);
     assert.equal(appointment?.customerId, chat(id).customerId);
   }
-  // Camille's colouring is still to be booked and Chloé only asked for a time: nothing to open.
-  assert.equal(appointmentForConversation(chat('conv-camille'), demoEvents), null);
-  assert.equal(appointmentForConversation(chat('conv-chloe'), demoEvents), null);
-  // Once the booking is made in Camille's chat, the chat leads to it.
-  const camille = chat('conv-camille');
-  const action = camille.aiFollowUp!.appointmentAction!;
-  const booked = { ...appointmentFromConversationAction(action, camille, demoEvents, initialServices, initialEmployees, true)!, conversationId: camille.id };
+  // Sabrina's colouring and Reto's men's cut still wait for the owner, Chloé only asked: nothing to open.
+  for (const id of ['conv-sabrina', 'conv-reto', 'conv-chloe']) assert.equal(appointmentForConversation(chat(id), demoEvents), null, id);
+  // Once the booking is made in Sabrina's chat, the chat leads to it.
+  const sabrina = chat('conv-sabrina');
+  const action = sabrina.quickReplies![0].appointmentAction!;
+  const booked = { ...appointmentFromConversationAction(action, sabrina, demoEvents, initialServices, initialEmployees, false)!, conversationId: sabrina.id };
   const calendar = upsertAppointment(demoEvents, booked);
-  assert.equal(appointmentForConversation({ ...camille, appointmentId: action.appointmentId }, calendar)?.id, 'cal-camille');
-  assert.equal(appointmentForConversation(camille, calendar)?.id, 'cal-camille');
+  assert.equal(appointmentForConversation({ ...sabrina, appointmentId: action.appointmentId }, calendar)?.id, action.appointmentId);
+  assert.equal(appointmentForConversation(sabrina, calendar)?.id, action.appointmentId);
   // A cancelled appointment has left the calendar: the chat does not lead to another customer's booking.
   assert.equal(appointmentForConversation(chat('conv-marie'), demoEvents.filter((event) => event.id !== 'cal-2')), null);
   // A live chat names no appointment. A booking confirmed in it carries the chat's id; the newest one counts.
@@ -239,10 +243,129 @@ test('the Friday chat about a late appointment follows the opening hours', () =>
   const chloe = demoConversations.find((item) => item.id === 'conv-chloe')!;
   const friday = initialBookingHours.find((day) => day.day === 'Friday')!;
   assert.equal(friday.to, '18:30');
-  assert.equal(chloe.attentionReason, 'The request is outside opening hours (we close at 18:30 on Fridays).');
-  assert.match(chloe.messages[0].original, /nach 18:30 Uhr/);
-  assert.match(chloe.aiFollowUp!.translation, /last appointment on Friday is at 18:00/);
-  assert.match(chloe.quickReplies![0].en, /stay open until 19:30 on Friday\. Shall I book you for 19:00\?/);
-  // The salon is open on Saturdays, so the AI may offer Giulia a Saturday time.
+  assert.equal(chloe.attentionReason, 'The customer asked for Friday at 19:00, after closing time (18:30). Offer another time.');
+  assert.match(chloe.messages[0].original, /am Freitag um 19:00 Uhr/);
+  // The AI says why that time is not possible and hands over; it neither books nor promises a time.
+  assert.match(chloe.messages[1].translation, /open until 18:30, so unfortunately an appointment at 19:00 isn't possible/);
+  assert.equal(chloe.bookingRequest, undefined);
+  assert.match(chloe.aiFollowUp!.translation, /last appointment on Friday starts at 18:00/);
+  assert.deepEqual(chloe.quickReplies!.map((reply) => reply.en), [
+    'We can offer you an appointment on Friday at 18:00. Does that suit you?',
+    'On Saturday we would have an appointment free at 11:30. Does that suit you?',
+  ]);
+  // The salon is open on Saturdays, so the owner may offer one; Giulia's move goes to a Saturday too.
   assert.ok(initialBookingHours.find((day) => day.day === 'Saturday')!.isOpen);
+});
+
+// ---------- the salon's own chats as data ----------
+
+const EVERY_TEXT = (conversation: Conversation) => [
+  ...conversation.messages, ...(conversation.aiFollowUp ? [conversation.aiFollowUp] : []),
+  ...(conversation.quickReplies ?? []).map((reply) => ({ sender: 'owner' as const, original: reply.local, translation: reply.en, translationDe: reply.de })),
+];
+
+test('the salon\'s chats lead with booking: four in German (one in Swiss German), one each in French, Italian and English', () => {
+  const languages = demoConversations.map((conversation) => conversation.language);
+  assert.deepEqual(['DE', 'FR', 'IT', 'EN'].map((language) => languages.filter((item) => item === language).length), [4, 1, 1, 1]);
+  assert.ok(languages.filter((language) => language === 'DE').length / languages.length > 0.5);
+  // Every chat is about an appointment: it holds a request, a booking, or a time the customer asks for.
+  for (const conversation of demoConversations) {
+    assert.ok(conversation.bookingRequest || /Termin|rendez-vous|appuntamento|appointment|haircut|coupe|taglio|Coloration|Herreschnitt/i.test(conversation.messages[0].original + conversation.messages[0].translation), conversation.id);
+  }
+  // Reto writes as many people here do, in Swiss German; the AI answers in standard German.
+  const reto = demoConversations.find((item) => item.id === 'conv-reto')!;
+  assert.match(reto.messages[0].original, /Samschtig/);
+  assert.equal(reto.language, 'DE');
+  // Swiss spelling throughout: no ß in any German text, wherever it stands.
+  const german = demoConversations.flatMap((conversation) => EVERY_TEXT(conversation).map((text) => conversation.language === 'DE' ? text.original : text.translationDe ?? ''));
+  assert.deepEqual(german.filter((text) => text.includes('ß')), []);
+});
+
+test('the names, services, prices, stylists and hours in the chats are the salon\'s own', () => {
+  const services = new Map(initialServices.map((service) => [service.id, service]));
+  for (const conversation of demoConversations) {
+    const request = conversation.bookingRequest;
+    if (request) {
+      // The request names a service and a stylist of the salon, by id and by their current names.
+      assert.equal(request.service, services.get(request.serviceId!)!.name, conversation.id);
+      if (request.employeeId) assert.equal(request.staffName, initialEmployees.find((employee) => employee.id === request.employeeId)!.name, conversation.id);
+      assert.equal(request.customerName, conversation.customerName, conversation.id);
+      // The customer gave their name in the chat before the AI passed the request on.
+      assert.ok(conversation.messages.some((message) => message.sender === 'customer' && message.original.includes(conversation.customerName)), conversation.id);
+    }
+    for (const text of EVERY_TEXT(conversation)) {
+      // A price is one of the menu's, and the colouring's length the menu's.
+      for (const price of text.translation.matchAll(/CHF (\d+)/g)) assert.ok(initialServices.some((service) => service.priceCHF === Number(price[1])), `${conversation.id}: CHF ${price[1]}`);
+      if (/colouring takes (\d+) minutes/.test(text.translation)) assert.match(text.translation, new RegExp(`takes ${services.get('srv-3')!.durationMinutes} minutes`));
+      // Stylists are named by their first names, as the salon's team has them.
+      for (const name of text.translation.matchAll(/\bwith ([A-Z][a-z]+)\b/g)) assert.ok(initialEmployees.some((employee) => employee.firstName === name[1]), `${conversation.id}: ${name[1]}`);
+    }
+  }
+  // Chloé is told the real closing time on Friday.
+  const friday = initialBookingHours.find((day) => day.day === 'Friday')!;
+  assert.match(demoConversations.find((item) => item.id === 'conv-chloe')!.messages[1].original, new RegExp(`bis ${friday.to} Uhr geöffnet`));
+});
+
+/** Words with which the AI would claim a booking or a free time it cannot know: the calendar is the owner's. */
+const AI_PROMISES = /\b(booked|is confirmed|confirmed:|is free|is available|gebucht|ist bestätigt|frei ist|ist frei|réservé|confirmé|disponible|prenotato|confermato|disponibile|libero)\b/i;
+
+test('no chat shows the AI booking, promising a free time or calling something booked that is not in the calendar', () => {
+  for (const conversation of demoConversations) {
+    for (const message of [...conversation.messages, ...(conversation.aiFollowUp ? [{ ...conversation.aiFollowUp, sender: 'ai' as const }] : [])]) {
+      if (message.sender !== 'ai') continue;
+      for (const text of [message.original, message.translation, message.translationDe ?? '']) {
+        assert.doesNotMatch(text, AI_PROMISES, `${conversation.id}: ${text}`);
+      }
+    }
+    // A confirmation is the salon's message, and only in a chat whose appointment is in the calendar.
+    const confirmations = conversation.messages.filter((message) => message.sender === 'owner');
+    assert.equal(confirmations.length, conversation.appointmentId ? 1 : 0, conversation.id);
+    if (conversation.appointmentId) assert.ok(demoEvents.some((event) => event.id === conversation.appointmentId), conversation.id);
+    // "Booked" only with its appointment.
+    assert.equal(conversation.status === 'booked', Boolean(conversation.appointmentId) && conversation.bookingRequest?.status === 'confirmed', conversation.id);
+  }
+  // The chat about a discount waits for the owner's answer, with the request the AI took.
+  const sabrina = demoConversations.find((item) => item.id === 'conv-sabrina')!;
+  assert.equal(sabrina.status, 'needs-attention');
+  assert.match(sabrina.attentionReason!, /discount/);
+  assert.equal(sabrina.bookingRequest!.status, 'requested');
+  // One chat asks to change a confirmed appointment, one asks for a time after closing.
+  const giulia = demoConversations.find((item) => item.id === 'conv-giulia')!;
+  assert.deepEqual([giulia.bookingRequest!.kind, giulia.bookingRequest!.status, giulia.appointmentId], ['change', 'requested', 'cal-giulia']);
+  assert.equal(demoConversations.find((item) => item.id === 'conv-chloe')!.bookingRequest, undefined);
+});
+
+test('the salon\'s confirmations in the chats are the fixed sentences a live chat gets', () => {
+  for (const conversation of demoConversations.filter((item) => item.appointmentId)) {
+    const sent = conversation.messages.find((message) => message.sender === 'owner')!;
+    const event = demoEvents.find((item) => item.id === conversation.appointmentId)!;
+    const fixed = chatBookingMessage('confirmed', {
+      language: conversation.language, customerName: conversation.customerName, salonName: 'Bella Hair Salon',
+      serviceName: event.serviceName, staffName: event.staffName, date: event.date, time: event.startTime,
+    });
+    assert.equal(sent.original, fixed.original, conversation.id);
+    assert.equal(sent.translation, fixed.translation, conversation.id);
+    assert.equal(sent.translationDe, conversation.language === 'DE' ? undefined : fixed.translationDe, conversation.id);
+  }
+  // The appointment a reply in Sabrina's chat books has the id that confirming her request gives it.
+  const sabrina = demoConversations.find((item) => item.id === 'conv-sabrina')!;
+  assert.equal(sabrina.quickReplies![0].appointmentAction!.appointmentId, chatAppointmentId(sabrina.id, sabrina.bookingRequest!));
+});
+
+test('every request in a chat passes the salon\'s rules, today and on a day in another month', () => {
+  for (const now of [FIXED_NOW, salonInstant('2026-11-19', '14:10', 'Europe/Zurich'), salonInstant('2027-06-03', '10:30', 'Europe/Zurich')]) {
+    const workspace = createDemoWorkspace('Europe/Zurich', now);
+    const salon = context({ events: workspace.events, requests: workspace.requests, shiftOverview: workspace.shifts, now });
+    const waiting = workspace.conversations.filter((conversation) => conversation.bookingRequest?.status === 'requested');
+    assert.equal(waiting.length, 3, String(now));
+    for (const conversation of waiting) {
+      const plan = planChatBooking(salon, conversation)!;
+      assert.equal(plan.refusal, null, `${now.toISOString()}: ${conversation.id}`);
+      assert.ok(plan.action, `${now.toISOString()}: ${conversation.id}`);
+      // Inside the opening hours, never on a closed day, never in the past.
+      const request = conversation.bookingRequest!;
+      assert.equal(isOutsideOpeningHours(initialBookingHours, request.date, request.time, plan.endTime!), false, conversation.id);
+      assert.ok(request.date > getSalonNow('Europe/Zurich', now).date, conversation.id);
+    }
+  }
 });

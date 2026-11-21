@@ -25,7 +25,7 @@ test('search keeps customer, pending request and confirmed appointment results d
 });
 
 test('everybody in a chat, a request or the calendar can be found as a customer', () => {
-  for (const name of ['Camille', 'Giulia Rossi', demoRequests[1].customerName, demoEvents[0].customerName]) {
+  for (const name of ['Sabrina', 'Reto Hollenstein', 'Giulia Rossi', demoRequests[1].customerName, demoEvents[0].customerName]) {
     assert.ok(getHeaderSearchResults(demoCustomers, [], [], name).some((result) => result.kind === 'customer'), name);
   }
 });

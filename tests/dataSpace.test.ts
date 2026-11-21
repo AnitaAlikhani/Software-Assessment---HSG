@@ -50,8 +50,9 @@ test('the live site keeps its old key names and the preview space never shares t
 });
 
 const chat = { waId: '4179' } as LiveConversation;
-// What the storage holds for it: the chat, and the time it is deleted unless something happens in it.
-const stored = JSON.stringify({ ...chat, keptUntil: NOW + FOURTEEN_DAYS * 1000 });
+// What the storage holds for it: its revision (the number of saves, first, so the save script can
+// read it), the chat, and the time it is deleted unless something happens in it.
+const stored = JSON.stringify({ rev: 1, ...chat, keptUntil: NOW + FOURTEEN_DAYS * 1000 });
 /** Key names that must not show a customer id or a message id carry a hash of it instead. */
 const hashed = (text: string) => createHash('sha256').update(text).digest('hex');
 const everyStoreAction = async () => {
@@ -82,9 +83,10 @@ test('on the live site every chat is stored under the key it always had, and no 
   for (const settings of liveSites) {
     assert.deepEqual(withoutRandomValues(await deployedWith(settings, everyStoreAction, { store: new FakeStore(NOW) })), [
       // Saving: the chat under its own key, with its 14 days, unless it was deleted meanwhile. The
-      // key name and the stored text are the ones every chat saved before this version has, so
-      // those stay reachable. No list of chats is written.
-      ['EVAL', SAVE_SCRIPT, 2, 'slotbee:live:chat:4179', marker, 'none', stored, FOURTEEN_DAYS],
+      // key name is the one every chat saved before this version has, and a chat stored without a
+      // revision reads as revision 0, so those stay reachable. No list of chats is written. A chat
+      // that was not loaded first is saved whatever revision is stored ('any').
+      ['EVAL', SAVE_SCRIPT, 2, 'slotbee:live:chat:4179', marker, 'none', stored, FOURTEEN_DAYS, 'any'],
       // Once an hour a save looks whether the earlier version's list still holds ids to take out.
       ['SMEMBERS', 'slotbee:live:index'],
       // Reading one chat to show it, and reading it with its deletion marker to change it.

@@ -121,7 +121,15 @@ export interface Conversation {
     time: string;
     customerName: string;
     status: 'requested' | 'confirmed';
+    /** The stylist the customer asked for, where they named one: the id in the salon's list and the name. */
+    employeeId?: string;
+    staffName?: string;
+    /** 'change': the customer wants to move the appointment that was confirmed in this chat (`previous`) to this time. */
+    kind?: 'new' | 'change';
+    previous?: { date: string; time: string };
   };
+  /** The customer asked in the chat to cancel the appointment that was confirmed in it. The owner decides. */
+  cancellationRequest?: { service: string; date: string; time: string };
 }
 
 export interface HandoverRule {

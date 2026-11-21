@@ -8,7 +8,7 @@ import { createDemoCustomers, createDemoEvents, createDemoShifts } from '../src/
  */
 export const FIXED_NOW = new Date('2026-10-05T10:00:00Z');
 
-/** The sample chats as they look at FIXED_NOW: Camille's Friday is 9 October, Giulia's Saturday 10 October. */
+/** The salon's own chats as they look at FIXED_NOW: Sabrina's Friday is 9 October, Giulia's Saturday 10 October. */
 export const demoConversations = createDemoConversations('Europe/Zurich', FIXED_NOW);
 
 /**

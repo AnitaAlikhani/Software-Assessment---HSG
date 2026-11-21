@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CalendarCheck, Check, ChevronRight, Copy, MessageSquare, Phone, Plus, RotateCcw, Undo2, X } from 'lucide-react';
+import { CalendarCheck, CalendarClock, CalendarX, Check, ChevronRight, Copy, MessageSquare, Phone, Plus, RotateCcw, Undo2, X } from 'lucide-react';
 import { ChannelBadge, channelLabel } from '../components/ChannelBadge';
+import { ChatCancellationAnswers, ChatRequestAnswers, type AnswerChat } from '../components/ChatBookingCards';
 import { appointmentIdForRequest, requestTimes } from '../appointmentActions';
 import type { AvailabilityContext } from '../availability';
 import { chatBookingName } from '../bookingData';
@@ -10,8 +11,8 @@ import { answerText } from '../customerTexts';
 import { timeAgoLabel } from '../demoRequests';
 import { researchMode } from '../flags';
 import { formatDate, formatDayMonth, formatPhone, formatStoredTimeRange, formatTimeRange, isPhoneNumber, isSamplePhone, normalizePhone, weekdayName } from '../format';
-import { inboxItems, isWaiting, type InboxItem, type RequestAnswer } from '../inbox';
-import { acceptedAppointmentState, checkRequest, freeStartsForRequest, nextFreeDayForRequest, planChatBooking } from '../requestAnswers';
+import { chatOutcome, inboxItems, isWaiting, type InboxItem, type RequestAnswer } from '../inbox';
+import { acceptedAppointmentState, checkRequest, freeStartsForRequest, nextFreeDayForRequest, planChatBooking, planChatCancellation } from '../requestAnswers';
 import { addMinutes, getSalonNow } from '../scheduling';
 import type { AppointmentRequest, CalendarEvent, Conversation, Customer } from '../types';
 
@@ -39,8 +40,11 @@ export interface HomeInboxProps {
   /** Takes back an answer to a request from the booking page. Left out, no "Undo" is shown. */
   onUndoAnswer?: (id: string) => Outcome;
   onDismissAnswer?: (kind: RequestAnswer['kind'], id: string) => void;
-  /** Books a chat's request and confirms it in the chat. Left out, no "Accept" is shown for those. */
-  onAcceptChatRequest?: (conversationId: string) => Outcome;
+  /**
+   * Answers a chat's booking request or cancellation (src/App.tsx, handleChatBooking): resolves
+   * to why it could not be done, or nothing. Left out, a chat's request only offers "Open chat".
+   */
+  onChatBooking?: AnswerChat;
   onOpenConversations: (conversationId?: string) => void;
   onOpenCustomer?: (customerId: string) => void;
   onOpenAppointment: (event: CalendarEvent) => void;
@@ -128,8 +132,9 @@ async function copyToClipboard(text: string): Promise<boolean> {
 
 /**
  * "Waiting for you": the one list of everything that needs the owner. Booking requests from the
- * booking page (Accept, Move, Reject), booking requests the AI collected in a chat (Accept, Open
- * chat) and chats in which a customer waits.
+ * booking page (Accept, Move, Reject), booking requests the AI collected in a chat (Confirm,
+ * Suggest another time, Decline, as the chat's own card offers them), a customer's wish to cancel
+ * (Cancel appointment, Keep appointment) and chats in which a customer waits.
  *
  * An answered request does not disappear at once. It stays where it was, says what was done and
  * offers "Undo". For a request from the booking page it also says what the app does not do:
@@ -137,7 +142,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
  */
 export const HomeInbox: React.FC<HomeInboxProps> = ({
   requests, conversations, customers, answers, salon, clock, salonName, selectedRequestId,
-  onAcceptRequest, onRejectRequest, onMoveRequest, onUndoAnswer, onDismissAnswer, onAcceptChatRequest,
+  onAcceptRequest, onRejectRequest, onMoveRequest, onUndoAnswer, onDismissAnswer, onChatBooking,
   onOpenConversations, onOpenCustomer, onOpenAppointment, onSimulateNewRequest,
 }) => {
   const items = inboxItems({ requests, conversations, events: salon.events, answers, timeZone: salon.timeZone, now: clock });
@@ -483,64 +488,124 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
 
   // ---------- a booking request that waits in a chat ----------
 
+  /** Home's way into the chat's answers: a tap counts only when it was aimed (see `counts`). */
+  const chatAnswer = (key: string): AnswerChat | undefined => onChatBooking && (async (conversationId, action) => {
+    const outcome = await onChatBooking(conversationId, action);
+    if (!outcome) settle(key, null);
+    return outcome;
+  });
+
   const renderChatRequest = (item: Extract<InboxItem, { kind: 'chat-request' }>) => {
     const { conversation, booking } = item;
     const plan = planChatBooking(salon, conversation);
     const customer = customerOfChat(conversation);
     const name = chatBookingName(conversation.customerName, booking.customerName);
-    const accept = plan?.action && onAcceptChatRequest ? onAcceptChatRequest : null;
+    const change = booking.kind === 'change' && booking.previous;
     return (
       <>
         <div className="flex items-start gap-3">
           <DateTile date={booking.date} />
           <div className="min-w-0 flex-1 space-y-0.5">
-            <p className="text-xs font-medium text-slate-500">Booking request from a chat · {age(conversation.lastMessageAt, conversation.lastTime)}</p>
+            <p className="text-xs font-medium text-slate-500">{change ? 'Change request from a chat' : 'Booking request from a chat'} · {age(conversation.lastMessageAt, conversation.lastTime)}</p>
             <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customer?.name ?? name, customer?.id)}</p>
             <p className="text-sm text-slate-700">
               {plan?.serviceName ?? booking.service} ·{' '}
               <span className="whitespace-nowrap tabular-nums">{plan?.endTime ? formatTimeRange(booking.time, plan.endTime) : booking.time}</span>
             </p>
-            {plan?.employee && <p className="text-xs text-slate-500">with {plan.employee.name}, who is free then</p>}
+            {change && (
+              <p className="text-xs text-slate-500">
+                instead of <span className="whitespace-nowrap">{formatDate(plan?.previous?.date ?? booking.previous!.date)},</span>{' '}
+                <span className="whitespace-nowrap tabular-nums">{plan?.previous ? formatTimeRange(plan.previous.startTime, plan.previous.endTime) : booking.previous!.time}</span>
+              </p>
+            )}
+            {plan?.employee
+              ? <p className="text-xs text-slate-500">with {plan.employee.name}{plan.asked ? ', as asked' : ''}</p>
+              : plan?.asked && <p className="text-xs text-slate-500">asked for {plan.asked.name}</p>}
             <p className="text-xs text-slate-500">{chatContact(conversation)}</p>
           </div>
         </div>
-        {plan?.refusal
-          ? <p role="status" className={`mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs font-medium leading-relaxed text-amber-900 ${INDENT}`}>{plan.refusal}</p>
-          : accept && <p className={`mt-3 text-xs text-slate-500 ${INDENT}`}>Accept adds it to your calendar and confirms it in the chat.</p>}
-        {problemOf(item.key, plan?.refusal)}
-        <div className={`mt-3 grid gap-2 ${accept ? 'grid-cols-2' : 'grid-cols-1'} sm:flex sm:flex-wrap ${INDENT}`}>
-          {accept && (
-            <button type="button" onClick={act(item.key, () => settle(item.key, accept(conversation.id)))} className={PRIMARY}>
-              <Check className={ICON} aria-hidden="true" />Accept
-            </button>
-          )}
-          <button type="button" onClick={act(item.key, () => onOpenConversations(conversation.id))} className={accept ? OUTLINE : PRIMARY}>
-            <MessageSquare className={ICON} aria-hidden="true" />Open chat
+        <div className={INDENT}>
+          <ChatRequestAnswers conversation={conversation} salon={salon} onAnswer={chatAnswer(item.key)} allowTap={(event) => counts(event, item.key)} />
+          <button type="button" onClick={act(item.key, () => onOpenConversations(conversation.id))} className={`mt-2 ${QUIET} -ml-3`}>
+            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
           </button>
         </div>
       </>
     );
   };
 
-  const renderChatAnswered = (item: Extract<InboxItem, { kind: 'chat-request-answered' }>) => {
-    const { answer } = item;
-    // Only while the appointment is still the chat's own: one given to another customer since is not offered from here.
-    const appointment = salon.events.find((event) => event.id === answer.appointmentId && event.conversationId === answer.id);
-    // A customer can delete the chat at any time: then there is nothing to open or to try again.
-    const chatIsThere = conversations.some((conversation) => conversation.id === answer.id);
-    const retry = answer.delivery === 'failed' && onAcceptChatRequest && chatIsThere ? onAcceptChatRequest : null;
+  const renderChatCancellation = (item: Extract<InboxItem, { kind: 'chat-cancellation' }>) => {
+    const { conversation, cancellation } = item;
+    const plan = planChatCancellation(salon, conversation);
+    const customer = customerOfChat(conversation);
+    const appointment = plan?.appointment;
     return (
       <>
         <div className="flex items-start gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-            <CalendarCheck className="h-5 w-5" aria-hidden="true" />
+          <DateTile date={appointment?.date ?? cancellation.date} />
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <p className="text-xs font-medium text-slate-500">Cancellation request from a chat · {age(conversation.lastMessageAt, conversation.lastTime)}</p>
+            <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customer?.name ?? conversation.customerName, customer?.id)} wants to cancel</p>
+            <p className="text-sm text-slate-700">
+              {appointment?.serviceName ?? cancellation.service} ·{' '}
+              <span className="whitespace-nowrap tabular-nums">{appointment ? formatTimeRange(appointment.startTime, appointment.endTime) : cancellation.time}</span>
+            </p>
+            {appointment && <p className="text-xs text-slate-500">with {appointment.staffName}</p>}
+            <p className="text-xs text-slate-500">{chatContact(conversation)}</p>
+          </div>
+        </div>
+        <div className={INDENT}>
+          <ChatCancellationAnswers conversation={conversation} salon={salon} onAnswer={chatAnswer(item.key)} allowTap={(event) => counts(event, item.key)} />
+          <button type="button" onClick={act(item.key, () => onOpenConversations(conversation.id))} className={`mt-2 ${QUIET} -ml-3`}>
+            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  /** What an answer to a chat did, as the entry says it: a title, its colours and icon, and the sentence below. */
+  const answeredChat = (answer: Extract<RequestAnswer, { kind: 'chat' }>, chatIsThere: boolean) => {
+    const name = answer.customerName;
+    // A live chat's message was sent by the server; one of the salon's own chats shows the answer in the chat itself.
+    const told = (what: string) => answer.live ? `${name} has ${what} in the chat.` : `The ${what.replace(/^the /, '')} is in the chat.`;
+    switch (chatOutcome(answer)) {
+      case 'suggested': return { title: 'Other time suggested', tone: 'indigo', Icon: CalendarClock, line: `${told('the suggestion')} When ${name} takes it up, it comes back here as a request.` };
+      case 'declined': return { title: 'Declined', tone: 'slate', Icon: X, line: told('the answer') };
+      case 'cancelled': return { title: 'Cancelled', tone: 'slate', Icon: CalendarX, line: `The appointment has left your calendar. ${told('the cancellation')}` };
+      case 'kept': return { title: 'Appointment kept', tone: 'slate', Icon: CalendarCheck, line: `Nothing was sent to ${name}. ${chatIsThere ? 'Write to them in the chat yourself.' : ''}`.trim() };
+      default: return { title: 'Confirmed', tone: 'emerald', Icon: CalendarCheck, line: `The appointment is in your calendar. ${told('the confirmation')}` };
+    }
+  };
+  const TONES: Record<string, { tile: string; title: string }> = {
+    emerald: { tile: 'bg-emerald-100 text-emerald-700', title: 'text-emerald-800' },
+    indigo: { tile: 'bg-indigo-100 text-[#5551FF]', title: 'text-[#433fd8]' },
+    slate: { tile: 'bg-slate-200 text-slate-600', title: 'text-slate-700' },
+  };
+
+  const renderChatAnswered = (item: Extract<InboxItem, { kind: 'chat-request-answered' }>) => {
+    const { answer } = item;
+    // Only while the appointment is still the chat's own: one given to another customer since is not offered from here.
+    const appointment = answer.appointmentId ? salon.events.find((event) => event.id === answer.appointmentId && event.conversationId === answer.id) : undefined;
+    // A customer can delete the chat at any time: then there is nothing to open or to try again.
+    const chatIsThere = conversations.some((conversation) => conversation.id === answer.id);
+    const outcome = chatOutcome(answer);
+    const retry = answer.delivery === 'failed' && outcome === 'confirmed' && onChatBooking && chatIsThere ? onChatBooking : null;
+    const said = answeredChat(answer, chatIsThere);
+    const tone = TONES[said.tone];
+    const time = answer.endTime && answer.endTime !== answer.startTime ? formatTimeRange(answer.startTime, answer.endTime) : answer.startTime;
+    return (
+      <>
+        <div className="flex items-start gap-3">
+          <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${tone.tile}`}>
+            <said.Icon className="h-5 w-5" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <p role="status" className="text-sm font-bold text-emerald-800">Accepted</p>
+            <p role="status" className={`text-sm font-bold ${tone.title}`}>{said.title}</p>
             <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{answer.customerName}</p>
             <p className="text-xs text-slate-600">
               {answer.serviceName} · <span className="whitespace-nowrap">{formatDate(answer.date)},</span>{' '}
-              <span className="whitespace-nowrap tabular-nums">{formatTimeRange(answer.startTime, answer.endTime)}</span> · with {answer.staffName}
+              <span className="whitespace-nowrap tabular-nums">{time}</span>{answer.staffName && <> · with {answer.staffName}</>}
             </p>
           </div>
         </div>
@@ -551,16 +616,14 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
             {answer.problem && <p>{answer.problem}</p>}
             {chatIsThere && <p>You can also open the chat and write to {answer.customerName} yourself.</p>}
           </div>
+        ) : answer.delivery === 'pending' ? (
+          <p role="status" className={`mt-3 text-xs leading-relaxed text-slate-700 ${INDENT}`}>The appointment is in your calendar. The confirmation is on its way into the chat…</p>
         ) : (
-          <p role="status" className={`mt-3 text-xs leading-relaxed text-slate-700 ${INDENT}`}>
-            {answer.delivery === 'done'
-              ? <>The appointment is in your calendar. <span className="font-semibold text-slate-900">{answer.customerName} has the confirmation in the chat.</span></>
-              : 'The appointment is in your calendar. The confirmation is on its way into the chat…'}
-          </p>
+          <p role="status" className={`mt-3 text-xs leading-relaxed text-slate-700 ${INDENT}`}>{said.line}</p>
         )}
         {problemOf(item.key)}
         <div className={`mt-3 flex flex-wrap gap-2 ${INDENT}`}>
-          {retry && <button type="button" onClick={act(item.key, () => settle(item.key, retry(answer.id)))} className={PRIMARY}>Try again</button>}
+          {retry && <button type="button" onClick={act(item.key, () => { void Promise.resolve(retry(answer.id, { type: 'confirm' })).then((outcome) => settle(item.key, outcome)); })} className={PRIMARY}>Try again</button>}
           {chatIsThere && (
             <button type="button" onClick={act(item.key, () => onOpenConversations(answer.id))} className={OUTLINE}>
               <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
@@ -619,6 +682,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
       {item.kind === 'request' && renderRequest(item)}
       {item.kind === 'request-answered' && renderAnswered(item)}
       {item.kind === 'chat-request' && renderChatRequest(item)}
+      {item.kind === 'chat-cancellation' && renderChatCancellation(item)}
       {item.kind === 'chat-request-answered' && renderChatAnswered(item)}
       {item.kind === 'chat' && renderChat(item)}
     </li>

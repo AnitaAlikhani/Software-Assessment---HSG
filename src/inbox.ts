@@ -1,16 +1,17 @@
 import type { AppointmentRequest, CalendarEvent, Conversation } from './types';
 import { appointmentIdForRequest, requestTimes } from './appointmentActions';
-import type { ChatBooking } from './requestAnswers';
+import type { ChatBooking, ChatCancellation } from './requestAnswers';
 import { getSalonNow } from './scheduling';
 
 /**
  * Home's inbox, "Waiting for you": everything that needs the owner, in one list.
  *
  *   - booking requests from the booking page;
- *   - booking requests the AI collected in a chat and the owner has not confirmed yet;
+ *   - booking requests the AI collected in a chat and the owner has not answered yet, and a
+ *     customer's wish in a chat to cancel an appointment;
  *   - chats in which a customer waits for the owner.
  *
- * A chat with a waiting booking request is listed once, as that request. The list is built here
+ * A chat with a waiting booking request or cancellation is listed once, as that request. The list is built here
  * from the data, without a clock of its own, so every screen and every test builds the same one.
  */
 
@@ -41,18 +42,36 @@ export type RequestAnswer =
       /** The id of the chat the request was collected in. */
       id: string;
       at: number;
+      /**
+       * What the owner answered. Missing on answers stored before there were other answers
+       * than a confirmation: those are confirmations.
+       */
+      outcome?: 'confirmed' | 'suggested' | 'declined' | 'cancelled' | 'kept';
+      /** The appointment a confirmation booked; empty for the other answers. */
       appointmentId: string;
       customerName: string;
       serviceName: string;
+      /** Who takes the appointment, or who was suggested; empty when nobody is named. */
       staffName: string;
+      /** The time the answer is about: the confirmed, suggested, declined or cancelled one. */
       date: string;
       startTime: string;
       endTime: string;
-      /** Whether the server has put the confirmation into the chat: still on its way, there, or not. */
+      /** The time the answered request asked for, where it differs from `date` and `startTime` (a suggestion names another time). */
+      asked?: { date: string; time: string };
+      /** Whether the chat is a live one: there the server has sent the customer the message. */
+      live?: boolean;
+      /**
+       * Whether the answer has reached the chat. Answers are recorded once the server has taken
+       * them ('done'); 'pending' and 'failed' are only found in answers stored by an earlier build.
+       */
       delivery: 'pending' | 'done' | 'failed';
       /** After a failure: what the server said. */
       problem?: string;
     };
+
+/** The answer to a chat's request, also for one stored before answers had an outcome. */
+export const chatOutcome = (answer: Extract<RequestAnswer, { kind: 'chat' }>): NonNullable<Extract<RequestAnswer, { kind: 'chat' }>['outcome']> => answer.outcome ?? 'confirmed';
 
 export const answerIsShown = (answer: RequestAnswer, now: Date): boolean => now.getTime() - answer.at < ANSWER_SHOWN_MS;
 
@@ -72,14 +91,16 @@ export type InboxItem = { key: string } & (
   | { kind: 'request-answered'; answer: Extract<RequestAnswer, { kind: 'request' }> }
   /** A booking request that waits in a chat. */
   | { kind: 'chat-request'; conversation: Conversation; booking: ChatBooking }
-  /** A chat's booking request the owner has just accepted. */
+  /** A customer's wish in a chat to cancel the appointment confirmed there. */
+  | { kind: 'chat-cancellation'; conversation: Conversation; cancellation: ChatCancellation }
+  /** A chat's request the owner has just answered. */
   | { kind: 'chat-request-answered'; answer: Extract<RequestAnswer, { kind: 'chat' }> }
   /** A chat in which the customer waits for the owner. */
   | { kind: 'chat'; conversation: Conversation }
 );
 
 /** True for an entry that still waits for the owner; false for one that only shows an answer just given. */
-export const isWaiting = (item: InboxItem): boolean => item.kind === 'request' || item.kind === 'chat-request' || item.kind === 'chat';
+export const isWaiting = (item: InboxItem): boolean => item.kind === 'request' || item.kind === 'chat-request' || item.kind === 'chat-cancellation' || item.kind === 'chat';
 
 /** A chat's booking request that the owner has not confirmed yet. */
 export const waitingChatBooking = (conversation: Pick<Conversation, 'bookingRequest'>): ChatBooking | null =>
@@ -87,7 +108,8 @@ export const waitingChatBooking = (conversation: Pick<Conversation, 'bookingRequ
 
 /**
  * How many booking requests are open: those from the booking page and those that wait in a
- * chat. For a badge that should count what Home lists as requests.
+ * chat. For a badge that should count what Home lists as requests. (A cancellation is no booking
+ * request: its chat counts among the chats that need the owner.)
  */
 export const openRequestCount = (requests: AppointmentRequest[], conversations: Conversation[]): number =>
   requests.filter((request) => request.status === 'pending').length + conversations.filter((conversation) => waitingChatBooking(conversation)).length;
@@ -142,11 +164,21 @@ export function inboxItems({ requests, conversations, events, answers, timeZone,
     if (answer.outcome === 'accepted' && !events.some((event) => event.id === appointmentIdForRequest(answer.id))) continue;
     dated.push({ item: { kind: 'request-answered', key: `request:${answer.id}`, answer }, at: askedBy(answer.request), exact: answer.request.createdAt ?? '' });
   }
+  const supersededAnswers = new Set<string>();
   for (const conversation of conversations) {
     const answer = chatAnswer(conversation.id);
     const booking = waitingChatBooking(conversation);
-    if (answer) continue; // listed below, also when the chat itself has gone meanwhile
-    if (booking) {
+    const cancellation = conversation.cancellationRequest;
+    // A new request in the same chat (the customer took up a suggested time) is listed as itself;
+    // until then the answer stands where the request stood, also when the chat itself has gone meanwhile.
+    const before = answer?.asked ?? (answer ? { date: answer.date, time: answer.startTime } : null);
+    const answered = answer && before && !(booking && (booking.date !== before.date || booking.time !== before.time))
+      && !(cancellation && chatOutcome(answer) !== 'cancelled' && chatOutcome(answer) !== 'kept');
+    if (answer && answered) continue;
+    if (answer) supersededAnswers.add(answer.id);
+    if (cancellation) {
+      dated.push({ item: { kind: 'chat-cancellation', key: `chat:${conversation.id}`, conversation, cancellation }, at: asked(cancellation.date, cancellation.time), exact: '' });
+    } else if (booking) {
       // No second key: the time of the last message changes when the confirmation arrives, and the entry must not move then.
       dated.push({ item: { kind: 'chat-request', key: `chat:${conversation.id}`, conversation, booking }, at: asked(booking.date, booking.time), exact: '' });
     } else if (conversation.status === 'needs-attention') {
@@ -154,7 +186,7 @@ export function inboxItems({ requests, conversations, events, answers, timeZone,
     }
   }
   for (const answer of shown) {
-    if (answer.kind === 'chat') dated.push({ item: { kind: 'chat-request-answered', key: `chat:${answer.id}`, answer }, at: asked(answer.date, answer.startTime), exact: '' });
+    if (answer.kind === 'chat' && !supersededAnswers.has(answer.id)) dated.push({ item: { kind: 'chat-request-answered', key: `chat:${answer.id}`, answer }, at: asked(answer.date, answer.startTime), exact: '' });
   }
   return dated
     .sort((a, b) => a.at.localeCompare(b.at) || a.exact.localeCompare(b.exact) || a.item.key.localeCompare(b.item.key))

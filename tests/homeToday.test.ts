@@ -70,7 +70,7 @@ test('the AI\'s latest bookings come newest first, a handful of them', () => {
   const latest = latestAiBookings(demoEvents);
   assert.equal(latest.length, 5);
   assert.ok(latest.every((event) => event.isAiBooked));
-  // The three bookings the sample chats made, this morning and last evening.
+  // The three requests the AI took in the salon's chats and the owner confirmed, this morning and last evening.
   assert.deepEqual(latest.slice(0, 3).map((event) => event.id), ['cal-2', 'cal-3', 'cal-john']);
   const moments = latest.map((event) => event.createdAt!);
   assert.deepEqual(moments, [...moments].sort().reverse());
@@ -164,7 +164,7 @@ test('a closed day, an empty day and a day that is over each say so in a sentenc
 
 test('Home lists what the AI booked last, each a way to its appointment', () => {
   const card = cardOf(home(demoEvents, FIXED_NOW), 'home-ai-title');
-  assert.match(words(card), /^Booked by the AI The newest bookings first\. Marie Dupont Booked 3 hours ago Haircut · Thu, 08\.10\.2026, 13:30–14:00 Léa Girard Booked 14 hours ago Colouring · Fri, 09\.10\.2026, 11:00–12:30 John Bennett Booked 18 hours ago Haircut · Wed, 07\.10\.2026, 15:00–15:30/);
+  assert.match(words(card), /^Booked by the AI The newest bookings first\. Marie Dupont Booked 3 hours ago Haircut · Thu, 08\.10\.2026, 13:30–14:00 Lara Rüegg Booked 14 hours ago Colouring · Fri, 09\.10\.2026, 11:00–12:30 John Bennett Booked 18 hours ago Haircut · Wed, 07\.10\.2026, 15:00–15:30/);
   assert.equal(card.match(/<button/g)?.length, 5);
   assert.match(card, /Booked 2 days ago/);
   // Without a booking by the AI the card says so.

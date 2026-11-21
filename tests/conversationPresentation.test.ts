@@ -4,9 +4,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { initialAiSettings } from '../src/conversationData';
 import { appointmentForConversation } from '../src/appointmentActions';
+import type { AvailabilityContext } from '../src/availability';
+import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { demoStorageKey } from '../src/useDemoState';
-import { demoConversations, demoEvents } from './fixedClock';
-import { conversationForSelection, conversationsInFilter, messageForOwner } from '../src/conversationPresentation';
+import { demoConversations, demoEvents, demoShifts, FIXED_NOW } from './fixedClock';
+import { chatBookingOrigin, chatBookingOriginLabel, conversationForSelection, conversationsInFilter, messageForOwner, ownerReadsChatLanguage, showsTranslation } from '../src/conversationPresentation';
 import { conversationsWaiting } from '../src/analytics';
 import type { Conversation } from '../src/types';
 import { ConversationsView } from '../src/views/ConversationsView';
@@ -113,55 +115,107 @@ test('the list is filtered by All, Needs you and Booked', () => {
   const all = [confirmed, ...demoConversations];
   assert.equal(conversationsInFilter(all, 'all'), all);
   assert.deepEqual(conversationsInFilter(all, 'needs'), waiting);
-  // "Booked" keeps every chat with an appointment: the confirmed live chat, and the sample chats whose
-  // appointment is in the calendar (Giulia asks to move hers; Léa's and John's were booked by the AI).
-  assert.deepEqual(conversationsInFilter(all, 'booked').map(conversation => conversation.id), ['live-web-1', 'conv-giulia', 'conv-marie', 'conv-lea', 'conv-john']);
+  // "Booked" keeps every chat with an appointment: the confirmed live chat, and the salon's chats whose
+  // appointment is in the calendar (Giulia asks to move hers; Marie's, Lara's and John's the owner confirmed).
+  assert.deepEqual(conversationsInFilter(all, 'booked').map(conversation => conversation.id), ['live-web-1', 'conv-giulia', 'conv-marie', 'conv-lara', 'conv-john']);
   for (const conversation of conversationsInFilter(all, 'booked')) assert.ok(conversation.status === 'booked' || conversation.appointmentId, conversation.id);
   // A chat without an appointment is not listed, whatever its status.
   assert.deepEqual(conversationsInFilter(demoConversations.filter(conversation => !conversation.appointmentId), 'booked'), []);
   assert.deepEqual(conversationsInFilter([], 'booked'), []);
+  // A live chat whose booking the owner confirmed stays under "Booked" after she wrote in it (its status is then "You handled").
+  const answered: Conversation = { ...confirmed, id: 'live-web-2', status: 'owner-handled', appointmentId: undefined };
+  assert.deepEqual(conversationsInFilter([answered, { ...answered, id: 'live-web-3', bookingRequest: undefined }], 'booked').map(conversation => conversation.id), ['live-web-2']);
 });
 
-test('a chat whose booking is in the calendar offers the way to that appointment', () => {
+/** The salon as the chat screen gets it: its calendar is where a chat's appointment is looked up. */
+const salonWith = (events = demoEvents): AvailabilityContext => ({
+  services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts,
+  events, requests: [], now: FIXED_NOW, timeZone: 'Europe/Zurich',
+});
+
+test('a chat whose booking is in the calendar shows it above the messages, with the way to that appointment', () => {
   const view = (selectedId: string, extra: Partial<React.ComponentProps<typeof ConversationsView>> = {}) =>
-    renderToStaticMarkup(React.createElement(ConversationsView, {
-      ...props, selectedId, onOpenAppointment: () => {},
-      appointmentFor: conversation => appointmentForConversation(conversation, demoEvents), ...extra,
-    }));
-  // Marie's haircut was booked in her chat, Giulia asks to move an appointment she has.
-  assert.match(view('conv-marie'), />View appointment</);
-  assert.match(view('conv-giulia'), />View appointment</);
-  // Chloé only asked for a time: nothing is booked, so nothing is offered.
-  assert.doesNotMatch(view('conv-chloe'), /View appointment/);
-  // A cancelled appointment has left the calendar: no link that leads nowhere.
+    renderToStaticMarkup(React.createElement(ConversationsView, { ...props, selectedId, salon: salonWith(), onOpenAppointment: () => {}, ...extra }));
+  const line = (html: string) => /<section[^>]*aria-label="Appointment from this chat"[^>]*>(.*?)<\/section>/.exec(html)?.[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  // Marie's haircut was booked in her chat: who confirmed it, what and when, and the way to it.
+  assert.match(line(view('conv-marie')) ?? '', /^Booked by the AI · confirmed by you \S.* · with \S.* \w{3}, \d{2}\.\d{2}\.\d{4} · \d{2}:\d{2}–\d{2}:\d{2} View in calendar$/);
+  // Giulia asks to move an appointment she has: it stays in view while her request waits.
+  assert.match(line(view('conv-giulia')) ?? '', /^Confirmed by you .* View in calendar$/);
+  // The line stands above the messages, before what the chat needs from the owner.
+  assert.match(view('conv-giulia'), /Appointment from this chat[\s\S]*Needs your attention[\s\S]*wants to move an appointment/);
+  // Chloé only asked for a time: nothing is booked, so nothing is shown.
+  assert.equal(line(view('conv-chloe')), undefined);
+  // A cancelled appointment has left the calendar: no line that leads nowhere.
   const withoutMarie = demoEvents.filter(event => event.id !== 'cal-2');
-  assert.doesNotMatch(view('conv-marie', { appointmentFor: conversation => appointmentForConversation(conversation, withoutMarie) }), /View appointment/);
-  // Without a calendar to look in, or a way to open it, the link is left out.
-  assert.doesNotMatch(view('conv-marie', { appointmentFor: undefined }), /View appointment/);
-  assert.doesNotMatch(view('conv-marie', { onOpenAppointment: undefined }), /View appointment/);
+  assert.equal(line(view('conv-marie', { salon: salonWith(withoutMarie) })), undefined);
+  // Without a calendar to look in the line is left out; without a way to open it, it has no button.
+  assert.equal(line(view('conv-marie', { salon: undefined })), undefined);
+  assert.match(line(view('conv-marie', { onOpenAppointment: undefined })) ?? '', /^Booked by the AI · confirmed by you (?!.*View in calendar)/);
 });
 
-test('the header of a chat holds two controls at most, laid out to share one row on a phone', () => {
-  const header = (selectedId: string) => {
-    const html = renderToStaticMarkup(React.createElement(ConversationsView, {
-      ...props, selectedId, onOpenAppointment: () => {}, appointmentFor: conversation => appointmentForConversation(conversation, demoEvents),
-    }));
-    // The row of controls: what follows the customer's name and number, up to the end of the header.
-    const row = /<div class="(flex flex-wrap items-center gap-2[^"]*)">(<button.*?<\/button>)<\/div><\/div>/.exec(html);
-    assert.ok(row, 'the chat header has its row of controls');
-    return { classes: row[1], buttons: Array.from(row[2].matchAll(/<button[^>]*class="([^"]*)"[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g), match => ({ classes: match[1], label: match[2] })) };
+test('the bar of a chat holds the way back, the name, what the AI does, and two controls at most', () => {
+  const bar = (selectedId: string, extra: Partial<React.ComponentProps<typeof ConversationsView>> = {}) => {
+    const html = renderToStaticMarkup(React.createElement(ConversationsView, { ...props, selectedId, salon: salonWith(), onOpenAppointment: () => {}, onBookForCustomer: () => {}, ...extra }));
+    // The bar: from the thread's start to the end of its first row.
+    const row = /<div id="conversation-thread"[^>]*><div class="(flex shrink-0 items-center[^"]*)">(.*?)<\/button><\/div>/.exec(html);
+    assert.ok(row, 'the chat has its bar');
+    // A button's name: its aria-label, or else its text.
+    const labels = Array.from(row[2].matchAll(/<button([^>]*)>(.*?)(?=<\/button>|$)/g), ([, attributes, inner]) =>
+      /aria-label="([^"]*)"/.exec(attributes)?.[1] ?? inner.replace(/<[^>]+>/g, ''));
+    return { classes: row[1], html: row[2], labels };
   };
-  // A chat with an appointment: how the AI works in it, and the way to the appointment. Nothing else.
-  const booked = header('conv-marie');
-  assert.deepEqual(booked.buttons.map(button => button.label), ['AI replies automatically', 'View appointment']);
-  // From 360 px on the two never wrap: the note about the AI may narrow (and take two lines),
-  // "View appointment" keeps its width and stays on one line. Measured in a browser at 375 px.
-  assert.match(booked.classes, /min-\[360px\]:flex-nowrap/);
-  assert.match(booked.buttons[0].classes, /\bmin-w-0\b/);
-  assert.match(booked.buttons[1].classes, /\bshrink-0\b.*\bwhitespace-nowrap\b/);
-  for (const button of booked.buttons) assert.match(button.classes, /\bmin-h-11\b/);
-  // A chat without one: the note alone.
-  assert.deepEqual(header('conv-chloe').buttons.map(button => button.label), ['AI replies automatically']);
+  const booked = bar('conv-marie');
+  // Back to the list (phones only), an appointment by hand for this customer, the AI's settings. Nothing else.
+  assert.deepEqual(booked.labels, ['All conversations', 'Book for this customer', 'Open AI receptionist settings']);
+  assert.match(booked.html, /<button[^>]*aria-label="All conversations"[^>]*class="md:hidden/);
+  assert.match(booked.html, /<h2[^>]*truncate[^>]*>Marie/);
+  assert.match(booked.html, /AI replies automatically/);
+  // On a phone "Book" is an icon with its name for screen readers, so the customer's name keeps its room.
+  assert.match(booked.html, /<span aria-hidden="true" class="max-sm:hidden">Book<\/span>/);
+  for (const button of booked.html.matchAll(/<button[^>]*class="([^"]*)"/g)) assert.match(button[1], /\b(min-h-11|size-11)\b/);
+  // The same bar for a chat without an appointment; without a form to open, the way back and the settings.
+  assert.deepEqual(bar('conv-chloe').labels, booked.labels);
+  assert.deepEqual(bar('conv-chloe', { onBookForCustomer: undefined }).labels, ['All conversations', 'Open AI receptionist settings']);
+});
+
+test('a chat that waits for a decision ends with the reason and the ways on, in the place of the reply box', () => {
+  const view = (selectedId: string, conversations = demoConversations) =>
+    renderToStaticMarkup(React.createElement(ConversationsView, { ...props, conversations, selectedId, salon: salonWith(), onChatBooking: () => null }));
+  const ways = (html: string) => {
+    const group = /<div role="group" aria-label="Who answers this chat"[^>]*>(.*?)<\/div>/.exec(html)?.[1] ?? '';
+    return Array.from(group.matchAll(/<button[^>]*class="([^"]*)"[^>]*>(.*?)<\/button>/g), ([, classes, label]) => `${label}${/bg-\[#5551FF\]/.test(classes) ? ' (main)' : ''}`);
+  };
+  // Chloé asked for a time after closing: the owner takes over, or the AI offers its answer.
+  const chloe = view('conv-chloe');
+  assert.deepEqual(ways(chloe), ['Take over (main)', 'Let AI continue']);
+  assert.match(chloe, /Needs your attention<\/p><p[^>]*>The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\.<\/p>/);
+  assert.doesNotMatch(chloe, /aria-label="Reply as owner"/);
+  // Sabrina's request waits on its card, and the AI has an answer ready for her question: both ways stay, the card's answers lead.
+  assert.deepEqual(ways(view('conv-sabrina')), ['Take over', 'Let AI continue']);
+  // Reto's request is all that waits: the AI has passed it on and has nothing to go on with.
+  const reto = view('conv-reto');
+  assert.deepEqual(ways(reto), ['Take over']);
+  // After the last message come the reason, then the request with its answers, then the ways on:
+  // all of it where the owner reads and replies, the request inside what scrolls with the messages.
+  const lastMessage = demoConversations.find(conversation => conversation.id === 'conv-reto')!.messages.at(-1)!.original.slice(0, 30);
+  const order = [lastMessage, 'Needs your attention', 'data-chat-waiting', 'Reto Hollenstein wants to book', '>Confirm<', 'Who answers this chat'].map(part => reto.indexOf(part));
+  assert.ok(order.every((at, index) => at >= 0 && (index === 0 || at > order[index - 1])), `order of the chat's end: ${order.join(', ')}`);
+  // The earlier block with its single answer is gone.
+  assert.doesNotMatch(reto, /Confirm booking|Checked against opening hours\b/);
+  // A live chat with a request in which the customer wrote again: the AI can answer that message.
+  const live = (messages: Conversation['messages']): Conversation => ({
+    ...demoConversations.find(conversation => conversation.id === 'conv-reto')!, id: 'live-web-9', live: true, messages,
+  });
+  const asked = { id: 'm1', sender: 'customer' as const, original: 'Haircut on Thursday at 15:00, for Tom', translation: 'Haircut on Thursday at 15:00, for Tom', time: '10:00' };
+  const passedOn = { id: 'm2', sender: 'ai' as const, original: 'I have passed your request on.', translation: 'I have passed your request on.', time: '10:00' };
+  const again = { id: 'm3', sender: 'customer' as const, original: 'Do you have parking?', translation: 'Do you have parking?', time: '10:05' };
+  assert.deepEqual(ways(view('live-web-9', [live([asked, passedOn])])), ['Take over']);
+  assert.deepEqual(ways(view('live-web-9', [live([asked, passedOn, again])])), ['Take over', 'Let AI continue']);
+  // Once the owner has taken over, the reply box is there and the ways on are gone.
+  const taken = view('conv-reto', demoConversations.map(conversation => conversation.id === 'conv-reto' ? { ...conversation, takenOver: true } : conversation));
+  assert.deepEqual(ways(taken), []);
+  assert.match(taken, /aria-label="Reply as owner"/);
+  assert.match(taken, /Reto Hollenstein wants to book/);
 });
 
 test('approval setting replaces immediate AI sending with a review entry point', () => {
@@ -179,15 +233,67 @@ test('stored conversation drafts are restored when the conversation view mounts 
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { pathname: '/audit/' } } });
   Object.defineProperty(globalThis, 'sessionStorage', {
     configurable: true,
-    value: { getItem: (key: string) => key === storageKey ? JSON.stringify({ 'conv-chloe': 'Draft kept while reviewing settings' }) : null },
+    value: { getItem: (key: string) => key === storageKey ? JSON.stringify({ 'conv-marie': 'Draft kept while reviewing settings', 'conv-chloe': 'Kept for later' }) : null },
   });
   try {
-    const html = renderToStaticMarkup(React.createElement(ConversationsView, props));
+    const html = renderToStaticMarkup(React.createElement(ConversationsView, { ...props, selectedId: 'conv-marie' }));
     assert.match(html, /value="Draft kept while reviewing settings"/);
+    // A chat that waits for a decision has no reply box yet; its draft comes back with the take-over.
+    const waiting = renderToStaticMarkup(React.createElement(ConversationsView, props));
+    assert.doesNotMatch(waiting, /Kept for later/);
+    const takenOver = props.conversations.map(conversation => conversation.id === 'conv-chloe' ? { ...conversation, takenOver: true } : conversation);
+    assert.match(renderToStaticMarkup(React.createElement(ConversationsView, { ...props, conversations: takenOver })), /value="Kept for later"/);
   } finally {
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
     else Reflect.deleteProperty(globalThis, 'window');
     if (previousStorage) Object.defineProperty(globalThis, 'sessionStorage', previousStorage);
     else Reflect.deleteProperty(globalThis, 'sessionStorage');
   }
+});
+
+test('a chat\'s booking says how it came about: confirmed by the owner, or booked by the AI', () => {
+  const chat = (id: string) => demoConversations.find(conversation => conversation.id === id)!;
+  const appointmentOf = (id: string) => appointmentForConversation(chat(id), demoEvents);
+  // The owner confirmed the requests the AI took in these chats, although they came in through the AI.
+  for (const id of ['conv-marie', 'conv-lara', 'conv-john']) {
+    assert.equal(appointmentOf(id)?.isAiBooked, true, id);
+    // Home and the calendar count them as booked by the AI: the chat agrees, and adds who confirmed.
+    assert.equal(chatBookingOriginLabel(chat(id), appointmentOf(id)), 'Booked by the AI · confirmed by you', id);
+  }
+  // Giulia's appointment was confirmed in her chat as well; her change waits, the appointment stays hers.
+  assert.equal(chatBookingOrigin(chat('conv-giulia'), appointmentOf('conv-giulia')), 'owner');
+  // An appointment the AI made by itself, where no request was confirmed.
+  const live: Conversation = { ...chat('conv-marie'), id: 'live-web-1', live: true, bookingRequest: undefined };
+  assert.equal(chatBookingOriginLabel(live, { isAiBooked: true, conversationId: 'live-web-1' }), 'Booked by the AI');
+  // The owner booked it in the chat by hand.
+  assert.equal(chatBookingOriginLabel(live, { isAiBooked: false, conversationId: 'live-web-1' }), 'Confirmed by you');
+  // No appointment, or one that belongs to another chat: nothing to say.
+  for (const id of ['conv-sabrina', 'conv-reto', 'conv-chloe']) assert.equal(chatBookingOriginLabel(chat(id), appointmentOf(id)), null, id);
+  assert.equal(chatBookingOrigin(chat('conv-marie'), { isAiBooked: true, conversationId: 'conv-john' }), null);
+  // An appointment that names no chat (made before chats were linked) counts only by who made it.
+  assert.equal(chatBookingOrigin({ id: 'x', bookingRequest: undefined }, { isAiBooked: true, conversationId: undefined }), 'ai');
+  assert.equal(chatBookingOrigin({ id: 'x', bookingRequest: undefined }, { isAiBooked: false, conversationId: undefined }), null);
+});
+
+test('the translation line shows only when the owner does not read the chat\'s language', () => {
+  const english = { ...initialAiSettings, ownerLanguage: 'English', translateChats: true };
+  const german = { ...english, ownerLanguage: 'German' };
+  const byLanguage = (language: Conversation['language']) => demoConversations.find(conversation => conversation.language === language)!;
+  // An owner who reads English: the German, French and Italian chats are translated, the English one is not.
+  assert.deepEqual((['DE', 'FR', 'IT', 'EN'] as const).map(language => showsTranslation(byLanguage(language), english)), [true, true, true, false]);
+  // An owner who reads German: the German chats need no translation, the others do.
+  assert.deepEqual((['DE', 'FR', 'IT', 'EN'] as const).map(language => showsTranslation(byLanguage(language), german)), [false, true, true, true]);
+  assert.equal(ownerReadsChatLanguage(byLanguage('DE'), german), true);
+  // Translation off: no line at all.
+  assert.equal(showsTranslation(byLanguage('FR'), { ...english, translateChats: false }), false);
+  // A live chat names the language the AI detected; its code stands in for every unknown language.
+  const spanish: Conversation = { ...byLanguage('EN'), id: 'live-web-2', live: true, languageLabel: 'Spanish' };
+  assert.equal(showsTranslation(spanish, english), true);
+  assert.equal(showsTranslation({ ...spanish, languageLabel: 'german' }, german), false);
+  // Without a detected name the code decides.
+  assert.equal(showsTranslation({ ...spanish, languageLabel: undefined }, english), false);
+  // The messages follow the same rule: a German chat is shown as written to an owner who reads German.
+  const message = byLanguage('DE').messages[0];
+  assert.deepEqual(messageForOwner(message, 'DE', german), { text: message.original, showOriginal: false, translationUnavailable: false });
+  assert.equal(messageForOwner(message, 'DE', english).showOriginal, true);
 });

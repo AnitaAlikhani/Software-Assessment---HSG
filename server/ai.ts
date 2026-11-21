@@ -4,7 +4,7 @@ import { initialAiSettings } from '../src/conversationData.js';
 import { formatMoney, formatMonth, weekdayName, zonedDateTime } from '../src/format.js';
 import { initialBookingHours, initialCompanySettings, initialEmployees, initialServices } from '../src/mockData.js';
 import type { ChatMessage } from '../src/types.js';
-import { ALWAYS_HAND_OVER, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES, teamFact } from './salonRules.js';
+import { ALWAYS_HAND_OVER, BOOKING_CASES, BOOKING_FLOW, MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SALON_FACTS, SLOT_STEP_MINUTES, STYLE_RULES, teamFact } from './salonRules.js';
 
 /**
  * Tried in order, all on Google's free tier. Each model has its own free daily quota; the Lite
@@ -105,6 +105,9 @@ ${bullets(team ? [...SALON_FACTS, team] : SALON_FACTS)}
 BOOKING FLOW:
 ${bullets(BOOKING_FLOW)}
 
+WHAT THE CUSTOMER WANTS (set intent to exactly one of these; one rule per case):
+${bullets(BOOKING_CASES)}
+
 STYLE:
 ${bullets(STYLE_RULES)}
 
@@ -113,6 +116,10 @@ ${bullets(handover)}
 
 Only help with the salon and appointments. If a message is about something else, say briefly that you can only help with appointments.`;
 }
+
+/** What the customer's message is about. The server acts on this, never on the wording of the reply. */
+export type Intent = 'new' | 'change' | 'cancel' | 'question';
+export const INTENTS: Intent[] = ['new', 'change', 'cancel', 'question'];
 
 export interface IncomingAnalysis {
   languageCode: string;
@@ -124,6 +131,11 @@ export interface IncomingAnalysis {
   replyDe: string;
   needsOwner: boolean;
   reason: string;
+  /**
+   * Missing in answers of the earlier format, and in any answer a model wrote without it: the
+   * server then works out a safe meaning itself (see recordAnalysis.ts).
+   */
+  intent?: Intent;
   /** Filled once service, day, time and first name are known. Empty strings otherwise. */
   bookingRequest?: BookingRequest;
 }
@@ -137,6 +149,9 @@ export interface BookingRequest {
   /** HH:MM */
   time: string;
   customerName: string;
+  /** The stylist the customer asked for, as they wrote it. Matched against the team by the check, which adds employeeId. */
+  staffName?: string;
+  employeeId?: string;
 }
 
 const analysisSchema = {
@@ -151,23 +166,28 @@ const analysisSchema = {
     replyDe: { type: 'string', description: 'Your reply in German' },
     needsOwner: { type: 'boolean', description: 'True when the rules say the owner must handle this' },
     reason: { type: 'string', description: 'If needsOwner, one short English sentence for the owner. Otherwise empty.' },
+    intent: { type: 'string', enum: INTENTS, description: 'new: a new booking; change: move the confirmed appointment; cancel: cancel it; question: anything else' },
     bookingRequest: {
       type: 'object',
-      description: 'Only when service, day, time and first name are all known and the time follows the rules. Otherwise all fields empty.',
+      description: 'Only for intent new or change, when service, day, time and first name are all known and the time follows the rules. Otherwise all fields empty.',
       properties: {
         service: { type: 'string', description: 'Exact service name from the list, or empty' },
         date: { type: 'string', description: 'YYYY-MM-DD, or empty' },
         time: { type: 'string', description: 'HH:MM (24h), or empty' },
         customerName: { type: 'string', description: 'Customer first name, or empty' },
+        staffName: { type: 'string', description: 'First name of the stylist the customer asked for, or empty' },
       },
-      required: ['service', 'date', 'time', 'customerName'],
+      required: ['service', 'date', 'time', 'customerName', 'staffName'],
     },
   },
-  required: ['languageCode', 'languageName', 'translationEn', 'translationDe', 'reply', 'replyEn', 'replyDe', 'needsOwner', 'reason', 'bookingRequest'],
+  required: ['languageCode', 'languageName', 'translationEn', 'translationDe', 'reply', 'replyEn', 'replyDe', 'needsOwner', 'reason', 'intent', 'bookingRequest'],
 };
 
+/** How many earlier messages the AI sees. Enough for a booking talk that went back and forth; the chat state covers what came before. */
+export const HISTORY_MESSAGES = 30;
+
 const history = (messages: ChatMessage[]) =>
-  messages.slice(-10).map(message => `${message.sender === 'customer' ? 'Customer' : 'Salon'}: ${message.original}`).join('\n') || '(no earlier messages)';
+  messages.slice(-HISTORY_MESSAGES).map(message => `${message.sender === 'customer' ? 'Customer' : 'Salon'}: ${message.original}`).join('\n') || '(no earlier messages)';
 
 /** Errors where another model may still work: busy, rate-limited, unknown model, unsupported option, or our timeout. */
 const tryNext = (error: unknown) =>
@@ -236,9 +256,15 @@ export const salonNow = (now = new Date()) => {
   return `${weekdayName(date)}, ${Number(date.slice(8))} ${formatMonth(date)} at ${time}`;
 };
 
-export const analyzeIncoming = (earlier: ChatMessage[], text: string, now = new Date()) =>
+/**
+ * `chatState` is what the server knows about the chat (see chatStateLines in recordAnalysis.ts):
+ * the language, the first name and service known so far, a waiting or confirmed booking. It stands
+ * before the conversation, so the markers "Conversation so far:" and "New customer message:" keep
+ * their meaning for anything that reads the prompt.
+ */
+export const analyzeIncoming = (earlier: ChatMessage[], text: string, now = new Date(), chatState: string[] = []) =>
   json<IncomingAnalysis>(
-    `Right now it is ${salonNow(now)} (salon time, Europe/Zurich). Use this for words like "today", "tomorrow" or "next week", and only suggest times that are in the future and inside opening hours.\n\nConversation so far:\n${history(earlier)}\n\nNew customer message:\n${text}`,
+    `Right now it is ${salonNow(now)} (salon time, Europe/Zurich). Use this for words like "today", "tomorrow" or "next week", and only suggest times that are in the future and inside opening hours.\n\n${chatState.length ? `Chat state (from the salon's records; trust it over your own reading of the conversation):\n${bullets(chatState)}\n\n` : ''}Conversation so far:\n${history(earlier)}\n\nNew customer message:\n${text}`,
     analysisSchema,
   );
 

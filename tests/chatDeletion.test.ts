@@ -96,11 +96,12 @@ test('Telegram: a deletion that slips in between the last check and the save sti
   freezeClock(t);
   const store = new FakeStore(NOW);
   const world = outsideWorld();
-  // The narrowest case: the answer is already sent, and the customer's /delete is handled just before the chat is saved.
+  // The narrowest case: the answer is already sent, and the customer's /delete is handled just before it is saved.
+  // Each message is saved three times: on arrival, with the AI's reading, and with the reply once it went out.
   const run = store.run.bind(store);
   let saves = 0;
   store.run = (command: Command) => {
-    if (command[1] === SAVE_SCRIPT && (saves += 1) === 2) {
+    if (command[1] === SAVE_SCRIPT && (saves += 1) === 6) {
       run(['EVAL', DELETE_SCRIPT, 3, command[3], command[4], 'slotbee:live:index', 'another-request', 600, `tg-${TELEGRAM_CHAT}`]);
     }
     return run(command);
@@ -109,7 +110,7 @@ test('Telegram: a deletion that slips in between the last check and the save sti
     await telegramWebhook(telegramUpdate('Hello'));
     await telegramWebhook(telegramUpdate('One more question'));
   }, { store, outside: world.outside }));
-  assert.equal(saves, 2);
+  assert.equal(saves, 6);
   assert.equal(storedChat(store, `tg-${TELEGRAM_CHAT}`), null);
   assert.deepEqual(store.holding(String(TELEGRAM_CHAT)), []);
 });
@@ -215,12 +216,23 @@ test('owner reply and booking confirmation in a website chat that its visitor de
     messages: [{ id: 'm1', sender: 'customer', original: 'A haircut on Thursday at 10:00, please.', translation: 'A haircut on Thursday at 10:00, please.', time: '12:00' }],
     bookingRequest: { service: 'Haircut', date: '2026-10-08', time: '10:00', customerName: 'Eva', status: 'requested' },
   };
-  // The only call to the AI here is the translation of the owner's text. The visitor deletes the chat while it runs.
+  // The owner's own reply is translated first: the visitor deletes the chat while that runs.
   const world = outsideWorld({ whileAiWorks: () => deleteChat(chatRequest('DELETE', { session: SESSION })) });
+  // The confirmation is a fixed text and needs no AI: the deletion lands between loading the chat and saving it.
+  const run = store.run.bind(store);
+  let deleteBeforeSave = false;
+  store.run = (command: Command) => {
+    if (deleteBeforeSave && command[1] === SAVE_SCRIPT) {
+      deleteBeforeSave = false;
+      run(['EVAL', DELETE_SCRIPT, 3, command[3], command[4], 'slotbee:live:index', 'another-request', 600, `web-${SESSION}`]);
+    }
+    return run(command);
+  };
   await quietly(() => deployedWith(SETTINGS, async () => {
     for (const action of [{ type: 'reply', conversationId: id, text: 'See you then.' }, { type: 'confirm-booking', conversationId: id }]) {
       store.advance(DELETION_MARKER_SECONDS * 1000); // the deletion of the round before is long over
       store.run(['SET', `slotbee:live:chat:web-${SESSION}`, JSON.stringify(waiting), 'EX', RETENTION_SECONDS]);
+      deleteBeforeSave = action.type === 'confirm-booking';
       const response = await act(ownerAction(action));
       assert.equal(response.status, 410, action.type);
       assert.deepEqual(await response.json(), { error: 'This chat was deleted by the customer.' });
@@ -229,7 +241,8 @@ test('owner reply and booking confirmation in a website chat that its visitor de
       assert.deepEqual(await (await readChat(chatRequest('GET', { session: SESSION }))).json(), { messages: [] });
     }
   }, { store, outside: world.outside }));
-  assert.equal(world.prompts.length, 2);
+  // Only the owner's own words went to the AI, for the translation. The confirmation is a fixed text.
+  assert.equal(world.prompts.length, 1);
 });
 
 test('owner taking over a chat in the moment its customer deletes it', async (t) => {
@@ -237,10 +250,11 @@ test('owner taking over a chat in the moment its customer deletes it', async (t)
   const store = new FakeStore(NOW);
   const world = outsideWorld();
   // Taking over has no slow step. The deletion lands between loading the chat and saving it.
+  // (The visitor's message is saved twice before: on arrival and with the answer.)
   const run = store.run.bind(store);
   let saves = 0;
   store.run = (command: Command) => {
-    if (command[1] === SAVE_SCRIPT && (saves += 1) === 2) {
+    if (command[1] === SAVE_SCRIPT && (saves += 1) === 3) {
       run(['EVAL', DELETE_SCRIPT, 3, command[3], command[4], 'slotbee:live:index', 'another-request', 600, `web-${SESSION}`]);
     }
     return run(command);

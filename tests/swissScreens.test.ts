@@ -236,7 +236,9 @@ const screens = (): Record<string, string> => {
   const appointment = demoEvents.find((event) => event.id === 'cal-2')!;
   const conversationProps = {
     mobileDetailOpen: false, onBackToList: nothing, onSelect: nothing, onTakeOver: nothing, onLetAiContinue: () => null,
-    onOwnerReply: () => true, aiSettings: initialAiSettings, onOpenAiSettings: nothing, onConfirmBooking: nothing,
+    onOwnerReply: () => true, aiSettings: initialAiSettings, onOpenAiSettings: nothing,
+    // The booking cards of a chat check its request against the salon's calendar.
+    salon: context, onChatBooking: () => null,
   };
   const calendarProps = {
     events: demoEvents, services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts,
@@ -344,7 +346,7 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   assert.match(calendar, /Mon 05\.10\. Today Tue 06\.10\. \d+ appointments Wed 07\.10\. \d+ appointments Thu 08\.10\. \d+ appointments Fri 09\.10\. \d+ appointments Sat 10\.10\. \d+ appointments Sun 11\.10\./);
   assert.match(shown(all['calendar, an appointment open']), /Time: Thu, 08\.10\.2026, 13:30–14:00 .*Phone: \+41 79 555 61 12/);
   // Conversations: a booking request collected in a chat.
-  assert.match(shown(all['conversations, a booking request']), /Haircut · Thu, 08\.10\.2026 · 15:00 · Tom/);
+  assert.match(shown(all['conversations, a booking request']), /Tom wants to book Haircut Thu, 08\.10\.2026 · 15:00–15:30 · for Tom/);
   // Customers: last visit and next appointment.
   assert.match(shown(all.customers), /Marie Dupont .*?\+41 79 555 61 12 .*?Thu, 27\.08\.2026 .*?Thu, 08\.10\.2026, 13:30/);
   // Services and the booking page: prices.

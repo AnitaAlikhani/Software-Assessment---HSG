@@ -1,6 +1,6 @@
-import type { CalendarEvent, ChatLanguage } from './types';
-import { formatDate } from './format';
-import { dayKeyForDate } from './scheduling';
+import type { CalendarEvent, ChatLanguage } from './types.js';
+import { formatDate } from './format.js';
+import { dayKeyForDate } from './scheduling.js';
 
 /**
  * The ready texts for a customer whose booking request the owner has answered.
@@ -107,6 +107,25 @@ const SENTENCES: Record<ChatLanguage, {
     rejected: w => `Buongiorno ${w.name}, grazie per la Sua richiesta di appuntamento${w.salon}. Purtroppo non possiamo offrirLe ${w.service} ${w.day} alle ${w.time}. Ci contatti pure per trovare un'altra data.`,
   },
 };
+
+// An appointment that is cancelled: its own short table, because it is said about an appointment,
+// not in answer to a request.
+const CANCELLED: Record<ChatLanguage, (words: Pick<Words, 'name' | 'salon' | 'day' | 'time'>) => string> = {
+  EN: w => `Hello ${w.name}, your appointment${w.salon} on ${w.day} at ${w.time} is cancelled. Get in touch whenever you would like a new one.`,
+  DE: w => `Guten Tag ${w.name}, Ihr Termin${w.salon} am ${w.day} um ${w.time} Uhr ist abgesagt. Melden Sie sich gern, wenn Sie einen neuen Termin möchten.`,
+  FR: w => `Bonjour ${w.name}, votre rendez-vous${w.salon} du ${w.day} à ${w.time} est annulé. N'hésitez pas à nous contacter pour un nouveau rendez-vous.`,
+  IT: w => `Buongiorno ${w.name}, il Suo appuntamento${w.salon} di ${w.day} alle ${w.time} è annullato. Ci contatti pure per un nuovo appuntamento.`,
+};
+
+/** The sentence that tells a customer that their appointment is cancelled. */
+export function cancelledText(details: Pick<AnswerTextBase, 'language' | 'customerName' | 'salonName' | 'date' | 'startTime'>): string {
+  const language: ChatLanguage = SENTENCES[details.language] ? details.language : 'EN';
+  const salonName = details.salonName.trim();
+  return CANCELLED[language]({
+    name: details.customerName.trim(), salon: salonName ? SENTENCES[language].salon(salonName) : '',
+    day: dayIn(language, details.date), time: details.startTime,
+  });
+}
 
 /** The sentence for the customer: the appointment is confirmed, another time is offered, or the request cannot be met. */
 export function answerText(details: AnswerTextDetails): string {

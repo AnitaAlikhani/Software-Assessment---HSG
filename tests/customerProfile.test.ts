@@ -21,7 +21,7 @@ const NICOLE = 'cust-002';
 
 const profile = (customerId: string, partial: Partial<React.ComponentProps<typeof CustomersView>> = {}) => render(React.createElement(CustomersView, {
   customers: demoCustomers, events: demoEvents, now: FIXED_NOW, timeZone: ZONE, selectedCustomerId: customerId,
-  customersWithChat: new Set(['cust-camille', 'cust-marie']),
+  customersWithChat: new Set(['cust-sabrina', 'cust-marie']),
   onClearSelection: nothing, onAddCustomer: nothing, onUpdateCustomer: nothing, onDeleteCustomer: nothing,
   onOpenChat: nothing, onOpenAppointment: nothing, onNewAppointment: nothing,
   cannotDelete: (customer) => deletionDependency('customer', customer.id, customer.name, demoEvents, demoRequests),
@@ -132,16 +132,16 @@ test('the actions offered depend on what exists', () => {
 });
 
 test('a customer without appointments says so in plain words', () => {
-  const camille = profile('cust-camille');
-  assert.match(camille, />No visits yet</);
-  assert.match(camille, />Nothing booked\.</);
-  assert.match(camille, />No visits yet\.</);
-  assert.doesNotMatch(camille, /customer-upcoming|Show all/);
+  const sabrina = profile('cust-sabrina');
+  assert.match(sabrina, />No visits yet</);
+  assert.match(sabrina, />Nothing booked\.</);
+  assert.match(sabrina, />No visits yet\.</);
+  assert.doesNotMatch(sabrina, /customer-upcoming|Show all/);
   // Her number is invented too; a real one is a dialling link, an address on a real domain a mail link.
-  const real = demoCustomers.map((customer) => customer.id === 'cust-camille' ? { ...customer, phone: '+41712223344', email: 'camille@bernard.ch' } : customer);
-  const html = profile('cust-camille', { customers: real });
+  const real = demoCustomers.map((customer) => customer.id === 'cust-sabrina' ? { ...customer, phone: '+41712223344', email: 'sabrina@luechinger.ch' } : customer);
+  const html = profile('cust-sabrina', { customers: real });
   assert.match(html, /href="tel:\+41712223344"[^>]*>.*\+41 71 222 33 44/);
-  assert.match(html, /href="mailto:camille@bernard\.ch"/);
+  assert.match(html, /href="mailto:sabrina@luechinger\.ch"/);
 });
 
 test('a customer who is no longer in the list gets a short message and a way back', () => {

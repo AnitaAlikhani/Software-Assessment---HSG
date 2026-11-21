@@ -199,7 +199,7 @@ test('a chat\'s booking request goes to the first stylist who offers the service
   assert.equal(planChatBooking(emptyCalendar(), { id: 'live-web-tom' }), null);
 });
 
-test('a chat\'s booking request that cannot be booked says why, and that the chat is the place to settle it', () => {
+test('a chat\'s booking request that cannot be booked says why, and offers another time or declining', () => {
   const refusal = (partial: Partial<AvailabilityContext>, booking: Parameters<typeof chat>[0] = {}) => {
     const plan = planChatBooking(emptyCalendar(partial), chat(booking))!;
     assert.equal(plan.action, null);
@@ -208,23 +208,21 @@ test('a chat\'s booking request that cannot be booked says why, and that the cha
   };
   // Thursday 15:00: Anna and Selina are taken, Luca does not work on Thursdays.
   const bothBusy = [appointment('cal-a', 'emp-1', '2026-10-08', '14:30', '15:30'), appointment('cal-s', 'emp-2', '2026-10-08', '15:00', '15:30')];
-  assert.equal(refusal({ events: bothBusy }), 'Nobody who offers Haircut is free on Thu, 08.10.2026 at 15:00–15:30. Open the chat to agree a new time.');
+  assert.equal(refusal({ events: bothBusy }), 'Nobody who offers Haircut is free on Thu, 08.10.2026 at 15:00–15:30. Suggest another time, or decline.');
   // Reasons that hold for the whole salon are named.
   assert.equal(refusal({ closedDates: [{ id: 'c-1', name: 'Team day', start: '2026-10-08', end: '2026-10-08' }] }),
-    'The salon is closed on Thu, 08.10.2026 (Team day). Open the chat to agree another day.');
+    'The salon is closed on Thu, 08.10.2026 (Team day). Suggest another day, or decline.');
   assert.equal(refusal({ bookingHours: initialBookingHours.map((day) => day.day === 'Thursday' ? { ...day, isOpen: false } : day) }),
-    'The salon is closed on Thursdays. Open the chat to agree another day.');
-  assert.equal(refusal({}, { date: '2026-10-03' }), 'This time has passed. Open the chat to agree a new time.');
-  assert.equal(refusal({ now: new Date('2026-10-08T13:00:20Z') }), 'This time has passed. Open the chat to agree a new time.');
-  // The service is gone, or nobody offers it.
+    'The salon is closed on Thursdays. Suggest another day, or decline.');
+  assert.equal(refusal({}, { date: '2026-10-03' }), 'This time has passed. Suggest another time, or decline.');
+  assert.equal(refusal({ now: new Date('2026-10-08T13:00:20Z') }), 'This time has passed. Suggest another time, or decline.');
+  // The service is gone, or nobody offers it: another time would not help, so none is offered.
   assert.equal(refusal({}, { serviceId: 'srv-gone', service: 'Perm' }),
-    '"Perm" is no longer one of your services. Add the appointment by hand in the calendar, or open the chat to agree something else.');
+    '"Perm" is no longer one of your services. Add the appointment by hand in the calendar, or decline.');
+  assert.equal(planChatBooking(emptyCalendar(), chat({ serviceId: 'srv-gone', service: 'Perm' }))!.movable, false);
   assert.equal(refusal({ services: withService('srv-2', { assignedEmployeeIds: [] }) }),
-    'Nobody in your team offers Haircut. Assign someone to it in Services, or open the chat to agree something else.');
-  // Nothing here offers what the server cannot do yet: no word of declining or moving the request.
-  for (const text of [refusal({ events: bothBusy }), refusal({}, { date: '2026-10-03' }), refusal({}, { serviceId: 'srv-gone' })]) {
-    assert.doesNotMatch(text!, /reject|decline|Move the request/i);
-  }
+    'Nobody in your team offers Haircut. Assign someone to it in Services, or decline.');
+  assert.equal(planChatBooking(emptyCalendar({ events: bothBusy }), chat())!.movable, true);
 });
 
 test('a moved request remembers the time the customer asked for, however often it is moved', () => {
