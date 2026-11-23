@@ -16,6 +16,7 @@ import { SETTINGS_TABS } from '../navigation';
 import { dateRangeFieldClass, useDateRangeForm } from '../dateRangeForm';
 import { SectionTabs, sectionPanel } from '../components/SectionTabs';
 import { BookingLinkCard } from '../components/BookingLinkCard';
+import { ThisDeviceCard, type ThisDeviceFacts } from '../components/ThisDeviceCard';
 
 /** Opening and closing times are chosen on the half hour, the step appointments start on. */
 const HALF_HOURS = Array.from({ length: 48 }, (_, index) => formatTime(index * 30));
@@ -56,18 +57,21 @@ interface SettingsViewProps {
   onOpenAbsences?: () => void;
   /** While salon details or opening hours are changed and not saved: the question to ask before another screen is opened. */
   onUnsavedChange?: (question: string | null) => void;
+  /** Whether this browser is signed in to the live chats, and "Sign out on this device". Left out, the section is not shown. */
+  thisDevice?: ThisDeviceFacts;
 }
 
 /**
  * Settings: what is true for the whole salon. "Salon" holds its name, address and what customers
  * read about it; "Opening hours" the regular week; "Closed dates" the days the whole salon is
- * shut; "Online booking" the link customers book with.
+ * shut; "Online booking" the link customers book with, and whether this browser is signed in to
+ * the live chats that customers start online.
  */
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings: initialSettings,
   bookingHours: initialBookingHours,
   onSaveSettings,
-  closedDates, onSaveClosedDates, now, tab, onTabChange, bookingLink, onOpenAbsences, onUnsavedChange,
+  closedDates, onSaveClosedDates, now, tab, onTabChange, bookingLink, onOpenAbsences, onUnsavedChange, thisDevice,
 }) => {
   // Without an owner of the tab (a test, a page that does not keep it in the address) the page keeps it itself.
   const [ownTab, setOwnTab] = useState<SettingsSubTab>(tab ?? 'salon');
@@ -593,6 +597,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <h2 className="text-base font-bold text-slate-900">Online booking</h2>
               </div>
               <BookingLinkCard address={bookingLink} salonName={initialSettings.companyName} />
+              {thisDevice && <div className="border-t border-slate-100 pt-6"><ThisDeviceCard {...thisDevice} /></div>}
             </div>
           )}
       </div>

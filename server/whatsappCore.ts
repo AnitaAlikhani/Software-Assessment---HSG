@@ -14,6 +14,17 @@ export interface LiveConversation {
   language: ChatLanguage;
   /** Language as the AI detected it, e.g. "Spanish", when it is not one of the demo languages. */
   languageLabel?: string;
+  /**
+   * True once the AI has named the chat's language. Before that `language` is only a default, so
+   * a fixed text sent without the AI goes out in German and English (see chatFlow.ts).
+   */
+  languageSettled?: boolean;
+  /**
+   * The customer was told, without the AI, that the team will answer (chatFlow.ts answerWithoutAi),
+   * and nobody has answered since. Taken in the save that hands the chat to the owner, so that of
+   * messages arriving at the same moment only one sends the sentence; cleared by the next answer.
+   */
+  teamPromised?: boolean;
   status: ConversationStatus;
   takenOver: boolean;
   attentionReason?: string;
@@ -173,10 +184,12 @@ export function addCustomerMessage(
   return conversation;
 }
 
-export function addReply(conversation: LiveConversation, sender: 'ai' | 'owner', message: Translated, now = Date.now()) {
+export function addReply(conversation: LiveConversation, sender: 'ai' | 'owner', message: Translated, now = Date.now(), { promise = false } = {}) {
   // A random tail: two replies within the same millisecond (or a frozen clock) still get their own ids.
   conversation.messages.push({ id: `${sender}-${now}-${randomUUID().slice(0, 8)}`, sender, time: timeLabel(now), ...message });
   conversation.updatedAt = now;
+  // An answer ends the promise that the team will answer; the promise itself (`promise`) keeps it.
+  if (!promise) conversation.teamPromised = undefined;
   if (sender === 'owner') {
     conversation.takenOver = true;
     conversation.status = 'owner-handled';
@@ -192,6 +205,7 @@ export function addSalonMessage(conversation: LiveConversation, message: Transla
   const id = `owner-${now}-${randomUUID().slice(0, 8)}`;
   conversation.messages.push({ id, sender: 'owner', time: timeLabel(now), ...message });
   conversation.updatedAt = now;
+  conversation.teamPromised = undefined;
   return id;
 }
 

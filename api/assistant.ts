@@ -1,5 +1,5 @@
 import { json } from '../server/ai.js';
-import { hasLiveAccess } from '../server/access.js';
+import { ownerAccess, ownerRefusal } from '../server/limits.js';
 import { ASSISTANT_INSTRUCTION, assistantPrompt, assistantSchema, readAnswer, readQuestion } from '../server/assistant.js';
 
 const noStore = { 'Cache-Control': 'no-store' };
@@ -13,7 +13,8 @@ const MAX_BODY = 20_000;
  * spend the AI quota.
  */
 export async function POST(request: Request) {
-  if (!hasLiveAccess(request)) return Response.json({ error: 'No access' }, { status: 401 });
+  const access = await ownerAccess(request);
+  if (access !== 'ok') return ownerRefusal(access, (error, status) => Response.json({ error }, { status }));
 
   let body: unknown;
   try {

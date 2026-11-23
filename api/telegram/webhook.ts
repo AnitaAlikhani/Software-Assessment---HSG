@@ -1,5 +1,6 @@
 import { cleanName } from '../../server/bookingRules.js';
-import { applyAi, askAi, recordDelivery, storeIncoming } from '../../server/chatFlow.js';
+import { answerMessengerMessage, recordDelivery } from '../../server/chatFlow.js';
+import { addressWaiting, countWrongTry } from '../../server/limits.js';
 import { researchSetting } from '../../server/researchMode.js';
 import { claimMessage, deleteOwnChat, loadConversation, releaseMessage, storeConfigured } from '../../server/store.js';
 import { sendTelegramText, sendTelegramTyping, telegramConfigured, telegramRefused, webhookSecret } from '../../server/telegramApi.js';
@@ -40,10 +41,12 @@ async function answerCommand(message: NonNullable<ReturnType<typeof parseTelegra
 /** Every new Telegram message to the salon's bot arrives here. */
 export async function POST(request: Request) {
   if (!telegramConfigured()) return new Response('Telegram is not configured', { status: 500 });
+  // Somebody guessing the secret is counted and, after too many wrong tries, made to wait (server/limits.ts).
   if (request.headers.get('x-telegram-bot-api-secret-token') !== webhookSecret()) {
-    return new Response('Forbidden', { status: 403 });
+    return (await countWrongTry(request)) ? new Response('Too many wrong tries', { status: 429 }) : new Response('Forbidden', { status: 403 });
   }
   if (!storeConfigured()) return new Response('Storage is not configured', { status: 500 });
+  if (await addressWaiting(request)) return new Response('Too many wrong tries', { status: 429 });
 
   let body: unknown;
   try { body = await request.json(); } catch { return new Response('OK'); }
@@ -70,15 +73,13 @@ export async function POST(request: Request) {
     return new Response('OK');
   }
 
-  // The message is stored before the AI runs, so a slow or failing AI never loses it.
-  const stored = await storeIncoming({ ...message, name: cleanName(message.name) || 'Telegram customer' });
-  if (!stored) return new Response('OK'); // deleted in the moment it arrived
-  if (!stored.conversation.takenOver) await sendTelegramTyping(chatId).catch(error => console.error(error));
-  const analysis = await askAi(stored.conversation, message.id);
-  // Applied to the chat as it is now: a customer who sent /delete meanwhile has been told that the
-  // chat is gone (nothing is stored again and no answer follows), and a chat the owner took over
-  // meanwhile gets no AI reply.
-  const answered = await applyAi(stored, message.id, analysis, false);
+  // The message is stored before the AI runs, so a slow or failing AI never loses it. The answer
+  // is applied to the chat as it is now: a customer who sent /delete meanwhile has been told that
+  // the chat is gone (nothing is stored again and no answer follows), and a chat the owner took
+  // over meanwhile gets no AI reply. Past a limit the AI is not asked (see answerMessengerMessage).
+  const answered = await answerMessengerMessage({ ...message, name: cleanName(message.name) || 'Telegram customer' }, async stored => {
+    if (!stored.conversation.takenOver) await sendTelegramTyping(chatId).catch(error => console.error(error));
+  });
   if (!answered?.reply) return new Response('OK');
   let delivered = false;
   try {
@@ -88,6 +89,6 @@ export async function POST(request: Request) {
     // Telegram did not take the answer. The owner sees the message and that nobody answered it.
     console.error(error);
   }
-  await recordDelivery(answered, answered.reply, delivered, false);
+  await recordDelivery(answered, answered.reply, delivered, false, Date.now(), answered.promise);
   return new Response('OK');
 }

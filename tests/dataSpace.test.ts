@@ -121,7 +121,7 @@ test('a preview of a work branch never touches a key of the live site', async ()
 
 test('a preview of a work branch cannot take over the Telegram bot or the WhatsApp number', async () => {
   const secrets = { LIVE_ACCESS_KEY: 'right-key', WHATSAPP_VERIFY_TOKEN: 'verify-word', TELEGRAM_BOT_TOKEN: '' };
-  const setup = (key: string) => telegramSetup(new Request(`https://copy.invalid/api/telegram/setup?key=${key}`));
+  const setup = (key: string) => telegramSetup(new Request('https://copy.invalid/api/telegram/setup', { headers: { 'x-live-key': key } }));
   const verify = () => whatsappVerification(new Request('https://copy.invalid/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=verify-word&hub.challenge=1234'));
 
   await deployedWith({ ...WORK_BRANCH_PREVIEW, ...secrets }, async () => {
@@ -143,7 +143,7 @@ test('a preview of a work branch cannot take over the Telegram bot or the WhatsA
 });
 
 test('every copy can say which chats it uses, and a preview does not advertise the live bot', async () => {
-  const space = (key: string) => spaceRoute(new Request(`https://copy.invalid/api/space?key=${key}`));
+  const space = (key: string) => spaceRoute(new Request('https://copy.invalid/api/space', { headers: { 'x-live-key': key } }));
   const inbox = () => conversationsRoute(new Request('https://copy.invalid/api/whatsapp/conversations', { headers: { 'x-live-key': 'right-key' } }));
 
   // The preview's own storage holds one chat.

@@ -272,7 +272,7 @@ test('the owner sees the same page as a preview, without a promise that it reach
 });
 
 test('the customer chat reads like the salon\'s chat, and like a study only on a research link', () => {
-  const chat = () => renderToStaticMarkup(React.createElement(CustomerChat, { liveKey: 'chat-key' }));
+  const chat = () => renderToStaticMarkup(React.createElement(CustomerChat, { token: 'chat-token' }));
   setResearchModeForTests(false);
   try {
     const html = chat();
@@ -303,15 +303,16 @@ test('the customer chat reads like the salon\'s chat, and like a study only on a
 });
 
 test('without a working link the chat page says what to do and offers nothing else', () => {
-  const chat = () => renderToStaticMarkup(React.createElement(CustomerChat, { liveKey: null }));
+  const chat = () => renderToStaticMarkup(React.createElement(CustomerChat, { token: null }));
   setResearchModeForTests(false);
   try {
     const html = chat();
     assert.match(visible(html), /This chat link is no longer valid\. Please ask the salon for a new one\./);
     assert.doesNotMatch(visible(html), TELLS);
-    assert.doesNotMatch(html, /<a\s|<button|<input/);
+    assert.doesNotMatch(html, /<a\s|<button|<input|<textarea|role="alert"/);
+    // A study participant with an old link reads the same sentence the server gives (api/chat.ts).
     setResearchModeForTests(true);
-    assert.match(visible(chat()), new RegExp(`This test chat needs the invitation link from the ${PRODUCT_NAME} team\\.`));
+    assert.match(visible(chat()), /This chat link is no longer valid\. Please ask the salon for a new one\./);
   } finally {
     setResearchModeForTests(undefined);
   }

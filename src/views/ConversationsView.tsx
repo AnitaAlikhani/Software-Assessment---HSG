@@ -12,6 +12,7 @@ import {
   Send,
   WifiOff,
   X,
+  Clock,
 } from 'lucide-react';
 import {
   AiAssistantSettings,
@@ -24,7 +25,7 @@ import {
 import { conversationTimeLabel, LANGUAGE_NAMES } from '../conversationData';
 import { confirmedButMissing, conversationForSelection, conversationsInFilter, messageForOwner, ownerLanguageName, shownStatus, type ConversationFilter } from '../conversationPresentation';
 import { useDemoState } from '../useDemoState';
-import { liveActionFor, type LiveActionState, type LiveChannels, type LiveInbox } from '../liveWhatsApp';
+import { liveActionFor, OWNER_WAIT_TEXT, type LiveActionState, type LiveChannels, type LiveInbox, type TeamCheck, type TeamCheckResult } from '../liveWhatsApp';
 import { researchMode } from '../flags';
 import { ChannelBadge, channelLabel } from '../components/ChannelBadge';
 import { formatDate, formatPhone } from '../format';
@@ -38,6 +39,7 @@ import {
   messagesWaitingForOwner,
   NO_ACCESS_TEXT,
   NO_ACCESS_TITLE,
+  SIGN_OUT_LABEL,
   openChatState,
 } from './chatScreen';
 
@@ -66,6 +68,10 @@ interface ConversationsViewProps {
   liveChannels?: LiveChannels | null;
   /** The connection to the live chats and the owner's answers on their way. */
   liveInbox?: LiveInbox | null;
+  /** "Sign out on this device", offered where the server refused this browser's key. */
+  onSignOut?: () => void;
+  /** Study tool: runs one of the team's checks with this device's key. */
+  onTeamCheck?: (kind: TeamCheck) => Promise<TeamCheckResult>;
   /** The salon as the slot rules see it: the booking cards check a chat's request against it. */
   salon?: AvailabilityContext;
   /** Answers a booking request, a change or a cancellation that waits in a chat (src/App.tsx, handleChatBooking). */
@@ -166,6 +172,7 @@ const LiveChip = () => (
 const contactLine = (c: Conversation) =>
   [/\d/.test(c.phone) || c.phone.startsWith('@') ? formatPhone(c.phone) : '', channelLabel(c.channel)].filter(Boolean).join(' · ');
 
+const SIGN_OUT_BUTTON = 'min-h-11 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600';
 const BACK_BUTTON = 'md:hidden -ml-1.5 flex size-11 shrink-0 items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-[#5551FF]';
 const PRIMARY = 'min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] transition-colors disabled:opacity-60 disabled:cursor-wait';
 const SECONDARY = 'min-h-11 px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors disabled:opacity-60 disabled:cursor-wait';
@@ -207,6 +214,8 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
   onOpenAiSettings,
   liveChannels,
   liveInbox,
+  onSignOut,
+  onTeamCheck,
   salon,
   onChatBooking,
   onBookForCustomer,
@@ -500,8 +509,19 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
       return (
         <div role="alert" className="m-3 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-800">
           <KeyRound className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <p><span className="block text-sm font-semibold">{NO_ACCESS_TITLE}</span>{NO_ACCESS_TEXT}</p>
+          <div className="min-w-0 space-y-2">
+            <p><span className="block text-sm font-semibold">{NO_ACCESS_TITLE}</span>{NO_ACCESS_TEXT}</p>
+            {onSignOut && <button type="button" onClick={onSignOut} className={SIGN_OUT_BUTTON}>{SIGN_OUT_LABEL}</button>}
+          </div>
         </div>
+      );
+    }
+    if (connection === 'waiting') {
+      return (
+        <p role="status" className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900">
+          <Clock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span><span className="block font-semibold">Live chats are paused</span>{liveInbox?.waitNotice ?? OWNER_WAIT_TEXT}</span>
+        </p>
       );
     }
     if (connection === 'reconnecting') {
@@ -552,9 +572,16 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
             <p className="max-w-sm"><span className="block font-semibold text-slate-900">{NO_ACCESS_TITLE}</span>{NO_ACCESS_TEXT}</p>
           </>
         )}
+        {state === 'waiting' && (
+          <>
+            <Clock className="size-6 text-amber-600" aria-hidden="true" />
+            <p className="max-w-sm"><span className="block font-semibold text-slate-900">Live chats are paused</span>{liveInbox?.waitNotice ?? OWNER_WAIT_TEXT}</p>
+          </>
+        )}
         {state === 'gone' && <p>This conversation is no longer available.</p>}
         {state === 'none' && <p>No conversations yet.</p>}
-        {(state === 'gone' || state === 'no-access') && <button type="button" onClick={back} className="min-h-11 rounded-xl px-4 py-2 font-semibold text-[#5551FF] bg-indigo-50">View all conversations</button>}
+        {state === 'no-access' && onSignOut && <button type="button" onClick={onSignOut} className={SIGN_OUT_BUTTON}>{SIGN_OUT_LABEL}</button>}
+        {(state === 'gone' || state === 'no-access' || state === 'waiting') && <button type="button" onClick={back} className="min-h-11 rounded-xl px-4 py-2 font-semibold text-[#5551FF] bg-indigo-50">View all conversations</button>}
       </div>
     </div>
   );
@@ -574,6 +601,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
         <div className="px-4 pt-4 md:p-0">
           <LiveTestStrip
             channels={liveChannels}
+            onCheck={onTeamCheck}
             liveCount={conversations.filter(c => c.live).length}
             waitingCount={conversations.filter(c => c.live && c.status === 'needs-attention').length}
           />

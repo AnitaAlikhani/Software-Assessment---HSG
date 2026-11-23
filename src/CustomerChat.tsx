@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { MoreVertical, Send, Sparkles } from 'lucide-react';
+import { Clock, Link2Off, MoreVertical, Phone, Send, Sparkles } from 'lucide-react';
 import { PRODUCT_NAME } from './brand';
 import { PoweredBy } from './components/Logo';
 import { SalonTimeNote } from './components/SalonTimeNote';
@@ -30,13 +30,75 @@ const HEADER_COLOR = '#075e54';
 const newSessionId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 20);
 
+/** The server's sentence for a chat link it does not accept (api/chat.ts answers it with 401). */
+export const LINK_NOT_VALID = 'This chat link is no longer valid. Please ask the salon for a new one.';
+/** Said when the server's 429 answer brings no sentence of its own. */
+export const TOO_MANY_MESSAGES = 'Too many messages in a short time. Please wait a moment and try again.';
+/** How long the page waits before it asks again after the server said "too many" (429). */
+const POLL_AFTER_LIMIT_MS = 30_000;
+
 /**
- * The key that opens this chat comes with the link and stays in the address. This page does not
- * save it: the same key opens the owner's view of all chats, and a customer's browser must not
- * be left holding it for the next visit to the site.
+ * The chat token that opens this chat: the "chat" parameter of the address ("/?chat=<token>").
+ * The token opens this chat and nothing else. An address of the old form ("?chat=1&live=…")
+ * carries no token: null, and the page says that the link is no longer valid.
  */
-const keyFromAddress = (): string | null =>
-  typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('live');
+export function chatTokenFromAddress(search: string): string | null {
+  const token = new URLSearchParams(search).get('chat');
+  return token && token !== '1' ? token : null;
+}
+
+/** The headers of every request of this page: the chat token, and never an owner key. */
+export const chatHeaders = (token: string, json = false): Record<string, string> =>
+  ({ ...(json ? { 'Content-Type': 'application/json' } : {}), 'x-chat-token': token });
+
+/**
+ * What an answer of /api/chat means for this page. A chat that reached its length answers 429
+ * with `full: true`: that is not "wait a moment" (trying again fails the same way) but "this
+ * chat is closed", and the page offers a new chat. Only a 429 without `full` means "wait".
+ */
+export type ChatAnswer = 'ok' | 'link-not-valid' | 'full' | 'too-many' | 'failed';
+export const chatAnswer = (status: number, data?: { full?: unknown; error?: unknown } | null): ChatAnswer => {
+  if (status === 401 || status === 403) return 'link-not-valid';
+  if (status >= 200 && status < 300) return 'ok';
+  if (data?.full === true) return 'full';
+  return status === 429 ? 'too-many' : 'failed';
+};
+
+/** The server's sentence in an answer, or the page's own when it sent none. */
+const sentenceOf = (data: { error?: unknown } | null, answer: ChatAnswer): string =>
+  typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : answer === 'too-many' ? TOO_MANY_MESSAGES : LINK_NOT_VALID;
+
+/**
+ * Asks the server about the earlier chats whose period is over, one after the other. The first
+ * refused link ends the round: every further try with a refused token counts as a wrong try
+ * for the customer's whole network, so the page asks nothing more.
+ */
+export async function askAboutEarlierChats(
+  ids: string[],
+  ask: (id: string) => Promise<Response>,
+): Promise<{ answers: Record<string, 'gone' | 'kept' | undefined>; refused: Response | null }> {
+  const answers: Record<string, 'gone' | 'kept' | undefined> = {};
+  for (const id of ids) {
+    try {
+      const response = await ask(id);
+      const answer = chatAnswer(response.status);
+      if (answer === 'link-not-valid') return { answers, refused: response };
+      if (answer === 'too-many') { done(response); break; }
+      if (response.ok) answers[id] = ((await response.json()) as { messages?: unknown[] }).messages?.length ? 'kept' : 'gone';
+      else { done(response); if (response.status === 404) answers[id] = 'gone'; }
+    } catch { /* offline: ask again on the next visit */ }
+  }
+  return { answers, refused: null };
+}
+
+/**
+ * A refused link or "too many": what to tell the customer. The server's own sentence is used
+ * when it sends one; otherwise the page's. Reads the answer, so call it only for these two.
+ */
+export async function refusalSentence(response: Response): Promise<string> {
+  const data = (await response.json().catch(() => ({}))) as { error?: unknown };
+  return sentenceOf(data, chatAnswer(response.status));
+}
 
 function stored(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -75,10 +137,8 @@ export function chatCopy(study: boolean, salon: string, phone: string, earlier =
       `How long: ${days} days after the last activity in the chat. Every new message starts the ${days} days again. “Delete chat” in the chat menu removes it at once, together with earlier chats you started on this device.`,
       'This device remembers the chat and your first name, so you can continue later. When you start a new chat, it also keeps a reference to the chat before (no messages), so that “Delete chat” can remove that one too. The reference is dropped once that chat is gone.',
     ],
-    // Without a working link there is no chat to open.
-    noLink: study
-      ? `This test chat needs the invitation link from the ${PRODUCT_NAME} team.`
-      : 'This chat link is no longer valid. Please ask the salon for a new one.',
+    // Without a working link there is no chat to open. The sentence is the server's (api/chat.ts).
+    noLink: LINK_NOT_VALID,
     threadNote: `Chats are deleted automatically after ${days} days without activity.`,
     // What "New chat" does with the chat on screen. Shown in the chat menu and where a long chat has to be left.
     newChatNote: 'A new chat starts empty. The salon keeps this one until it is deleted automatically, and “Delete chat” removes it too.',
@@ -107,13 +167,22 @@ const sameMessages = (a: VisitorMessage[], b: VisitorMessage[]) =>
 /**
  * The customer's side of the salon chat: a customer writes like on WhatsApp, in any language.
  * The AI assistant answers here, and the owner sees the chat in Conversations and can reply.
- * Opened with "?chat=1&live=KEY". This page never links into the owner's dashboard.
+ * Opened with "/?chat=<token>". This page never links into the owner's dashboard, and it never
+ * sends or keeps an owner key: its requests carry the chat token only.
  */
-export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
-  const [key] = useState(() => liveKey === undefined ? keyFromAddress() : liveKey);
+export default function CustomerChat({ token }: { token?: string | null }) {
+  const [key] = useState(() => token === undefined ? chatTokenFromAddress(typeof window === 'undefined' ? '' : window.location.search) : token);
   const [study] = useState(researchMode);
   // The server says when a link has stopped working; until then the chat shows.
   const [linkWorks, setLinkWorks] = useState(true);
+  // The server's sentence for a refused link, when it sent one.
+  const [linkSentence, setLinkSentence] = useState(LINK_NOT_VALID);
+  // The server's sentence after "too many" (429): the chat stays, the customer tries again later.
+  const [limited, setLimited] = useState<string | null>(null);
+  // The server has accepted the link once on this page (any answer that was not a refusal).
+  const [linkConfirmed, setLinkConfirmed] = useState(false);
+  // Set by the first refusal: from then on the page sends nothing, so it adds no further wrong tries.
+  const refused = useRef(false);
   const [session, setSession] = useState(() => stored(SESSION_STORAGE) ?? '');
   const [name, setName] = useState(() => stored(NAME_STORAGE) ?? '');
   const [nameDraft, setNameDraft] = useState('');
@@ -147,14 +216,31 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
   // The browser tab names the salon, not the product: "Chat with Bella Hair Salon".
   usePageHead(chatPageHead(salon, key && linkWorks ? HEADER_COLOR : undefined));
 
+  /** The link was refused: the page shows the server's sentence and nothing to type into. */
+  const linkRefused = async (response: Response) => {
+    // The first refusal ends every request of this page (see `refused`).
+    refused.current = true;
+    setLinkSentence(await refusalSentence(response));
+    setLinkWorks(false);
+  };
+  /** "Too many" (429): the server's sentence, said calmly; nothing typed is lost. */
+  const tooMany = async (response: Response) => { setLimited(await refusalSentence(response)); };
+
   // Before a chat exists, ask once whether the link still works, so nobody types into a dead chat.
   useEffect(() => {
-    if (!key || session) return;
+    if (!key || session || refused.current) return;
     let stopped = false;
-    fetch('/api/chat', { headers: { 'x-live-key': key }, cache: 'no-store' })
-      .then(response => { done(response); if (!stopped && response.status === 401) setLinkWorks(false); })
+    fetch('/api/chat', { headers: chatHeaders(key), cache: 'no-store' })
+      .then(response => {
+        if (stopped) { done(response); return; }
+        const answer = chatAnswer(response.status);
+        if (answer === 'link-not-valid') void linkRefused(response);
+        else if (answer === 'too-many') void tooMany(response);
+        else { done(response); if (answer === 'ok') setLinkConfirmed(true); }
+      })
       .catch(() => { /* offline: sending explains it */ });
     return () => { stopped = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, session]);
 
   useEffect(() => {
@@ -163,13 +249,16 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
     let timer: ReturnType<typeof setTimeout>;
     setAnsweredBy(null);
     const poll = async () => {
+      if (refused.current) return;
       const sentBefore = sends.current;
       try {
-        const response = await fetch(`/api/chat?session=${session}`, { headers: { 'x-live-key': key }, cache: 'no-store' });
-        if (response.status === 401) { done(response); if (!stopped) setLinkWorks(false); return; }
+        const response = await fetch(`/api/chat?session=${session}`, { headers: chatHeaders(key), cache: 'no-store' });
+        if (chatAnswer(response.status) === 'link-not-valid') { if (!stopped) void linkRefused(response); else done(response); return; }
+        // Too many requests from here: ask again later, and say nothing while nothing was sent.
+        if (response.status === 429) { done(response); if (!stopped) timer = setTimeout(poll, POLL_AFTER_LIMIT_MS); return; }
         if (response.ok) {
           const data = (await response.json()) as { messages: VisitorMessage[]; answeredBy?: 'assistant' | 'team' };
-          if (!stopped) setAnsweredBy(data.answeredBy ?? null);
+          if (!stopped) { setAnsweredBy(data.answeredBy ?? null); setLinkConfirmed(true); }
           // While a message is on its way, keep showing it instead of the older server copy.
           // The same holds for an answer that was asked for before the last message went out.
           if (!stopped && !sendingRef.current && sentBefore === sends.current) {
@@ -188,27 +277,26 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
 
   // An earlier chat whose period is over is normally gone at the salon. The device asks once
   // before it forgets the id, so a chat the salon kept alive can still be deleted from here.
+  // It waits until the server has accepted the link once, so a refused link costs one try, not one per chat.
   useEffect(() => {
-    if (!key) return;
+    if (!key || !linkConfirmed || refused.current) return;
     const due = dueEarlierChats(parseEarlierChats(stored(EARLIER_STORAGE)), Date.now());
     if (due.length === 0) return;
     let stopped = false;
     void (async () => {
-      const answers: Record<string, 'gone' | 'kept' | undefined> = {};
-      for (const chat of due) {
-        try {
-          const response = await fetch(`/api/chat?session=${chat.id}`, { headers: { 'x-live-key': key }, cache: 'no-store' });
-          if (response.ok) answers[chat.id] = ((await response.json()) as { messages?: unknown[] }).messages?.length ? 'kept' : 'gone';
-          else { done(response); if (response.status === 404) answers[chat.id] = 'gone'; }
-        } catch { /* offline: ask again on the next visit */ }
-      }
+      const { answers, refused: refusal } = await askAboutEarlierChats(
+        due.map(chat => chat.id),
+        id => refused.current ? Promise.reject(new Error('link refused')) : fetch(`/api/chat?session=${id}`, { headers: chatHeaders(key), cache: 'no-store' }),
+      );
+      if (refusal) { if (!stopped) void linkRefused(refusal); else done(refusal); return; }
       if (stopped) return;
       const settled = settleEarlierChats(parseEarlierChats(stored(EARLIER_STORAGE)), answers, Date.now());
       store(EARLIER_STORAGE, JSON.stringify(settled));
       setEarlier(settled);
     })();
     return () => { stopped = true; };
-  }, [key]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, linkConfirmed]);
 
   // Another tab of this browser started a new chat or deleted the chats: follow it. The device
   // then has one current chat in every tab, and none is left where "Delete chat" cannot reach it.
@@ -302,9 +390,12 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
     const ids = chatsToDelete(remaining, session);
     try {
       for (const id of ids) {
-        const response = await fetch(`/api/chat?session=${id}`, { method: 'DELETE', headers: { 'x-live-key': key } });
+        if (refused.current) return;
+        const response = await fetch(`/api/chat?session=${id}`, { method: 'DELETE', headers: chatHeaders(key) });
+        const answer = chatAnswer(response.status);
+        if (answer === 'link-not-valid') { await linkRefused(response); return; }
+        if (answer === 'too-many') { await tooMany(response); closeMenu(); return; }
         done(response);
-        if (response.status === 401) { setLinkWorks(false); return; }
         if (!response.ok) { setError(copy.notDeleted); closeMenu(); return; }
         if (id === session) break;
         remaining = remaining.filter(chat => chat.id !== id);
@@ -336,13 +427,14 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
   const send = async (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || sending || !key) return;
+    if (!text || sending || !key || refused.current) return;
     setSending(true);
     sendingRef.current = true;
     sends.current += 1;
     // From here on the salon may hold this chat, whatever becomes of the answer.
     atSalon.current = null;
     setError(null);
+    setLimited(null);
     setChatFull(false);
     setNotice(null);
     const pendingId = `pending-${Date.now()}`;
@@ -358,18 +450,27 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-live-key': key },
+        headers: chatHeaders(key, true),
         body: JSON.stringify({ session, name, text }),
       });
+      if (chatAnswer(response.status) === 'link-not-valid') { await linkRefused(response); return; }
       // A server that fell over answers with a page instead of data.
       const data = (await response.json().catch(() => ({}))) as { messages?: VisitorMessage[]; error?: string; aiFailed?: boolean; full?: boolean; answeredBy?: 'assistant' | 'team' };
+      // A full chat is checked before "too many": it is closed, and the way out is a new chat.
+      const answer = chatAnswer(response.status, data);
+      if (answer === 'too-many') {
+        // Not sent: the text goes back into the input, and the server's sentence says when to try again.
+        setMessages(previous => previous.filter(item => item.id !== pendingId));
+        setDraft(current => current || text);
+        setLimited(sentenceOf(data, answer));
+        return;
+      }
       if (response.ok && data.messages) {
         setAnsweredBy(data.answeredBy ?? null);
         atSalon.current = data.messages.length;
         setMessages(data.messages);
         if (data.aiFailed) setNotice(copy.aiBusy);
       } else {
-        if (response.status === 401) setLinkWorks(false);
         setChatFull(Boolean(data.full));
         notSent(data.error ?? copy.notSent);
       }
@@ -382,16 +483,40 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
   };
 
   if (!key || !linkWorks) {
+    // A page of its own, complete and calm: the link is over, so there is nothing to type into.
     return (
-      <main className="min-h-dvh bg-slate-50 flex items-center justify-center p-6">
-        <div className="max-w-sm text-center space-y-2">
-          <h1 className="text-base font-semibold text-slate-900">{salon}</h1>
-          <p className="text-sm text-slate-600">{copy.noLink}</p>
-          {salonPhone && <p className="text-sm text-slate-600">You can reach the salon on {salonPhone}.</p>}
+      <main className="min-h-dvh bg-[#efeae2] flex justify-center">
+        <div className="w-full max-w-lg flex flex-col min-h-dvh">
+          <div className="flex-1 flex items-center justify-center p-4">
+            <section aria-labelledby="chat-closed-title" className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-sm space-y-4">
+              <div aria-hidden="true" className="mx-auto flex size-14 items-center justify-center rounded-full bg-[#075e54]/10 text-[#075e54]">
+                <Link2Off className="size-6" />
+              </div>
+              <div className="space-y-2">
+                <h1 id="chat-closed-title" className="text-lg font-semibold text-slate-900">{salon}</h1>
+                <p className="text-[15px] leading-relaxed text-slate-700">{key ? linkSentence : copy.noLink}</p>
+              </div>
+              {salonPhone && (
+                <p className="flex items-center justify-center gap-2 border-t border-slate-100 pt-4 text-sm text-slate-600">
+                  <Phone className="size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                  <span>You can also call the salon on <span className="font-semibold text-slate-800 whitespace-nowrap">{salonPhone}</span>.</span>
+                </p>
+              )}
+            </section>
+          </div>
+          <PoweredBy className="shrink-0 px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]" />
         </div>
       </main>
     );
   }
+
+  /** The server's "too many" sentence: calm, above the input, which keeps what was typed. */
+  const limitNotice = limited && (
+    <p role="status" className="flex items-start gap-2 rounded-lg bg-white/90 px-3 py-2 text-xs text-slate-700 shadow-xs">
+      <Clock className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
+      <span>{limited}</span>
+    </p>
+  );
 
   return (
     // A column exactly as tall as the screen: header, the list that scrolls, the input bar.
@@ -454,6 +579,7 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
 
         {!session ? (
           <div className="flex-1 min-h-0 overflow-y-auto">
+            {limited && <div className="mx-4 mt-4">{limitNotice}</div>}
             {justDeleted && <p role="status" className="mx-4 mt-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">{justDeleted === 'all' ? copy.deletedAll : copy.deleted}</p>}
             <form onSubmit={start} className="m-4 mt-6 p-5 rounded-2xl bg-white shadow-sm space-y-4">
               <div className="flex items-start gap-3">
@@ -515,6 +641,7 @@ export default function CustomerChat({ liveKey }: { liveKey?: string | null }) {
               )}
               {answeredBy === 'team' && messages.length > 0 && <p role="status" className="mx-auto max-w-xs text-center text-xs text-slate-700 bg-white/80 rounded-lg px-3 py-2">{copy.teamAnswers}</p>}
               {notice && <p role="status" className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-700">{notice}</p>}
+              {limitNotice}
               {error && (
                 <div role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-red-700">
                   <p>{error}</p>

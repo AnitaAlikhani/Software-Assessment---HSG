@@ -49,7 +49,10 @@ test('only a refused key means no access; other failures are retried and keep th
   assert.equal(pollOutcome(401), 'refused');
   assert.equal(pollOutcome(403), 'refused');
   assert.equal(pollOutcome(404), 'missing');
-  for (const status of [500, 502, 503, 429, 408, 400]) assert.equal(pollOutcome(status), 'failed', String(status));
+  for (const status of [500, 502, 503, 408, 400]) assert.equal(pollOutcome(status), 'failed', String(status));
+  // 429: the server is there and makes this connection wait; that is not a failure to reach it.
+  assert.equal(pollOutcome(429), 'waiting');
+  assert.equal(connectionAfter('waiting', true), 'waiting');
   assert.equal(pollOutcome(null), 'failed');
 
   assert.equal(connectionAfter('enabled', false), 'live');

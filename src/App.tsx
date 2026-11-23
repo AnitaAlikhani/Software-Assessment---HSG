@@ -226,10 +226,15 @@ export default function App() {
   const [companySettings, setCompanySettings] = useDemoState<CompanySettingsData>('companySettings', initialCompanySettings);
   const [bookingHours, setBookingHours] = useDemoState<BookingHoursDay[]>('bookingHours', initialBookingHours);
   const [conversations, setConversations] = useDemoState<Conversation[]>('conversations', (builtAt) => startingData(builtAt).conversations);
-  // Real WhatsApp chats from the test number (only with a "?live=KEY" link); shown above the demo chats.
+  // Real chats from the live channels (on a device signed in with the owner link); shown above the built-in chats.
   // The public booking page is a customer's page: it never asks the server for them.
   const live = useLiveWhatsApp(!publicMode);
   const allConversations = [...live.conversations, ...conversations];
+  /** "Sign out on this device" (Settings and the chat screen): the browser forgets the owner key. */
+  const signOutHere = () => {
+    live.signOut();
+    showToast('Signed out on this device. Live chats are no longer shown here.', 'info');
+  };
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(DEFAULT_DEMO_CONVERSATION_ID);
   const [aiSettings, setAiSettings] = useDemoState<AiAssistantSettings>('aiSettings', initialAiSettings);
 
@@ -1222,6 +1227,8 @@ export default function App() {
               onOpenAiSettings={() => setCurrentTab('ai-assistant')}
               liveChannels={live.channels}
               liveInbox={live.inbox}
+              onSignOut={signOutHere}
+              onTeamCheck={live.teamCheck}
               salon={availabilityContext}
               onChatBooking={handleChatBooking}
               onBookForCustomer={openBookingForChat}
@@ -1255,6 +1262,7 @@ export default function App() {
               onSaveClosedDates={setClosedDates}
               onOpenAbsences={() => navigate({ tab: 'team', section: 'absences' })}
               onUnsavedChange={noteUnsaved}
+              thisDevice={{ signedIn: live.signedIn, connection: live.connection, waitNotice: live.inbox.waitNotice, onSignOut: signOutHere }}
             />
           )}
         </main>
@@ -1304,6 +1312,7 @@ export default function App() {
       {/* Owner assistant: answers from the data above and changes it only through the handlers the screens use. */}
       <AssistantPanel
         isOpen={isAssistantOpen}
+        usesAiModel={live.signedIn}
         onClose={() => setIsAssistantOpen(false)}
         salon={availabilityContext}
         customers={customers}

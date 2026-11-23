@@ -19,14 +19,27 @@ Meta locked the new WhatsApp business account until the business is verified, so
 website chat instead. It works like WhatsApp: testers write in any language, the AI answers in that language,
 and the owner sees the chat under **Conversations**.
 
-- **Tester link:** `https://slotbee.vercel.app/?chat=1&live=YOUR_LIVE_ACCESS_KEY&research=1`
+- **Tester link:** copy it from the live-test strip above **Conversations** (**Copy link**). It has the form
+  `https://slotbee.vercel.app/?chat=CHAT_TOKEN&research=1`. The chat token is made from `LIVE_ACCESS_KEY` and opens
+  the website chat only, never the owner's view. A new `LIVE_ACCESS_KEY` makes every older tester link invalid; the
+  old form `?chat=1&live=…` no longer opens a chat.
   With `&research=1` the page tells study participants that this is a student test. Without it, the same page
   uses the wording a salon's customers read (see "Study tools and study wording" below).
 - **Owner link:** `https://slotbee.vercel.app/?live=YOUR_LIVE_ACCESS_KEY&research=1` → Conversations
+  Open it once per device: the browser keeps the key and removes it from the address at once. Hand it to nobody.
+  **Settings → Online booking → This device** shows whether a browser is signed in and has **Sign out on this
+  device**.
   With `&research=1` the owner sees the study tools: a green **Live** label on these chats and, above the inbox,
-  the live-test strip with the tester link to copy. Without it the chats arrive all the same, but nothing marks
-  them as live and the strip is hidden.
+  the live-test strip with the tester link to copy and three checks: **Check the AI** (which Gemini models answer),
+  **Which chats this copy uses** and **Connect Telegram** (connects the bot to this site once `TELEGRAM_BOT_TOKEN`
+  is set). Without it the chats arrive all the same, but nothing marks them as live and the strip is hidden.
 - The owner can **Take over** and reply in English or German; the tester gets it in their language.
+
+**When this version goes live, set a new `LIVE_ACCESS_KEY` in Vercel first** (then redeploy). Every tester link
+given out before this version has the form `?chat=1&live=KEY` and so contains the owner key itself: with the old
+key still in place, anyone holding such a link could open the inbox with it. After the change those old tester
+links stop working (the page says the link is no longer valid). Copy a new tester link from the live-test strip and
+hand that out, and open the new owner link once on each of your own devices.
 
 It needs only Steps 3 and 4 below (Gemini key, Upstash, Vercel settings). The WhatsApp steps are for later,
 if the business account is verified.
@@ -76,7 +89,7 @@ Project `slotbee` → **Settings → Environment Variables**. Add:
 | `WHATSAPP_APP_SECRET` | from Step 2 |
 | `WHATSAPP_VERIFY_TOKEN` | any word you choose, e.g. `bella-salon-2026` |
 | `GEMINI_API_KEY` | from Step 3 |
-| `LIVE_ACCESS_KEY` | a long random word; this is the tester link key |
+| `LIVE_ACCESS_KEY` | a long random word; this is the owner link key, and tester links are made from it |
 
 Then **deploy** the branch (Vercel → Deployments → Redeploy, or merge and push).
 
@@ -90,7 +103,7 @@ Then **deploy** the branch (Vercel → Deployments → Redeploy, or merge and pu
 ## Step 6: Test it
 
 1. Open `https://slotbee.vercel.app/?live=YOUR_LIVE_ACCESS_KEY&research=1` once. The browser remembers the key
-   and that study tools are on.
+   (and takes it out of the address) and that study tools are on.
 2. From an allowed phone, send a WhatsApp message to the test number, e.g. *"Bonjour, avez-vous un rendez-vous jeudi ?"*
 3. Within a few seconds the chat appears under **Conversations** with a green **Live** label (a study tool:
    without `research=1` the chat appears without the label).
@@ -198,8 +211,8 @@ the WhatsApp number. The live site, and previews of `nil-live-whatsapp`, use the
 
 This relies on Vercel telling each copy that it is a preview and which branch it was built from (the project
 setting "Enable access to System Environment Variables" under Environment Variables). To see what a copy does,
-open `/api/space?key=YOUR_LIVE_ACCESS_KEY` on it. It answers `"dataSpace": "live"` or `"dataSpace": "preview"`
-and changes nothing. If Vercel tells a copy nothing, the copy keeps using the live chats, as before.
+open it with the owner link and press **Which chats this copy uses** in the live-test strip. It says whether the
+copy uses the live chats or its own test chats, and changes nothing. If Vercel tells a copy nothing, the copy keeps using the live chats, as before.
 
 One optional setting: `LIVE_DATA_SPACE=live`, set in Vercel **for one preview branch only**, makes that preview
 use the live chats. Use it when another branch takes over the live address. No setting can move the live site
@@ -218,8 +231,8 @@ If one fails, the build stops and the site that is already online stays as it is
 | Vercel logs show error 131030 | The phone is not in the allowed list from Step 1 |
 | Chat shows "The AI could not answer" | Check `GEMINI_API_KEY` and the Vercel function logs |
 | The inbox says "This chat was deleted by the customer." | The customer deleted the chat while your reply or confirmation was on its way. The chat was not stored again and the reply was held back; the chat leaves the list a few seconds later |
-| A preview address shows none of the live chats | Intended: previews of work branches keep their own chats (see above). Check with `/api/space` |
-| The live address suddenly shows none of the old chats after a branch change | Open `/api/space` there; if it says `preview`, set `LIVE_DATA_SPACE=live` for that branch |
-| `/api/telegram/setup` answers "only possible on the live site" | It was opened on a preview of a work branch; open it on the live address |
+| A preview address shows none of the live chats | Intended: previews of work branches keep their own chats (see above). Check with **Which chats this copy uses** |
+| The live address suddenly shows none of the old chats after a branch change | Press **Which chats this copy uses** there; if it says test chats, set `LIVE_DATA_SPACE=live` for that branch |
+| **Connect Telegram** answers "only possible on the live site" | It was pressed on a preview of a work branch; press it on the live address |
 | Meta cannot verify the callback URL on a preview address | Intended: only the live site accepts the WhatsApp webhook |
 | The Vercel build stops before "vite build" | The type check or a test failed: the build log names it |

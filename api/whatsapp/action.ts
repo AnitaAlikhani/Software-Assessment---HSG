@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { translateOwnerReply } from '../../server/ai.js';
-import { hasLiveAccess } from '../../server/access.js';
+import { aiCeilingReached, LIMIT_TEXTS, ownerAccess, ownerRefusal } from '../../server/limits.js';
 import { cleanName, matchStylist, strictDate, strictTime } from '../../server/bookingRules.js';
 import { applyAi, askAi, recordDelivery, type Saved } from '../../server/chatFlow.js';
 import { sendFirstNoticeIfDue } from '../../server/firstNotice.js';
@@ -223,7 +223,8 @@ const answeredFields = (chat: LiveConversation): AnsweredFields =>
 
 /** The owner's actions on a live chat (contract 2 of delivery 2C). */
 export async function POST(request: Request) {
-  if (!hasLiveAccess(request)) return fail('No access', 401);
+  const access = await ownerAccess(request);
+  if (access !== 'ok') return ownerRefusal(access, fail);
   if (!storeConfigured()) return fail('Storage is not configured', 500);
 
   let action: Action;
@@ -285,6 +286,9 @@ export async function POST(request: Request) {
   }
 
   if (action.type === 'let-ai-continue') {
+    // With the day's AI answers used up the AI cannot answer now: the chat stays with the owner as
+    // it is, and she reads why. Counted only when a customer's message waits for an answer.
+    if (conversation.messages.at(-1)?.sender === 'customer' && await aiCeilingReached(now)) return fail(LIMIT_TEXTS.aiCeiling, 429);
     // Hand the chat back first, then let the AI answer the customer's waiting message at once.
     const { outcome } = await apply(chat => {
       chat.takenOver = false;

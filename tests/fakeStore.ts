@@ -2,7 +2,7 @@
  * Stand-ins for the tests of the live chat: the storage in memory with a clock the test controls,
  * and a way to run code "as deployed" with given settings. Nothing leaves the test.
  */
-import { DELETE_SCRIPT, forgetEarlierListCleaning, SAVE_SCRIPT } from '../server/store';
+import { COUNT_SCRIPT, DELETE_SCRIPT, forgetEarlierListCleaning, SAVE_SCRIPT } from '../server/store';
 
 export type Command = (string | number)[];
 
@@ -17,7 +17,7 @@ interface Entry {
  * command, or a command on a key of the wrong kind, fails as it would on the real storage, so a
  * test notices a change that would break chats saved earlier.
  *
- * The real storage runs the store's two scripts in Lua. Here they are recognised by their text
+ * The real storage runs the store's scripts in Lua. Here they are recognised by their text
  * and answered by the same steps in TypeScript (see `script`). A script the store changes without
  * changing this file is unknown here and fails every test that uses it.
  */
@@ -85,6 +85,15 @@ export class FakeStore {
       }
       case 'MGET':
         return [key, ...rest].map(item => { const value = this.live(item)?.value; return typeof value === 'string' ? value : null; });
+      case 'INCR': {
+        const entry = this.live(key);
+        if (entry?.value instanceof Set) throw new Error(`WRONGTYPE ${key} holds a set, not a text`);
+        const current = entry === undefined ? 0 : Number(entry.value);
+        if (!Number.isInteger(current)) throw new Error('ERR value is not an integer or out of range');
+        // Like the real storage, raising a counter keeps the time it deletes itself.
+        this.entries.set(key, { value: String(current + 1), expiresAt: entry?.expiresAt });
+        return current + 1;
+      }
       case 'DEL':
         return [key, ...rest].filter(item => this.live(item) && this.entries.delete(item)).length;
       case 'SADD': {
@@ -135,7 +144,7 @@ export class FakeStore {
   }
 
   /**
-   * The store's two scripts, line for line as the Lua does it. Like the real storage, nothing
+   * The store's scripts, line for line as the Lua does it. Like the real storage, nothing
    * else runs between the steps of one script.
    */
   private script(script: string, keys: string[], args: string[]): unknown {
@@ -155,6 +164,24 @@ export class FakeStore {
       const deleted = this.execute(['DEL', keys[0]]);
       this.execute(['SREM', keys[2], args[2]]);
       return deleted;
+    }
+    if (script === COUNT_SCRIPT && args.length === 1 + 2 * (keys.length - (Number(args[0]) > 0 ? 1 : 0))) {
+      const gate = Number(args[0]);
+      let first = 0;
+      if (gate > 0) {
+        if ((Number(this.execute(['GET', keys[0]])) || 0) >= gate) return -1;
+        first = 1;
+      }
+      const counts: number[] = [];
+      for (let i = first; i < keys.length; i += 1) {
+        const j = i - first + 1;
+        const n = this.execute(['INCR', keys[i]]) as number;
+        if (n === 1) this.execute(['EXPIRE', keys[i], args[2 * j - 1]]);
+        counts.push(n);
+        const most = Number(args[2 * j]);
+        if (!Number.isNaN(most) && n > most) break;
+      }
+      return counts;
     }
     throw new Error('ERR the storage stand-in does not know this script, or it got the wrong number of keys and values');
   }

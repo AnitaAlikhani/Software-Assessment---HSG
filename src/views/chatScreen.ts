@@ -40,7 +40,7 @@ export type ChatBack = 'history' | 'list';
 export const chatBackTarget = (openedFromList: boolean): ChatBack => (openedFromList ? 'history' : 'list');
 
 /** What the place of the open chat shows. */
-export type OpenChatState = 'open' | 'none' | 'loading' | 'no-access' | 'gone';
+export type OpenChatState = 'open' | 'none' | 'loading' | 'no-access' | 'waiting' | 'gone';
 
 /**
  * A live chat is in the browser only after the server has answered. While the first answer is on
@@ -53,6 +53,8 @@ export const openChatState = (selectedId: string | null, found: boolean, connect
   if (isLiveConversation(selectedId)) {
     if (connection === 'loading' || connection === 'reconnecting') return 'loading';
     if (connection === 'denied') return 'no-access';
+    // The server makes this connection wait: the chat may well exist, it just cannot be fetched now.
+    if (connection === 'waiting') return 'waiting';
   }
   return 'gone';
 };
@@ -60,3 +62,5 @@ export const openChatState = (selectedId: string | null, found: boolean, connect
 /** The words for a refused access key, the same in the list and in a chat. */
 export const NO_ACCESS_TITLE = 'No access to live chats';
 export const NO_ACCESS_TEXT = 'The access link you opened is wrong or has expired. Open the latest link you were given.';
+/** The button that makes this browser forget its owner key (src/liveWhatsApp.ts, signOut). */
+export const SIGN_OUT_LABEL = 'Sign out on this device';

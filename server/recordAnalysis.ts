@@ -164,6 +164,7 @@ function settleLanguage(conversation: LiveConversation, messageId: string, analy
   if (!text(analysis.languageCode) || (spokenBefore && !same && words(written) < 4)) return;
   conversation.language = detected;
   conversation.languageLabel = label;
+  conversation.languageSettled = true;
 }
 
 /**

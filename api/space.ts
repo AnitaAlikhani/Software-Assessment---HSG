@@ -1,14 +1,15 @@
 import process from 'node:process';
 import { dataSpace, usesLiveData } from '../server/environment.js';
+import { ownerAccess, ownerRefusal } from '../server/limits.js';
 
 /**
- * Open /api/space?key=LIVE_ACCESS_KEY to see which stored chats this copy of the site uses:
- * the live ones, or its own preview space (see server/environment.ts). It changes nothing.
+ * Says which stored chats this copy of the site uses: the live ones, or its own preview space
+ * (see server/environment.ts). It changes nothing. The owner's key goes in the header x-live-key,
+ * never in the address: the study tools have a button for it ("Which chats this copy uses").
  */
-export function GET(request: Request) {
-  const key = process.env.LIVE_ACCESS_KEY;
-  const given = request.headers.get('x-live-key') ?? new URL(request.url).searchParams.get('key');
-  if (!key || given !== key) return Response.json({ error: 'No access' }, { status: 401 });
+export async function GET(request: Request) {
+  const access = await ownerAccess(request);
+  if (access !== 'ok') return ownerRefusal(access, (error, status) => Response.json({ error }, { status }));
   return Response.json({
     dataSpace: dataSpace(),
     usesLiveChats: usesLiveData(),

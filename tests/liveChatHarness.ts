@@ -12,6 +12,11 @@ import { FIXED_NOW } from './fixedClock';
 
 export const NOW = FIXED_NOW.getTime();
 export const SESSION = 'abc123def456ghi7';
+/**
+ * The customer's chat token for the key 'right-key', worked out here by the contract's recipe and
+ * not by the server's own code: the first 24 characters of base64url(HMAC-SHA-256(key, text)).
+ */
+export const CHAT_TOKEN = createHmac('sha256', 'right-key').update('slotbee customer chat v1').digest('base64url').slice(0, 24);
 export const SETTINGS = {
   LIVE_ACCESS_KEY: 'right-key', GEMINI_API_KEY: 'test-key', TELEGRAM_BOT_TOKEN: 'bot-token',
   WHATSAPP_APP_SECRET: 'app-secret', WHATSAPP_PHONE_NUMBER_ID: '1', WHATSAPP_ACCESS_TOKEN: 'token',
@@ -129,21 +134,35 @@ export async function quietly(work: () => Promise<unknown>): Promise<unknown[][]
 export const storedChat = (store: FakeStore, waId: string) =>
   JSON.parse(store.text(`slotbee:live:chat:${waId}`) ?? 'null') as (LiveConversation & { keptUntil?: number }) | null;
 
-/** The visitor's page: reading, writing and deleting its own chat. */
-export const chatRequest = (method: 'GET' | 'POST' | 'DELETE', { session, body }: { session?: string; body?: unknown } = {}) =>
+/** What a request carries besides its body: by default the page's own secret and no address. */
+export interface Sender {
+  /** The headers that prove access, e.g. { 'x-chat-token': ... }. Replaces the default. */
+  access?: Record<string, string>;
+  /** The caller's address, sent as x-forwarded-for (the limits count per address). */
+  address?: string;
+}
+const senderHeaders = ({ access, address }: Sender, fallback: Record<string, string>) =>
+  ({ ...(access ?? fallback), ...(address ? { 'x-forwarded-for': address } : {}) });
+
+/** The visitor's page: reading, writing and deleting its own chat, with the token from its link. */
+export const chatRequest = (method: 'GET' | 'POST' | 'DELETE', { session, body, ...sender }: { session?: string; body?: unknown } & Sender = {}) =>
   new Request(`https://site.invalid/api/chat${session === undefined ? '' : `?session=${session}`}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'x-live-key': 'right-key' },
+    headers: { 'Content-Type': 'application/json', ...senderHeaders(sender, { 'x-chat-token': CHAT_TOKEN }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-/** The owner's page acting on a live chat. */
-export const ownerAction = (action: Record<string, unknown>) =>
+/** The owner's page acting on a live chat, with the owner's key. */
+export const ownerAction = (action: Record<string, unknown>, sender: Sender = {}) =>
   new Request('https://site.invalid/api/whatsapp/action', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-live-key': 'right-key' },
+    headers: { 'Content-Type': 'application/json', ...senderHeaders(sender, { 'x-live-key': 'right-key' }) },
     body: JSON.stringify(action),
   });
+
+/** The owner's app asking for the live chats. */
+export const ownerInboxRequest = (sender: Sender = {}) =>
+  new Request('https://site.invalid/api/whatsapp/conversations', { headers: senderHeaders(sender, { 'x-live-key': 'right-key' }) });
 
 export const TELEGRAM_CHAT = 987654;
 let updateId = 9000;

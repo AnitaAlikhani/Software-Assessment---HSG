@@ -68,10 +68,13 @@ const quietly = async <T>(work: () => Promise<T>): Promise<T> => {
   try { return await work(); } finally { Object.assign(console, real); }
 };
 
-const chatRequest = (method: string, { key = 'right-key', session, body }: { key?: string | null; session?: string; body?: unknown } = {}) =>
+/** The token in the customer's link for the key 'right-key' (the contract's recipe, see tests/liveChatHarness.ts). */
+const CHAT_TOKEN = createHmac('sha256', 'right-key').update('slotbee customer chat v1').digest('base64url').slice(0, 24);
+/** The customer's page. `token: null` sends none; `ownerKey` sends the owner's key as well, which this route must ignore. */
+const chatRequest = (method: string, { token = CHAT_TOKEN, ownerKey, session, body }: { token?: string | null; ownerKey?: string; session?: string; body?: unknown } = {}) =>
   new Request(`https://site.invalid/api/chat${session === undefined ? '' : `?session=${session}`}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(key ? { 'x-live-key': key } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { 'x-chat-token': token } : {}), ...(ownerKey ? { 'x-live-key': ownerKey } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 const storedChat = (store: FakeStore, waId: string) => JSON.parse(store.text(`slotbee:live:chat:${waId}`) ?? 'null') as (LiveConversation & { keptUntil?: number }) | null;
@@ -79,7 +82,13 @@ const names = (commands: Command[]) => commands.map(command => command[0]);
 
 test('the chat explains a link that does not work and a server that is not ready, in plain words', async () => {
   await deployedWith(SETTINGS, async () => {
-    for (const request of [chatRequest('GET', { key: null }), chatRequest('POST', { key: 'wrong-key', body: { session: SESSION, text: 'Hi' } }), chatRequest('DELETE', { key: 'wrong-key', session: SESSION })]) {
+    // No token, a wrong token, the owner's key in place of the token, and a key or token in the address: all refused.
+    for (const request of [
+      chatRequest('GET', { token: null }), chatRequest('POST', { token: 'wrong-token', body: { session: SESSION, text: 'Hi' } }), chatRequest('DELETE', { token: 'wrong-token', session: SESSION }),
+      chatRequest('GET', { token: null, ownerKey: 'right-key' }), chatRequest('POST', { token: null, ownerKey: 'right-key', body: { session: SESSION, text: 'Hi' } }),
+      chatRequest('DELETE', { token: null, ownerKey: 'right-key', session: SESSION }),
+      new Request(`https://site.invalid/api/chat?live=right-key&key=right-key&token=${CHAT_TOKEN}&chat=${CHAT_TOKEN}`),
+    ]) {
       const response = request.method === 'GET' ? await readChat(request) : request.method === 'POST' ? await writeChat(request) : await deleteChat(request);
       assert.equal(response.status, 401);
       assert.deepEqual(await response.json(), { error: 'This chat link is no longer valid. Please ask the salon for a new one.' });

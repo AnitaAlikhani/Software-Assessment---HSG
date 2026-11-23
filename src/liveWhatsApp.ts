@@ -6,18 +6,70 @@ const KEY_STORAGE = 'slotbee-live-key';
 
 export const isLiveConversation = (id: string) => id.startsWith('live-');
 
+/** The key of this visit when the browser keeps no storage (private modes): gone with the page. */
+let keyThisVisit: string | null = null;
+
 /**
- * The access key comes from a "?live=KEY" link that we give to testers. It is kept in this
- * browser so the link only has to be opened once. Without a key the website stays a pure demo.
+ * The address without its "live" parameter: path, the other parameters exactly as they were
+ * written, and the hash (the app's route). Null when the address has no "live" parameter.
  */
-export function readLiveKey(search = typeof window === 'undefined' ? '' : window.location.search): string | null {
-  const fromUrl = new URLSearchParams(search).get('live');
-  try {
-    if (fromUrl) localStorage.setItem(KEY_STORAGE, fromUrl);
-    return fromUrl ?? localStorage.getItem(KEY_STORAGE);
-  } catch {
-    return fromUrl;
+export function addressWithoutKey(href: string): string | null {
+  const url = new URL(href);
+  const parts = url.search.replace(/^\?/, '').split('&').filter(Boolean);
+  const isKey = (part: string) => {
+    const name = part.split('=')[0];
+    try { return decodeURIComponent(name.replace(/\+/g, ' ')) === 'live'; } catch { return false; }
+  };
+  if (!parts.some(isKey)) return null;
+  const kept = parts.filter(part => !isKey(part));
+  return `${url.pathname}${kept.length ? `?${kept.join('&')}` : ''}${url.hash}`;
+}
+
+/**
+ * The owner signs a browser in by opening her link "/?live=KEY" once. The key is kept in this
+ * browser and taken out of the address at once, so it does not stay in the history, in a
+ * bookmark or in a link she copies from the address bar. Every other part of the address stays.
+ */
+export function readLiveKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  const fromUrl = new URLSearchParams(window.location?.search ?? '').get('live');
+  const cleaned = window.location?.href ? addressWithoutKey(window.location.href) : null;
+  if (cleaned !== null) {
+    try { window.history?.replaceState(window.history.state, '', cleaned); } catch { /* the key stays in the address; it still works */ }
   }
+  try {
+    if (fromUrl) { localStorage.setItem(KEY_STORAGE, fromUrl); return fromUrl; }
+    return localStorage.getItem(KEY_STORAGE);
+  } catch {
+    // The storage is blocked: the key holds for this visit only.
+    if (fromUrl) keyThisVisit = fromUrl;
+    return keyThisVisit;
+  }
+}
+
+/** Takes "live" out of the address without keeping it anywhere. */
+function dropKeyFromAddress(): void {
+  const cleaned = window.location?.href ? addressWithoutKey(window.location.href) : null;
+  if (cleaned === null) return;
+  try { window.history?.replaceState(window.history.state, '', cleaned); } catch { /* the address keeps it; nothing reads it there */ }
+}
+
+/**
+ * Runs once when any page starts (src/main.tsx): no page keeps "live" in its address. Only the
+ * owner's app stores the key; a customer's page (the booking page "?booking=1" or the chat
+ * "?chat=…") removes it without keeping it, so a key in a link handed to a customer stays nowhere.
+ */
+export function takeKeyFromAddress(): void {
+  if (typeof window === 'undefined') return;
+  const params = new URLSearchParams(window.location?.search ?? '');
+  if (params.has('chat') || params.get('booking') === '1') dropKeyFromAddress();
+  else readLiveKey();
+}
+
+/** "Sign out on this device": the browser forgets the key, and with it the live chats. */
+export function forgetLiveKey(): void {
+  keyThisVisit = null;
+  try { localStorage.removeItem(KEY_STORAGE); } catch { /* nothing was stored */ }
 }
 
 /**
@@ -44,17 +96,90 @@ export type LiveAction =
 /** How people can reach the live AI: the Telegram bot (if connected) and the website chat. */
 export interface LiveChannels {
   telegram: string | null;
-  /** Carries the access key, so it is shown with the study tools only, never as a customer link. */
-  websiteChatUrl: string;
+  /**
+   * The customer's chat link, made from the chat token the server sends. Null until the server
+   * has sent one: there is no link to show then. It never holds the owner's key.
+   */
+  websiteChatUrl: string | null;
 }
 
 /**
- * The website-chat link the owner copies for testers. With the study tools on it switches them
- * on for the tester as well ("research=1"): otherwise a study participant would read the salon's
- * wording instead of the notice that this is a study.
+ * The website-chat link for customers: "/?chat=<token>". The token opens the chat and nothing
+ * else, so the link can be handed out. With the study tools on it switches them on for the
+ * tester as well ("research=1"): otherwise a study participant would read the salon's wording
+ * instead of the notice that this is a study.
  */
-export const websiteChatUrl = (origin: string, key: string, study = researchMode()): string =>
-  `${origin}/?chat=1&live=${encodeURIComponent(key)}${study ? '&research=1' : ''}`;
+export const websiteChatUrl = (origin: string, token: string, study = researchMode()): string =>
+  `${origin}/?chat=${encodeURIComponent(token)}${study ? '&research=1' : ''}`;
+
+/** The team's three checks in the study tools, each a route that takes the owner's key from the header. */
+export type TeamCheck = 'ai' | 'space' | 'telegram';
+
+export const TEAM_CHECKS: Record<TeamCheck, { label: string; path: string }> = {
+  ai: { label: 'Check the AI', path: '/api/ai-check' },
+  space: { label: 'Which chats this copy uses', path: '/api/space' },
+  telegram: { label: 'Connect Telegram', path: '/api/telegram/setup' },
+};
+
+/** What a check answered, as lines of plain text. `ok` is false when the check itself failed. */
+export interface TeamCheckResult { ok: boolean; lines: string[] }
+
+type CheckAnswer = {
+  error?: string;
+  models?: { model: string; ok: boolean; ms: number; error?: string }[];
+  dataSpace?: string; usesLiveChats?: boolean; vercelEnvironment?: string | null; branch?: string | null;
+  ok?: boolean; bot?: string; webhook?: string;
+};
+
+/**
+ * Turns a check's answer into sentences. A failure says which check failed and why, in words a
+ * team member can act on; the server's own sentence is used where it gives one.
+ */
+export function describeTeamCheck(kind: TeamCheck, status: number | null, data: CheckAnswer | null): TeamCheckResult {
+  const failed = (why: string): TeamCheckResult => ({ ok: false, lines: [`${TEAM_CHECKS[kind].label} failed: ${why}`] });
+  if (status === null) return failed('could not reach the server. Check your connection.');
+  if (status === 401 || status === 403) return failed('the server did not accept the key of this device. Open your latest owner link.');
+  if (status === 429) return failed(data?.error ?? 'too many tries. Try again in a few minutes.');
+  if (status === 404) return failed('this copy of the site has no server for this check.');
+  if (status >= 400 || !data) return failed(data?.error ?? `the server answered with status ${status}.`);
+  if (kind === 'ai') {
+    const models = data.models ?? [];
+    if (models.length === 0) return failed('the server named no AI model.');
+    const answering = models.filter(model => model.ok).length;
+    return {
+      ok: answering > 0,
+      lines: [
+        `${answering} of ${models.length} AI ${models.length === 1 ? 'model answers' : 'models answer'}.`,
+        ...models.map(model => model.ok ? `${model.model}: answers (${model.ms} ms)` : `${model.model}: no answer${model.error ? ` (${model.error})` : ''}`),
+      ],
+    };
+  }
+  if (kind === 'space') {
+    const where = [data.vercelEnvironment && `Vercel environment: ${data.vercelEnvironment}`, data.branch && `branch: ${data.branch}`].filter(Boolean).join(' · ');
+    return {
+      ok: true,
+      lines: [
+        data.usesLiveChats ? 'This copy uses the live chats.' : `This copy uses its own test chats ("${data.dataSpace ?? 'unnamed'}"), not the live ones.`,
+        ...(where ? [where] : []),
+      ],
+    };
+  }
+  if (data.ok === false) return failed(data.error ?? 'the server could not connect the bot.');
+  return { ok: true, lines: [`Telegram is connected${data.bot ? `: ${data.bot}` : ''}.`, ...(data.webhook ? [`Messages go to ${data.webhook}`] : [])] };
+}
+
+/** Runs one check with the owner's key in the header, never in the address. */
+export async function runTeamCheck(kind: TeamCheck, key: string, fetcher: typeof fetch = fetch): Promise<TeamCheckResult> {
+  let response: Response;
+  try {
+    response = await fetcher(TEAM_CHECKS[kind].path, { headers: { 'x-live-key': key }, cache: 'no-store' });
+  } catch {
+    return describeTeamCheck(kind, null, null);
+  }
+  let data: CheckAnswer | null = null;
+  try { data = (await response.json()) as CheckAnswer; } catch { /* not the server's answer: the status says enough */ }
+  return describeTeamCheck(kind, response.status, data);
+}
 
 /**
  * What this browser knows about the live chats: still asking the server, reached them ("on"),
@@ -68,16 +193,25 @@ export type LiveStatus = 'checking' | 'on' | 'off';
  * - `loading`: the first answer is on its way;
  * - `live`: the chats are up to date;
  * - `reconnecting`: the last request failed; the chats on screen stay and the app tries again;
- * - `denied`: the server refused the access key (a wrong or expired link).
+ * - `denied`: the server refused the access key (a wrong or expired link);
+ * - `waiting`: the server makes this connection wait (429: too many wrong keys came from its
+ *   address). The server says why and for how long; the chats on screen stay.
  */
-export type LiveConnection = 'off' | 'loading' | 'live' | 'reconnecting' | 'denied';
+export type LiveConnection = 'off' | 'loading' | 'live' | 'reconnecting' | 'denied' | 'waiting';
+
+/** Said when the server's 429 answer brings no sentence of its own. */
+export const OWNER_WAIT_TEXT = 'Too many tries from this connection. The live chats come back in a few minutes.';
 
 /** How one request to the server ended. */
-export type PollOutcome = 'enabled' | 'disabled' | 'refused' | 'missing' | 'failed';
+export type PollOutcome = 'enabled' | 'disabled' | 'refused' | 'missing' | 'waiting' | 'failed';
 
-/** Sorts an answer (or a failure to get one) into an outcome. Only 401 and 403 mean the key was refused. */
+/**
+ * Sorts an answer (or a failure to get one) into an outcome. Only 401 and 403 mean the key was
+ * refused; 429 means the server is reachable and makes this connection wait.
+ */
 export const pollOutcome = (status: number | null, enabled?: boolean): PollOutcome => {
-  if (status === null || status >= 500 || status === 429 || status === 408) return 'failed';
+  if (status === 429) return 'waiting';
+  if (status === null || status >= 500 || status === 408) return 'failed';
   if (status === 401 || status === 403) return 'refused';
   if (status === 404) return 'missing';
   if (status >= 400) return 'failed';
@@ -95,6 +229,7 @@ export const connectionAfter = (outcome: PollOutcome, reachedBefore: boolean): L
     case 'disabled': return 'off';
     case 'refused': return 'denied';
     case 'missing': return reachedBefore ? 'reconnecting' : 'off';
+    case 'waiting': return 'waiting';
     case 'failed': return 'reconnecting';
   }
 };
@@ -112,7 +247,25 @@ export const POLL_TIMING = {
   /** The first retry after a failed request; each further failure doubles it, up to `retryMax`. */
   retryFirst: 2000,
   retryMax: 60_000,
+  /** After the server said "wait" (429): one request a minute, so waiting adds no load and ends soon after. */
+  waiting: 60_000,
 } as const;
+
+/** The server's sentence in an answer, if it sent one. */
+const serverSentence = (data: unknown): string | null => {
+  const error = (data as { error?: unknown } | null)?.error;
+  return typeof error === 'string' && error.trim() ? error.trim() : null;
+};
+
+/**
+ * What the owner reads when one of her actions was not done: the server's sentence where it
+ * gives one (a 429 says why she has to wait), otherwise a plain one. Null when it was done.
+ */
+export function actionError(status: number, data: unknown): string | null {
+  if (status >= 200 && status < 300) return null;
+  if (status === 401 || status === 403) return 'This access link is not valid any more.';
+  return serverSentence(data) ?? (status === 429 ? OWNER_WAIT_TEXT : 'The server could not do this. Try again.');
+}
 
 export interface PollSituation {
   /** The tab is in the background (document.hidden). */
@@ -151,6 +304,8 @@ export interface LiveActionState {
 /** What the chat screen needs to show the connection and the owner's answers on their way. */
 export interface LiveInbox {
   connection: LiveConnection;
+  /** While `waiting`: the server's sentence on why and how long. */
+  waitNotice?: string | null;
   actions: LiveActionState[];
   retry: (key: string) => void;
   dismiss: (key: string) => void;
@@ -176,12 +331,17 @@ const isHidden = () => typeof document !== 'undefined' && document.hidden;
  * the salon's chats and never keeps an access key, whatever its address or its storage holds.
  */
 export function useLiveWhatsApp(active = true) {
-  const [key] = useState(() => (active ? readLiveKey() : null));
+  const [key, setKey] = useState(() => (active ? readLiveKey() : null));
+  // The key the hook works with right now: an answer that arrives after signing out is dropped.
+  const keyNow = useRef(key);
+  keyNow.current = key;
+  const [chatToken, setChatToken] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // Without a key there is nothing to ask the server, so the answer is known at once.
   const [connection, setConnection] = useState<LiveConnection>(key ? 'loading' : 'off');
   const [telegram, setTelegram] = useState<string | null>(null);
   const [actions, setActions] = useState<LiveActionState[]>([]);
+  const [waitNotice, setWaitNotice] = useState<string | null>(null);
   const reached = useRef(false);
   const lastSeen = useRef('');
   const lastChange = useRef(Date.now());
@@ -203,11 +363,15 @@ export function useLiveWhatsApp(active = true) {
     let stopped = false;
     let running = false;
     let failures = 0;
+    // The server made this connection wait: the next request comes after POLL_TIMING.waiting, also
+    // when the tab comes back to the front, so waiting is never cut short by asking more.
+    let waiting = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const schedule = () => {
       clearTimeout(timer);
       if (stopped) return;
+      if (waiting) { timer = setTimeout(poll, POLL_TIMING.waiting); return; }
       const delay = nextPollDelay({ hidden: isHidden(), failures, quietForMs: Date.now() - lastChange.current });
       if (delay !== null) timer = setTimeout(poll, delay);
     };
@@ -220,14 +384,19 @@ export function useLiveWhatsApp(active = true) {
       try {
         const response = await fetch('/api/whatsapp/conversations', { headers: { 'x-live-key': key }, cache: 'no-store' });
         if (response.ok) {
-          const data = (await response.json()) as { enabled: boolean; conversations?: Conversation[]; channels?: { telegram?: string | null } };
+          const data = (await response.json()) as { enabled: boolean; conversations?: Conversation[]; channels?: { telegram?: string | null; chatToken?: string | null } };
           outcome = pollOutcome(response.status, data.enabled);
-          if (data.enabled) {
+          if (data.enabled && !stopped) {
             takeConversations(data.conversations ?? []);
             setTelegram(data.channels?.telegram ?? null);
+            setChatToken(typeof data.channels?.chatToken === 'string' && data.channels.chatToken ? data.channels.chatToken : null);
           }
         } else {
           outcome = pollOutcome(response.status);
+          if (outcome === 'waiting') {
+            const data = await response.json().catch(() => null);
+            if (!stopped) setWaitNotice(serverSentence(data) ?? OWNER_WAIT_TEXT);
+          }
         }
       } catch {
         // No connection, or an answer that is not the server's (a proxy's error page).
@@ -238,15 +407,17 @@ export function useLiveWhatsApp(active = true) {
       const next = connectionAfter(outcome, reached.current);
       if (outcome === 'enabled') reached.current = true;
       failures = next === 'reconnecting' ? failures + 1 : 0;
+      waiting = next === 'waiting';
+      if (!waiting) setWaitNotice(null);
       setConnection(next);
       // Off and denied are final for this page: asking again would get the same answer.
       if (next === 'off' || next === 'denied') { stopped = true; return; }
       schedule();
     };
 
-    pollNow.current = () => { if (!isHidden()) void poll(); };
-    // A hidden tab asks nothing; when it comes back to the front it asks at once.
-    const onVisibility = () => { if (isHidden()) clearTimeout(timer); else void poll(); };
+    pollNow.current = () => { if (!isHidden() && !waiting) void poll(); };
+    // A hidden tab asks nothing; when it comes back to the front it asks at once (unless it has to wait).
+    const onVisibility = () => { if (isHidden()) clearTimeout(timer); else if (waiting) schedule(); else void poll(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', pollNow.current);
     window.addEventListener('online', pollNow.current);
@@ -273,19 +444,22 @@ export function useLiveWhatsApp(active = true) {
     } catch {
       return 'Could not reach the server. Check your connection.';
     }
+    // Signed out while the answer was on its way: nothing of it belongs on screen any more.
+    if (keyNow.current !== key) return null;
     if (response.status === 401 || response.status === 403) {
       setConnection('denied');
-      return 'This access link is not valid any more.';
+      return actionError(response.status, null);
     }
     let data: { conversations?: Conversation[]; error?: string } = {};
     try { data = await response.json(); } catch { /* not the server's answer: the status says enough */ }
+    if (keyNow.current !== key) return null;
     if (data.conversations) {
       takeConversations(data.conversations);
       setConnection('live');
     }
     // The owner acted: the chats are busy again, so the next request comes soon.
     lastChange.current = Date.now();
-    return response.ok ? null : data.error ?? 'The server could not do this. Try again.';
+    return actionError(response.status, data);
   }, [key, takeConversations]);
 
   // The actions on their way, by key, so a second tap waits for the first instead of sending twice.
@@ -329,9 +503,48 @@ export function useLiveWhatsApp(active = true) {
     return run(`${conversationId}:reply:${replyCount.current}`, { type: 'reply', conversationId, text });
   };
 
-  const enabled = connection === 'live' || (connection === 'reconnecting' && reached.current);
+  /**
+   * "Sign out on this device": the key is forgotten, the requests stop (the polling effect ends
+   * with the key) and everything the server sent is dropped. The app is then as without a key.
+   */
+  const signOut = useCallback(() => {
+    forgetLiveKey();
+    setKey(null);
+  }, []);
+
+  // A new key, or none: start from nothing, so no chat of the old key stays on screen.
+  const [shownKey, setShownKey] = useState(key);
+  if (shownKey !== key) {
+    setShownKey(key);
+    setConnection(key ? 'loading' : 'off');
+    setConversations([]);
+    setTelegram(null);
+    setChatToken(null);
+    setActions([]);
+    setWaitNotice(null);
+  }
+  useEffect(() => {
+    reached.current = false;
+    lastSeen.current = '';
+    inflight.current.clear();
+    sent.current.clear();
+  }, [key]);
+
+  // Signing out or in in another tab of this browser counts here too.
+  useEffect(() => {
+    if (!active) return;
+    const follow = (event: StorageEvent) => {
+      if (event.key === KEY_STORAGE || event.key === null) setKey(event.key === null ? null : event.newValue);
+    };
+    window.addEventListener('storage', follow);
+    return () => window.removeEventListener('storage', follow);
+  }, [active]);
+
+  // While the app reconnects or waits, the chats it already has stay on screen.
+  const enabled = connection === 'live' || ((connection === 'reconnecting' || connection === 'waiting') && reached.current);
   const inbox: LiveInbox = {
     connection,
+    waitNotice: connection === 'waiting' ? waitNotice ?? OWNER_WAIT_TEXT : null,
     actions,
     retry: (itemKey: string) => {
       const action = sent.current.get(itemKey);
@@ -345,6 +558,13 @@ export function useLiveWhatsApp(active = true) {
 
   return {
     enabled,
+    /** Whether this browser holds an owner key (it may still be refused: see `connection`). */
+    signedIn: Boolean(key),
+    signOut,
+    /** Runs one of the team's checks of the study tools with this device's key. */
+    teamCheck: (kind: TeamCheck): Promise<TeamCheckResult> => key
+      ? runTeamCheck(kind, key)
+      : Promise.resolve({ ok: false, lines: [`${TEAM_CHECKS[kind].label} failed: this device is not signed in to the live chats.`] }),
     status: (connection === 'loading' ? 'checking' : enabled ? 'on' : 'off') as LiveStatus,
     connection,
     inbox,
@@ -364,7 +584,7 @@ export function useLiveWhatsApp(active = true) {
     cancelBooking: (conversationId: string, expected: ExpectedSlot) => act({ type: 'cancel-booking', conversationId, expected }),
     keepBooking: (conversationId: string, expected: ExpectedSlot) => act({ type: 'keep-booking', conversationId, expected }),
     channels: enabled && key
-      ? { telegram, websiteChatUrl: websiteChatUrl(window.location.origin, key) } as LiveChannels
+      ? { telegram, websiteChatUrl: chatToken ? websiteChatUrl(window.location.origin, chatToken) : null } as LiveChannels
       : null,
   };
 }

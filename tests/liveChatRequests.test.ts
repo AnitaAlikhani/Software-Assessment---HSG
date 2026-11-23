@@ -12,7 +12,7 @@ import { GET as ownerInbox } from '../api/whatsapp/conversations';
 import { checkBookingRequest, cleanName, strictDate, strictTime, validBookingRequest } from '../server/bookingRules';
 import { fixedReply } from '../server/chatReplies';
 import { TAKEN_OVER_REASON, UNANSWERED } from '../server/recordAnalysis';
-import { DELETE_SCRIPT, SAVE_SCRIPT } from '../server/store';
+import { COUNT_SCRIPT, DELETE_SCRIPT, SAVE_SCRIPT } from '../server/store';
 import type { LiveConversation } from '../server/whatsappCore';
 import { chatBookingMessage } from '../src/chatTemplates';
 import { initialCompanySettings } from '../src/mockData';
@@ -522,15 +522,20 @@ test('the AI failing on a message into a handed-back chat is said to the owner; 
   assert.equal(chat.messages[0].original, 'Hello');
 });
 
-test('storage commands: a website message costs one read and two saves, a Telegram message one read and three saves', async (t) => {
+test('storage commands: a website message costs one read, one count and two saves, a Telegram message one read, one count and three saves', async (t) => {
   freezeClock(t);
   const store = new FakeStore(NOW);
   const world = outsideWorld();
-  const webCommands = await deployedWith(SETTINGS, async () => { await writeChat(post('Hello')); }, { store, outside: world.outside });
+  // From an address: the wrong-tries check and every limit of the message still take a single command.
+  const webCommands = await deployedWith(SETTINGS, async () => {
+    await writeChat(chatRequest('POST', { body: { session: SESSION, name: 'Eva', text: 'Hello' }, address: '203.0.113.7' }));
+  }, { store, outside: world.outside });
   // SMEMBERS: a newly started instance looks once an hour at the earlier version's list (see store.ts).
-  assert.deepEqual(webCommands.map(command => command[0]), ['MGET', 'EVAL', 'SMEMBERS', 'EVAL']);
+  assert.deepEqual(webCommands.map(command => command[0]), ['MGET', 'EVAL', 'EVAL', 'SMEMBERS', 'EVAL']);
+  assert.equal(webCommands[1][1], COUNT_SCRIPT);
   const tgCommands = await deployedWith(SETTINGS, async () => { await telegramWebhook(telegramUpdate('Hello')); }, { store, outside: world.outside });
-  assert.deepEqual(tgCommands.map(command => command[0]), ['SET', 'MGET', 'EVAL', 'SMEMBERS', 'EVAL', 'EVAL']);
+  assert.deepEqual(tgCommands.map(command => command[0]), ['SET', 'MGET', 'EVAL', 'SMEMBERS', 'EVAL', 'EVAL', 'EVAL']);
+  assert.equal(tgCommands[4][1], COUNT_SCRIPT);
   // The visitor deletes the chat: it is gone for the owner too.
   await deployedWith(SETTINGS, async () => { await deleteChat(chatRequest('DELETE', { session: SESSION })); }, { store });
   assert.equal(storedChat(store, WEB), null);

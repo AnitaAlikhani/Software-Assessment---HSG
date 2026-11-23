@@ -238,7 +238,7 @@ test('a valid AI booking request asks the owner to confirm; the reply is only st
     // The owner's page checks the request against the salon's calendar (empty here) and answers it.
     salon: { services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: [], events: [], requests: [], timeZone: 'Europe/Zurich', now: new Date('2026-11-16T18:19:00Z') },
     onChatBooking: () => null,
-    liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=1' },
+    liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=chat-token' },
   }));
   assert.match(html, /Ana wants to book/);
   assert.match(html, />Confirm</);

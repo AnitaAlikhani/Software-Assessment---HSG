@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { cleanName } from '../../server/bookingRules.js';
-import { applyAi, askAi, recordDelivery, storeIncoming } from '../../server/chatFlow.js';
+import { answerMessengerMessage, recordDelivery } from '../../server/chatFlow.js';
+import { addressWaiting, countWrongTry } from '../../server/limits.js';
 import { sendFirstNoticeIfDue } from '../../server/firstNotice.js';
 import { claimMessage, deleteOwnChat, loadConversation, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
@@ -39,10 +40,13 @@ async function deleteChat(waId: string, language: ChatLanguage) {
 export async function POST(request: Request) {
   const raw = await request.text();
   const appSecret = process.env.WHATSAPP_APP_SECRET;
+  // A signature made without the app secret is counted for its address and, after too many wrong
+  // tries, made to wait (server/limits.ts).
   if (!appSecret || !verifySignature(raw, request.headers.get('x-hub-signature-256'), appSecret)) {
-    return new Response('Invalid signature', { status: 401 });
+    return (await countWrongTry(request)) ? new Response('Too many wrong tries', { status: 429 }) : new Response('Invalid signature', { status: 401 });
   }
   if (!storeConfigured()) return new Response('Storage is not configured', { status: 500 });
+  if (await addressWaiting(request)) return new Response('Too many wrong tries', { status: 429 });
 
   let body: unknown;
   try { body = JSON.parse(raw); } catch { return new Response('Bad request', { status: 400 }); }
@@ -55,14 +59,12 @@ export async function POST(request: Request) {
       await deleteChat(message.waId, (await loadConversation(message.waId))?.language ?? 'EN');
       continue;
     }
-    // The message is stored before the AI runs, so a slow or failing AI never loses it.
-    const stored = await storeIncoming({ ...message, name: cleanName(message.name) || 'WhatsApp customer' });
-    if (!stored) continue;
-    const analysis = await askAi(stored.conversation, message.id);
-    // Applied to the chat as it is now. A customer who sent /delete meanwhile has been told that
+    // The message is stored before the AI runs, so a slow or failing AI never loses it. The answer
+    // is applied to the chat as it is now. A customer who sent /delete meanwhile has been told that
     // the chat is gone: they get nothing more from it, and nothing of it is stored again. A chat
-    // the owner took over meanwhile gets no AI reply.
-    const answered = await applyAi(stored, message.id, analysis, false);
+    // the owner took over meanwhile gets no AI reply. Past a limit the AI is not asked: the chat
+    // goes to the owner and the customer is told the team will answer (see answerMessengerMessage).
+    const answered = await answerMessengerMessage({ ...message, name: cleanName(message.name) || 'WhatsApp customer' });
     if (!answered) continue;
     const { conversation, reply } = answered;
     // A notice that cannot be sent must not cost the customer the answer: it is tried again next time.
@@ -78,7 +80,7 @@ export async function POST(request: Request) {
         console.error(error);
       }
     }
-    await recordDelivery(answered, reply, delivered, Boolean(conversation.noticeSent && !noticeBefore));
+    await recordDelivery(answered, reply, delivered, Boolean(conversation.noticeSent && !noticeBefore), Date.now(), answered.promise);
   }
   return new Response('OK');
 }

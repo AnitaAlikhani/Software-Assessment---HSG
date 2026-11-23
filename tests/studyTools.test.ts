@@ -138,7 +138,7 @@ const inbox: React.ComponentProps<typeof ConversationsView> = {
   conversations: [liveChat], selectedId: liveChat.id, mobileDetailOpen: false,
   onBackToList: nothing, onSelect: nothing, onTakeOver: nothing, onLetAiContinue: () => null, onOwnerReply: () => true,
   aiSettings: initialAiSettings, onOpenAiSettings: nothing,
-  liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=1&live=owner-key' },
+  liveChannels: { telegram: 'slotbee_bella_bot', websiteChatUrl: 'https://example.test/?chat=chat-token-0123456789ab' },
 };
 
 test('the live-test strip and the "Live" mark are for moderators only', () => {
@@ -146,8 +146,8 @@ test('the live-test strip and the "Live" mark are for moderators only', () => {
   assert.doesNotMatch(html, /Live test/);
   assert.doesNotMatch(html, />Live</);
   assert.doesNotMatch(html, /@slotbee_bella_bot/);
-  // The website chat link carries the owner's access key: a normal visitor's page never contains it.
-  assert.doesNotMatch(html, /owner-key|chat=1/);
+  // The tester link is a study tool: a normal visitor's page never contains it.
+  assert.doesNotMatch(html, /chat-token|chat=/);
   const study = render(React.createElement(ConversationsView, inbox), { research: true });
   assert.match(study, /Live test is on/);
   assert.match(study, />Live</);
@@ -157,23 +157,24 @@ test('the live-test strip and the "Live" mark are for moderators only', () => {
 test('the website-chat link for testers switches the study tools on for them too', () => {
   // The owner copies this link in the live-test strip. A tester who opens it must read the study
   // notice, so the link carries the switch whenever the owner's own study tools are on.
-  const study = websiteChatUrl('https://slotbee.example', 'owner key/1', true);
-  assert.equal(study, 'https://slotbee.example/?chat=1&live=owner%20key%2F1&research=1');
+  // It is made from the chat token the server sends, never from the owner's key.
+  const study = websiteChatUrl('https://slotbee.example', 'tok-en_1/2', true);
+  assert.equal(study, 'https://slotbee.example/?chat=tok-en_1%2F2&research=1');
   const address = new URL(study);
-  assert.equal(address.searchParams.get('chat'), '1');
-  assert.equal(address.searchParams.get('live'), 'owner key/1');
+  assert.equal(address.searchParams.get('chat'), 'tok-en_1/2');
+  assert.equal(address.searchParams.has('live'), false);
   // The customer chat reads the switch from its address in the same way as every other page.
   assert.equal(readResearchMode(address.search, null), true);
   // Without study tools the link is the plain chat link, with the salon's wording.
-  const plain = websiteChatUrl('https://slotbee.example', 'owner key/1', false);
-  assert.equal(plain, 'https://slotbee.example/?chat=1&live=owner%20key%2F1');
+  const plain = websiteChatUrl('https://slotbee.example', 'tok-en_1/2', false);
+  assert.equal(plain, 'https://slotbee.example/?chat=tok-en_1%2F2');
   assert.equal(readResearchMode(new URL(plain).search, null), false);
   // Left to itself, the link follows the switch of the browser it is made in.
   try {
     setResearchModeForTests(true);
-    assert.match(websiteChatUrl('https://slotbee.example', 'key'), /&research=1$/);
+    assert.match(websiteChatUrl('https://slotbee.example', 'token'), /^https:\/\/slotbee\.example\/\?chat=token&research=1$/);
     setResearchModeForTests(false);
-    assert.doesNotMatch(websiteChatUrl('https://slotbee.example', 'key'), /research/);
+    assert.equal(websiteChatUrl('https://slotbee.example', 'token'), 'https://slotbee.example/?chat=token');
   } finally {
     setResearchModeForTests(undefined);
   }

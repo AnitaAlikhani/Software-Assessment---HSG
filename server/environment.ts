@@ -11,7 +11,8 @@ import process from 'node:process';
  * a branch other than the one that serves the live address. Everything else (the production
  * site, a copy Vercel tells us nothing about, a laptop) keeps the chats it used before this rule
  * existed. So this rule can never cut the live site off; at worst it does not separate a preview.
- * Open /api/space?key=LIVE_ACCESS_KEY on any copy to see which chats it uses.
+ * GET /api/space with the owner's key in the header x-live-key (the study tools' button "Which
+ * chats this copy uses") tells which chats a copy uses.
  *
  * One optional setting: LIVE_DATA_SPACE=live makes a preview of another branch use the live
  * chats (for example when that branch takes over the live address). No setting can move a copy

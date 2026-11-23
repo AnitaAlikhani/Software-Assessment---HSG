@@ -113,6 +113,52 @@ export const SAVE_SCRIPT = [
   'return 1',
 ].join('\n');
 
+/**
+ * Counting for the limits (server/limits.ts), in one storage command however many counters a
+ * request moves. Each command costs free quota, so a request never sends one per counter.
+ *
+ * ARGV[1] is the most a gate counter (KEYS[1]) may hold, or 0 for no gate. A gate is only read:
+ * when it is at its most, the script stops at once and answers -1, and nothing is counted. The
+ * other keys are counters: each is raised by one and, the first time, told to delete itself after
+ * its window (ARGV[2j] seconds for the j-th counter). Counting stops after the first counter that
+ * went over its most (ARGV[2j+1], or "none"), so a refused request does not use up the later ones
+ * (the day's AI answers come last). Answers the counts so far, in order.
+ */
+export const COUNT_SCRIPT = [
+  'local gate = tonumber(ARGV[1])',
+  'local first = 1',
+  'if gate > 0 then',
+  "  local seen = tonumber(redis.call('GET', KEYS[1])) or 0",
+  '  if seen >= gate then return -1 end',
+  '  first = 2',
+  'end',
+  'local counts = {}',
+  'for i = first, #KEYS do',
+  '  local j = i - first + 1',
+  "  local n = redis.call('INCR', KEYS[i])",
+  "  if n == 1 then redis.call('EXPIRE', KEYS[i], ARGV[2 * j]) end",
+  '  counts[j] = n',
+  '  local most = tonumber(ARGV[2 * j + 1])',
+  '  if most and n > most then break end',
+  'end',
+  'return counts',
+].join('\n');
+
+/** A counter of server/limits.ts: its key, how long its window lasts, and the most it may reach (none: only counted). */
+export interface Counter { key: string; seconds: number; most?: number }
+
+/**
+ * Reads the gate (if any) and raises the counters, as COUNT_SCRIPT describes: 'blocked' when the
+ * gate is at its most, otherwise the new count of each counter that was raised, in order.
+ */
+export async function countUp(gate: { key: string; most: number } | null, counters: Counter[]): Promise<number[] | 'blocked'> {
+  const keys = [...(gate ? [gate.key] : []), ...counters.map(counter => counter.key)];
+  const args = [gate ? gate.most : 0, ...counters.flatMap(counter => [counter.seconds, counter.most ?? 'none'])];
+  const { result } = await redis(['EVAL', COUNT_SCRIPT, keys.length, ...keys, ...args]);
+  if (result === -1) return 'blocked';
+  return list(result).map(Number);
+}
+
 export const storeConfigured = () => Boolean(url() && token());
 
 async function redis(command: unknown[]) {
@@ -140,6 +186,19 @@ export async function loadConversation(waId: string): Promise<LiveConversation |
   return parse((await redis(['GET', chatKey(waId)])).result);
 }
 
+/** A counter's value as the storage holds it: a missing key counts 0. */
+const count = (value: unknown) => Number(value) || 0;
+
+/**
+ * Reads a chat and, in the same command, one counter (the wrong-tries gate of server/limits.ts).
+ * The customer's page asks every few seconds, so the check must not cost a command of its own.
+ */
+export async function loadConversationAnd(waId: string, counterKey: string | null): Promise<{ conversation: LiveConversation | null; count: number }> {
+  if (!counterKey) return { conversation: await loadConversation(waId), count: 0 };
+  const [chat, counter] = list((await redis(['MGET', chatKey(waId), counterKey])).result);
+  return { conversation: parse(chat), count: count(counter) };
+}
+
 /**
  * Reads a chat that the request is going to change and save. The version goes back into
  * saveConversation: with it the storage can tell whether the customer deleted the chat while
@@ -159,6 +218,19 @@ export async function deletedSince(waId: string, version: ChatVersion): Promise<
   return typeof marker === 'string' && marker !== version;
 }
 
+/**
+ * The most messages a Telegram or WhatsApp chat keeps (LIMITS.messengerKept in limits.ts). Such a
+ * chat is one ongoing conversation that cannot be closed like a website chat, so a save beyond it
+ * keeps the newest ones. Nothing depends on the first messages staying: the first text of
+ * WhatsApp, the language and the bookings are fields of the chat, not messages, and the AI reads
+ * only the last 30.
+ */
+export const MESSENGER_MESSAGES_KEPT = 200;
+const keepNewest = (chat: LiveConversation): LiveConversation =>
+  (chat.channel ?? 'WhatsApp') !== 'Website' && Array.isArray(chat.messages) && chat.messages.length > MESSENGER_MESSAGES_KEPT
+    ? { ...chat, messages: chat.messages.slice(-MESSENGER_MESSAGES_KEPT) }
+    : chat;
+
 /** What a save found: stored, refused because the customer deleted the chat, or refused because another request saved it first. */
 export type SaveOutcome = 'saved' | 'deleted' | 'changed';
 
@@ -170,7 +242,7 @@ export type SaveOutcome = 'saved' | 'deleted' | 'changed';
 async function saveAt(conversation: LiveConversation, version: ChatVersion, expectedRev: number | 'any', now: number): Promise<SaveOutcome> {
   const rev = (typeof expectedRev === 'number' ? expectedRev : conversation.rev ?? 0) + 1;
   // The revision goes first: the save script reads it from the start of the text.
-  const { rev: _old, keptUntil: _kept, ...rest } = conversation as StoredChat;
+  const { rev: _old, keptUntil: _kept, ...rest } = keepNewest(conversation) as StoredChat;
   const stored = { rev, ...rest, keptUntil: now + RETENTION_SECONDS * 1000 };
   // A caller outside the type check that hands in no version has seen no deletion.
   const seen = typeof version === 'string' && version !== '' ? version : NO_DELETION_SEEN;
@@ -274,6 +346,14 @@ async function cleanEarlierList(now: number) {
  * database in steps and may name a key twice, so the names are collected in a set.
  */
 export async function listConversations(): Promise<LiveConversation[]> {
+  return (await listConversationsAnd(null)).conversations;
+}
+
+/**
+ * All stored chats and, in the same last command, one counter (the wrong-tries gate of
+ * server/limits.ts). The owner's app asks every few seconds, so the check costs no command of its own.
+ */
+export async function listConversationsAnd(counterKey: string | null): Promise<{ conversations: LiveConversation[]; count: number }> {
   const keys = new Set<string>();
   let cursor = '0';
   for (let step = 1; ; step += 1) {
@@ -286,9 +366,14 @@ export async function listConversations(): Promise<LiveConversation[]> {
       break;
     }
   }
-  if (keys.size === 0) return [];
-  // A chat that expired between the two commands comes back empty and is left out.
-  return list((await redis(['MGET', ...keys])).result).map(parse).filter((item): item is StoredChat => item !== null);
+  const read = [...keys, ...(counterKey ? [counterKey] : [])];
+  if (read.length === 0) return { conversations: [], count: 0 };
+  const values = list((await redis(['MGET', ...read])).result);
+  return {
+    // A chat that expired between the two commands comes back empty and is left out.
+    conversations: values.slice(0, keys.size).map(parse).filter((item): item is StoredChat => item !== null),
+    count: counterKey ? count(values[keys.size]) : 0,
+  };
 }
 
 /**

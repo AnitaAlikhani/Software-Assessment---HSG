@@ -9,6 +9,9 @@
     <meta name="application-name" content="SlotBee" />
     <meta name="apple-mobile-web-app-title" content="SlotBee" />
     <meta name="theme-color" content="#5551FF" />
+    <!-- Requests of the app name only this site as their origin, never the page's address: an owner link
+         ("?live=…") or a chat link ("?chat=…") must not travel to anyone in a Referer header. -->
+    <meta name="referrer" content="origin" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
