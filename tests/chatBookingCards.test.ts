@@ -61,6 +61,8 @@ test('a free time: the card names who takes it, what was checked, and offers all
   for (const button of html.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
   assert.match(html, /<select[^>]*class="[^"]*\btext-base\b/);
   assert.doesNotMatch(words(html), TELL_WORDS);
+  // What Confirm does is said in small letters on the card's tint: in the darker grey, which can be read there.
+  assert.match(html, /<p class="mt-2 text-\[13px\] text-slate-600">Confirm adds it to your calendar and sends Tom the confirmation in the chat\.<\/p>/);
   // One of the salon's own chats: the confirmation goes into the chat, and nothing claims that a message is sent.
   const own = words(requestCard(tom({}, { id: 'conv-tom', live: undefined })));
   assert.match(own, /Confirm adds it to your calendar and puts the confirmation in the chat\. Confirm/);

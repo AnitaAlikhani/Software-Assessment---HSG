@@ -611,3 +611,39 @@ export function restoreConfirmedBooking(context: AvailabilityContext, conversati
     .filter((sentence) => !/^(Suggest|Confirm|Decline|Assign|Add)\b|, or decline\.$/.test(sentence)).join(' ');
   return { error: why };
 }
+
+// ---------- the time "Suggest another time" opens on ----------
+
+/**
+ * Of a day's free times for a request, those that take nothing from a customer who waits in a
+ * chat. A chat's request holds no time until the owner confirms it, so the list of free times
+ * offers its time as well. A time counts as taken from the chat when, with the request moved
+ * there, the chat's request could no longer be confirmed as it stands.
+ */
+export function startsSparingChats(
+  context: AvailabilityContext, request: AppointmentRequest, date: string, starts: string[], conversations: ChatForBooking[],
+): string[] {
+  const waiting = conversations.filter((conversation) => planChatBooking(context, conversation)?.refusal === null);
+  if (waiting.length === 0) return starts;
+  return starts.filter((start) => {
+    const moved = movedRequest(request, date, start);
+    const after = { ...context, requests: context.requests.map((item) => (item.id === request.id ? moved : item)) };
+    return waiting.every((conversation) => planChatBooking(after, conversation)?.refusal === null);
+  });
+}
+
+/**
+ * The time the dialog "Suggest another time" opens on, for a day. The time the request stands
+ * at is no other time: on its own day the list opens on the next free time after it, or late in
+ * the day on the one before it. On another day it opens on the same time of day where that is
+ * free. And it opens on no time that another customer waits for in a chat while a time is free
+ * that nobody has asked for: the owner would take that time away with the button the dialog
+ * opens on. Every time stays in the list, for the owner to choose.
+ */
+export function otherTimeToOpenOn(context: AvailabilityContext, request: AppointmentRequest, date: string, conversations: ChatForBooking[] = []): string {
+  const own = requestTimes(request)?.start ?? '';
+  const sameDay = date === request.date;
+  const others = freeStartsForRequest(context, request, date).filter((start) => !sameDay || start !== own);
+  const choose = (starts: string[]) => starts.find((start) => (sameDay ? start > own : start >= own)) ?? starts.at(-1);
+  return choose(startsSparingChats(context, request, date, others, conversations)) ?? choose(others) ?? own;
+}

@@ -249,7 +249,9 @@ test('every booking request has the same three answers in the same words, wherev
   assert.deepEqual(buttons(answers(page)), ['Confirm', 'Suggest another time', 'Decline']);
   assert.equal(answers(liveChat), answers(page));
   assert.equal(answers(ownChat), answers(page));
-  // What differs is who tells the customer, and the line above the answers says it in each case.
+  // What differs is who tells the customer, and the line above the answers says it in each case, in the same grey.
+  assert.match(page, /<p class="mt-2\.5 text-\[13px\] text-slate-600">Confirm adds it to your calendar\. You tell Petra Meier yourself\.<\/p>/);
+  assert.match(ownChat, /<p class="mt-2 text-\[13px\] text-slate-600">Confirm adds it to your calendar and puts the confirmation in the chat\.<\/p>/);
   assert.match(words(page), /Confirm adds it to your calendar\. You tell Petra Meier yourself\. Confirm Suggest another time Decline$/);
   assert.match(words(liveChat), /Confirm adds it to your calendar and sends Tom the confirmation in the chat\. Confirm Suggest another time Decline$/);
   // Nobody is on the other side of the salon's own chat: the confirmation goes into the chat, and nothing says it was sent.

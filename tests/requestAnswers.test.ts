@@ -5,7 +5,8 @@ import { appointmentFromRequest } from '../src/appointmentActions';
 import { getAvailableSlots, validateBookingRequest, validateCalendarEvent, type AvailabilityContext } from '../src/availability';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import {
-  checkRequest, chatAppointmentId, freeStartsForRequest, movedRequest, nextFreeDayForRequest, planChatBooking, requestRefusal, wordingForRule,
+  checkRequest, chatAppointmentId, freeStartsForRequest, movedRequest, nextFreeDayForRequest, otherTimeToOpenOn, planChatBooking, requestRefusal,
+  startsSparingChats, wordingForRule,
 } from '../src/requestAnswers';
 import type { AppointmentRequest, CalendarEvent, Conversation } from '../src/types';
 import { demoEvents, demoRequests, demoShifts, FIXED_NOW } from './fixedClock';
@@ -118,6 +119,50 @@ test('a request whose time has passed says so, at the minute it starts as well',
   assert.equal(at('2026-10-07T08:01:00Z'), passed);
   assert.equal(at('2026-10-09T10:00:00Z'), passed);
   assert.equal(requestRefusal(salon(), { ...wash, timeStr: 'in the morning' }), 'This request has no valid time. Suggest another time, or decline.');
+});
+
+test('"Suggest another time" opens on another time, and on none that a customer waits for in a chat', () => {
+  // Petra's wash stands at 10:00 on Wednesday with Selina Keller. These are Selina's free times for it that day.
+  const free = freeStartsForRequest(salon(), wash, wash.date);
+  assert.deepEqual(free, ['10:00', '10:30', '11:00', '14:00', '15:00', '15:30', '17:30', '18:00']);
+  // The time it stands at is no other time: the list opens on the next free one, and keeps the time itself.
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date), '10:30');
+  // With nothing free after it, the list opens late in the day on the last time before it.
+  const late: AppointmentRequest = { ...wash, timeStr: '18:00 - 18:30' };
+  assert.equal(otherTimeToOpenOn(salon({ requests: [late, haircut] }), late, late.date), '17:30');
+  // On another day the same time of day is the first choice; where it is taken, the next free one.
+  assert.ok(!freeStartsForRequest(salon(), wash, '2026-10-08').includes('10:00'));
+  assert.equal(otherTimeToOpenOn(salon(), wash, '2026-10-08'), '10:30');
+  assert.equal(otherTimeToOpenOn(salon({ events: [] }), wash, '2026-10-08'), '10:00');
+
+  // Tom waits in a chat for a haircut with Selina at 10:30. A chat's request holds no time until it is
+  // confirmed: 10:30 is still in the list of free times, and Tom's request can be confirmed as it stands.
+  const tom = (time: string, asked: Partial<NonNullable<Conversation['bookingRequest']>> = { employeeId: 'emp-2', staffName: 'Selina Keller' }) => ({
+    id: 'live-web-tom', customerName: 'Tom',
+    bookingRequest: { service: 'Haircut', serviceId: 'srv-2', date: wash.date, time, customerName: 'Tom', status: 'requested' as const, ...asked },
+  });
+  assert.equal(planChatBooking(salon(), tom('10:30'))?.refusal, null);
+  assert.ok(freeStartsForRequest(salon(), wash, wash.date).includes('10:30'));
+  // Moved there, Petra's request would take the time from him.
+  const taken = salon({ requests: [movedRequest(wash, wash.date, '10:30'), haircut] });
+  assert.match(planChatBooking(taken, tom('10:30'))!.refusal!, /^Tom asked for Selina Keller\. Petra Meier has asked Selina Keller for 10:30–11:00 on Wed, 07\.10\.2026 as well\./);
+  // So the dialog does not open on it: it opens on the next time that nobody has asked for.
+  assert.deepEqual(startsSparingChats(salon(), wash, wash.date, free, [tom('10:30')]), ['10:00', '11:00', '14:00', '15:00', '15:30', '17:30', '18:00']);
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [tom('10:30')]), '11:00');
+  // A chat that asks for another time changes nothing, and neither does one that is answered or asks for nothing.
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [tom('11:00')]), '10:30');
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [{ ...tom('10:30'), bookingRequest: { ...tom('10:30').bookingRequest, status: 'confirmed' as const } }]), '10:30');
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [{ id: 'conv-x', bookingRequest: undefined }]), '10:30');
+  // Tom asked for nobody in particular: the time is his while nobody else who offers the service is free then.
+  const anyone = tom('10:30', {});
+  assert.equal(planChatBooking(taken, anyone)?.refusal === null, false);
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [anyone]), '11:00');
+  // Where the only other time is the one Tom waits for, the dialog still opens on a time: the owner decides.
+  const short = salon({ shiftOverview: withShift('emp-2', wash.date, { start: '10:00', end: '11:00' }) });
+  assert.deepEqual(freeStartsForRequest(short, wash, wash.date), ['10:00', '10:30']);
+  assert.equal(otherTimeToOpenOn(short, wash, wash.date, [tom('10:30')]), '10:30');
+  // A day with nothing free has nothing to open on but the time the request stands at.
+  assert.equal(otherTimeToOpenOn(salon({ shiftOverview: withShift('emp-2', wash.date, null) }), wash, wash.date, [tom('10:30')]), '10:00');
 });
 
 test('every refusal of the slot rules has words for the owner', () => {

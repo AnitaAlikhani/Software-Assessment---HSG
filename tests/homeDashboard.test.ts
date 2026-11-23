@@ -5,15 +5,15 @@ import { bookedShare, dayPart, monthCurve, monthPace, openState, weekLoad } from
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { STAFF_COLORS } from '../src/staffColors';
 import type { CalendarEvent, Conversation } from '../src/types';
-import { WIDE_SCREEN } from '../src/useWideScreen';
+import { LAPTOP_SCREEN, WIDE_SCREEN } from '../src/useWideScreen';
 import { HomeView } from '../src/views/HomeView';
 import { demoConversations, demoEvents, demoRequests, demoShifts, FIXED_NOW } from './fixedClock';
 import { HOME_DAY_VIEW_KEY } from '../src/homeVisit';
 import { readableText, render, TELL_WORDS } from './renderHelpers';
 
 // Home as a dashboard: whether the salon is open, the week day by day, the month as a line, and
-// the two ways the cards are arranged (one column on a phone; a greeting, the month first and two
-// columns on a wide screen). The figures themselves are in tests/figures.test.ts and
+// the ways the cards are arranged (one column on a phone; a greeting and two columns on a wide
+// screen, with the month first where it is a short band and after the columns where it is not). The figures themselves are in tests/figures.test.ts and
 // tests/homeFigures.test.ts, today's card in tests/homeToday.test.ts, the inbox in
 // tests/homeInbox.test.ts. Every test fixes its moment; none reads the clock.
 
@@ -151,13 +151,17 @@ const inBrowser = <T,>(globals: Record<string, unknown>, run: () => T): T => {
     }
   }
 };
-/** The same page as a laptop draws it: the browser answers yes to the one question Home asks about its width. */
-const wideHome = (events: CalendarEvent[], now: Date, partial: Partial<Props> = {}) => inBrowser({
+/** The same page as a browser of some width draws it: it answers yes to these questions about its width, and no to any other. */
+const onScreen = (yes: string[]) => (events: CalendarEvent[], now: Date, partial: Partial<Props> = {}) => inBrowser({
   window: {
-    matchMedia: (query: string) => ({ matches: query === WIDE_SCREEN, addEventListener: nothing, removeEventListener: nothing }),
+    matchMedia: (query: string) => ({ matches: yes.includes(query), addEventListener: nothing, removeEventListener: nothing }),
     location: { pathname: '/', search: '' },
   },
 }, () => home(events, now, partial));
+/** A laptop: wide enough for the two columns, and for the month's figures and its line to share one short band. */
+const wideHome = onScreen([WIDE_SCREEN, LAPTOP_SCREEN]);
+/** A tablet on its side, or a narrow window: wide enough for the two columns only. */
+const tabletHome = onScreen([WIDE_SCREEN]);
 
 const words = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/\s+/g, ' ').trim();
 /** One card of the page, by the id of its heading. */
@@ -221,6 +225,8 @@ test('the month is also drawn as a line, with its lines named and a sentence tha
   const card = cardOf(home(MONTHS, FIXED_NOW), 'home-month-title');
   assert.match(card, /<div role="group" aria-labelledby="[^"]+" aria-describedby="[^"]+" tabindex="0"/);
   assert.match(card, /<p aria-live="polite" class="sr-only"><\/p>/);
+  // What is booked ahead is a line of dots: quieter than the solid line, and still dark enough to be seen as a line.
+  assert.match(card, /stroke-opacity="0\.8" stroke-dasharray="0\.1 5"/);
   // Its scale is drawn, not written: the page's text holds no loose numbers, and no amount without its name.
   assert.match(card, /data-tick="31\."/);
   assert.doesNotMatch(words(card), /\b31\.(?!10\.)/);
@@ -287,6 +293,24 @@ test('a wide screen greets the owner, says whether the salon is open and puts th
   // Nobody is signed in as one of the team: the greeting names nobody.
   assert.match(words(wideHome(demoEvents, tuesday('08:00'))), /^Home Good morning Opens at 08:30 /);
   assert.match(words(wideHome(demoEvents, tuesday('19:00'))), /^Home Good evening Closed for today /);
+});
+
+test('a tablet on its side keeps the greeting and the two columns, and the month follows them', () => {
+  const anna = { id: 'emp-1', name: 'Anna Weber' };
+  const given = { requests: demoRequests, conversations: demoConversations, me: anna, bookingLinkButtons: React.createElement('p', null, 'the link buttons') };
+  const html = tabletHome(demoEvents, FIXED_NOW, given);
+  // The row of the greeting is the laptop's. Under it stands the day, not the month: here the month's line
+  // stands under its figures, and the card would fill the screen before the day and the inbox begin.
+  assert.match(words(html), /^Home Good afternoon, Anna Closed today the link buttons Today /);
+  assert.deepEqual(order(html), ['today', 'week', 'ai', 'inbox', 'month']);
+  // The month follows both columns: nothing of the inbox comes after it.
+  assert.ok(html.indexOf('home-month-title') > html.lastIndexOf('</li>'));
+  // Every card says what it says on a laptop, which opens with the month.
+  const laptop = wideHome(demoEvents, FIXED_NOW, given);
+  assert.deepEqual(order(laptop), ['month', 'today', 'week', 'ai', 'inbox']);
+  for (const id of CARDS) assert.equal(words(cardOf(html, id)), words(cardOf(laptop, id)), id);
+  // A salon that has not begun has no month to show, at either width.
+  assert.deepEqual(order(tabletHome([], tuesday('10:00'))), ['today', 'inbox']);
 });
 
 test('on a wide screen the booking link is two buttons beside the greeting, and takes no card', () => {

@@ -14,7 +14,7 @@ import { isNewSince, lastHomeVisit, noteHomeVisit, rememberDayView, rememberedDa
 import { inboxItems, type InboxItem, type RequestAnswer } from '../inbox';
 import { getSalonNow } from '../scheduling';
 import { staffColorFor } from '../staffColors';
-import { useWideScreen } from '../useWideScreen';
+import { useLaptopScreen, useWideScreen } from '../useWideScreen';
 import { SourceIcon } from './CalendarGrid';
 import { Meter, PaceChart, WeekBars } from './HomeCharts';
 import { HomeInbox, type Outcome } from './HomeInbox';
@@ -308,9 +308,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const curve = monthCurve(events, services, clock, timeZone);
   const drawn = before !== null || (curve.days.at(-1)?.value ?? 0) > 0;
 
-  // ---------- a wide screen: a greeting, the month first, two columns ----------
+  // ---------- a wide screen: a greeting, two columns, and on a laptop the month first ----------
 
   const wide = useWideScreen();
+  const laptop = useLaptopScreen();
   const open = openState(availabilityContext, clock);
   const firstName = me ? employees.find((employee) => employee.id === me.id)?.firstName || me.name.split(' ')[0] : '';
   const greeting = `Good ${dayPart(getSalonNow(timeZone, clock).time)}${firstName ? `, ${firstName}` : ''}`;
@@ -665,6 +666,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   // two columns that each end where their cards end. Today and the week stand on the left; the
   // inbox, which is the widest, on the right. The order in the page is the order on the screen,
   // for the keyboard and a screen reader too.
+  //
+  // The month comes first only where it is a short band (see LAPTOP_SCREEN). On a tablet on its
+  // side its line stands under its figures and the card fills the screen: the day and what waits
+  // for an answer would start below it. There the month follows the two columns.
   if (wide) {
     // The buttons take the card's place. Without them (a page that was given the card alone) the card ends the left column.
     const linkButtons = !notBegun && bookingLinkButtons;
@@ -678,7 +683,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {linkButtons && <div className="-my-1.5 ml-auto">{linkButtons}</div>}
         </div>
         {startCard}
-        {monthCard}
+        {laptop && monthCard}
         <div className="grid grid-cols-12 items-start gap-6">
           <div className="col-span-5 space-y-6">
             {todayCard}
@@ -691,6 +696,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {!inboxIsLonger && aiCard}
           </div>
         </div>
+        {!laptop && monthCard}
       </div>
     );
   }

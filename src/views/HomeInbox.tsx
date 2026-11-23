@@ -16,7 +16,7 @@ import {
   chatOutcome, inboxCounts, inboxItems, waitedMinutes, waitingLabel, waitingLevel, waitingWords,
   type InboxItem, type RequestAnswer, type WaitingLevel, type WAITING_LIMITS,
 } from '../inbox';
-import { acceptedAppointmentState, checkRequest, freeStartsForRequest, nextFreeDayForRequest, planChatBooking, planChatCancellation } from '../requestAnswers';
+import { acceptedAppointmentState, checkRequest, freeStartsForRequest, nextFreeDayForRequest, otherTimeToOpenOn, planChatBooking, planChatCancellation } from '../requestAnswers';
 import { addMinutes, getSalonNow } from '../scheduling';
 import type { AppointmentRequest, CalendarEvent, Conversation, Customer } from '../types';
 
@@ -312,7 +312,9 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
   const movingRequest = requests.find((request) => request.id === movingRequestId);
   const moveMinutes = movingRequest ? requestTimes(movingRequest)?.minutes ?? 0 : 0;
   const availableMoveSlots = movingRequest && rescheduleDate ? freeStartsForRequest(salon, movingRequest, rescheduleDate) : [];
-  const selectedMoveStart = availableMoveSlots.includes(rescheduleStart) ? rescheduleStart : availableMoveSlots[0] ?? '';
+  // Until the owner has chosen a time on the day shown, the list stands on the time the dialog would open on for that day.
+  const opensOn = movingRequest && rescheduleDate && !availableMoveSlots.includes(rescheduleStart) ? otherTimeToOpenOn(salon, movingRequest, rescheduleDate, conversations) : '';
+  const selectedMoveStart = availableMoveSlots.includes(rescheduleStart) ? rescheduleStart : availableMoveSlots.includes(opensOn) ? opensOn : availableMoveSlots[0] ?? '';
 
   const openMoveDialog = (request: AppointmentRequest) => {
     // A day on which nothing is free (the time has passed, the salon is closed, the stylist is
@@ -321,11 +323,9 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
     const firstFreeDay = freeStartsForRequest(salon, request, from).length > 0 ? from : nextFreeDayForRequest(salon, request, from);
     const day = firstFreeDay ?? from;
     setRescheduleDate(day);
-    // The time the request stands at is no other time. The list opens on the next free time
-    // after it, or late in the day on the one before it; the time itself stays in the list.
-    const own = requestTimes(request)?.start ?? '';
-    const others = freeStartsForRequest(salon, request, day).filter((start) => day !== request.date || start !== own);
-    setRescheduleStart(others.find((start) => start > own) ?? others.at(-1) ?? own);
+    // The time the request stands at is no other time, and a time another customer waits for in
+    // a chat is no time to open on (see otherTimeToOpenOn). Both stay in the list.
+    setRescheduleStart(otherTimeToOpenOn(salon, request, day, conversations));
     setMoveError(null);
     setMovingRequestId(request.id);
   };
@@ -581,7 +581,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
             is in a chat to be told, so the owner tells the customer herself. Then the same three answers. */}
         <div className={`@container ${INDENT}`}>
           {!check.refusal && (
-            <p className={`mt-2.5 ${SMALL} text-slate-500`}>Confirm adds it to your calendar. You tell {name} yourself.</p>
+            <p className={`mt-2.5 ${SMALL} text-slate-600`}>Confirm adds it to your calendar. You tell {name} yourself.</p>
           )}
           <RequestAnswerButtons
             onConfirm={check.refusal ? undefined : act(item.key, () => settle(item.key, onAcceptRequest(request.id)))}
@@ -947,6 +947,13 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
                   <p className="mt-2 text-[13px] text-slate-500" role="status">No available times for this employee and service on this date. Choose another date, or check the working hours and the opening hours.</p>
                 )}
               </div>
+              {/* "Suggest" names an answer, and this request came from the booking page: nobody is in a chat
+                  to receive it. Said here, before the button, as the entry says it afterwards. */}
+              {availableMoveSlots.length > 0 && (
+                <p className="text-[13px] leading-relaxed text-slate-600">
+                  SlotBee does not tell {movingRequest.customerName}. You get a text to pass the new time on.
+                </p>
+              )}
               {moveError && <p role="alert" className="text-[13px] text-rose-600 rounded-xl bg-rose-50 p-3">{moveError}</p>}
               <div className="sticky -bottom-4 -mx-4 flex gap-2 border-t border-slate-100 bg-white px-4 pt-3 pb-4 shadow-[0_-6px_12px_-8px_rgba(15,23,42,0.25)] sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6 sm:-mb-6 -mb-4">
                 <button

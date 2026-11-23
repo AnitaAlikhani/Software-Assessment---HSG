@@ -311,7 +311,7 @@ export const ChatRequestAnswers: React.FC<ChatRequestAnswersProps> = ({ conversa
         </div>
       )}
       {canConfirm && !suggesting && (
-        <p className="mt-2 text-[13px] text-slate-500">
+        <p className="mt-2 text-[13px] text-slate-600">
           {confirmDoes}
         </p>
       )}

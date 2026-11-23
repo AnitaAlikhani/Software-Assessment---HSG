@@ -237,7 +237,8 @@ export const PaceChart: React.FC<PaceChartProps> = ({ curve, month, className = 
           <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d={`${path(soFar)} L${x(now.at).toFixed(2)} 100 L0 100 Z`} fill={BRAND} fillOpacity="0.08" stroke="none" />
             {before && <path d={path([{ at: 0, value: 0 }, ...ends(before.days)])} stroke={BEFORE} vectorEffect="non-scaling-stroke" />}
-            <path d={path(ahead)} stroke={BRAND} strokeOpacity="0.55" strokeDasharray="0.1 5" vectorEffect="non-scaling-stroke" />
+            {/* Quieter than the solid line, and still dark enough to be seen as a line: 3.7:1 against the card. */}
+            <path d={path(ahead)} stroke={BRAND} strokeOpacity="0.8" strokeDasharray="0.1 5" vectorEffect="non-scaling-stroke" />
             <path d={path(soFar)} stroke={BRAND} vectorEffect="non-scaling-stroke" />
           </svg>
           {/* Where the month before stood at the same point, and where this one stands now. */}
