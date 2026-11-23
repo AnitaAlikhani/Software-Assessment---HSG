@@ -22,7 +22,7 @@ const entryOf = (html: string, customerName: string): string => {
   return entry.split('</li>')[0];
 };
 
-test('every pending request has an entry with its source, staff, age and actions; the selected one is marked', () => {
+test('every pending request has an entry with its source, staff, age and answers; the selected one is marked', () => {
   const html = renderToStaticMarkup(React.createElement(HomeView, { ...homeProps, selectedRequestId: 'req-2' }));
   const selected = entryOf(html, requests[1].customerName);
   assert.match(selected, />Booking page</);
@@ -30,14 +30,14 @@ test('every pending request has an entry with its source, staff, age and actions
   assert.doesNotMatch(html, /WhatsApp|Instagram/);
   assert.match(selected, /with Anna Weber/);
   assert.match(selected, />47 min<\/span><span class="sr-only">Waiting for 47 minutes<\/span>/);
-  for (const action of ['Accept', 'Move', 'Reject']) assert.match(selected, new RegExp(`>${action}</button>`));
+  for (const answer of ['Confirm', 'Suggest another time', 'Decline']) assert.match(selected, new RegExp(`>${answer}</button>`));
   // The request the owner came for is marked, and only that one.
   assert.match(selected, /^[^>]*aria-current="true"/);
   assert.equal(html.match(/aria-current="true"/g)?.length, 1);
   // The other request can be answered without selecting it first.
   const other = entryOf(html, requests[0].customerName);
   assert.doesNotMatch(other, /aria-current/);
-  assert.match(other, />Accept<\/button>/);
+  assert.match(other, />Confirm<\/button>/);
 });
 
 test('a stale request link marks no request and says so', () => {
@@ -46,7 +46,7 @@ test('a stale request link marks no request and says so', () => {
   assert.doesNotMatch(html, /aria-current="true"/);
   assert.doesNotMatch(html, /Simulate incoming booking/);
   // The request that still waits is listed with its own actions: no button acts on another customer's request.
-  assert.match(entryOf(html, requests[0].customerName), />Accept<\/button>/);
+  assert.match(entryOf(html, requests[0].customerName), />Confirm<\/button>/);
 });
 
 test('an empty calendar has no invented appointment or resource', () => {
@@ -57,22 +57,22 @@ test('an empty calendar has no invented appointment or resource', () => {
   assert.doesNotMatch(html, /Room 1/);
 });
 
-test('a request whose time has passed offers to move it instead of an Accept that would fail', () => {
+test('a request whose time has passed offers another time instead of a Confirm that would fail', () => {
   // Two days later the first request (Wednesday 7 October, 10:00) lies in the past, the second (Thursday 14:30) does not.
   const later = new Date('2026-10-07T10:00:00Z'); // 12:00 in Zurich
   const html = renderToStaticMarkup(React.createElement(HomeView, {
     ...homeProps, now: later, availabilityContext: { ...homeProps.availabilityContext, now: later },
   }));
   const passed = entryOf(html, requests[0].customerName);
-  assert.match(passed, /This time has passed\. Move the request to a new time, or reject it\./);
-  assert.doesNotMatch(passed, />Accept</);
-  assert.match(passed, />Move<\/button>/);
-  assert.match(passed, />Reject<\/button>/);
+  assert.match(passed, /This time has passed\. Suggest another time, or decline\./);
+  assert.doesNotMatch(passed, />Confirm</);
+  assert.match(passed, />Suggest another time<\/button>/);
+  assert.match(passed, />Decline<\/button>/);
   // It came in two days ago: the wait is said, and marked as overdue.
   assert.match(passed, />2 days<\/span><span class="sr-only">Waiting for 2 days, overdue<\/span>/);
   const upcoming = entryOf(html, requests[1].customerName);
   assert.doesNotMatch(upcoming, /This time has passed/);
-  assert.match(upcoming, />Accept<\/button>/);
+  assert.match(upcoming, />Confirm<\/button>/);
   // The request that is overdue stands first: the list is in the order of the times asked for.
   assert.ok(html.indexOf(requests[0].customerName) < html.indexOf(requests[1].customerName));
 });

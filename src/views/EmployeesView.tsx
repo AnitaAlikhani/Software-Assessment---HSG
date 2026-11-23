@@ -126,7 +126,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
       parts.push(`${appointments.length === 1 ? '1 upcoming appointment' : `${appointments.length} upcoming appointments`} with ${editingEmployee.name} would lie outside these hours, the next on ${formatDate(next.date)}, ${formatTimeRange(next.startTime, next.endTime)}. ${appointments.length === 1 ? 'It stays' : 'They stay'} in the calendar: move or cancel ${appointments.length === 1 ? 'it' : 'them'} yourself.`);
     }
     if (waiting.length > 0) {
-      parts.push(`${waiting.length === 1 ? '1 waiting request' : `${waiting.length} waiting requests`} could no longer be accepted at ${waiting.length === 1 ? 'its' : 'their'} time.`);
+      parts.push(`${waiting.length === 1 ? '1 waiting request' : `${waiting.length} waiting requests`} could no longer be confirmed at ${waiting.length === 1 ? 'its' : 'their'} time.`);
     }
     return parts.join(' ');
   })();

@@ -61,8 +61,10 @@ test('a free time: the card names who takes it, what was checked, and offers all
   for (const button of html.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
   assert.match(html, /<select[^>]*class="[^"]*\btext-base\b/);
   assert.doesNotMatch(words(html), TELL_WORDS);
-  // One of the salon's own chats: nothing claims that a message is sent.
-  assert.match(words(requestCard(tom({}, { id: 'conv-tom', live: undefined })) ), /Confirm adds it to your calendar\. Confirm/);
+  // One of the salon's own chats: the confirmation goes into the chat, and nothing claims that a message is sent.
+  const own = words(requestCard(tom({}, { id: 'conv-tom', live: undefined })));
+  assert.match(own, /Confirm adds it to your calendar and puts the confirmation in the chat\. Confirm/);
+  assert.doesNotMatch(own, /\b(sends?|sent)\b/);
 });
 
 test('a taken time: the card says who has it, offers no Confirm, and the nearest free times instead', () => {
@@ -425,7 +427,7 @@ test('the helper line of a change says that Confirm moves the appointment', () =
   const context = salon({ events: [tomsAppointment] });
   assert.match(words(requestCard(change, context)), /Confirm moves the appointment in your calendar and sends Tom the confirmation in the chat\./);
   assert.match(words(requestCard({ ...change, id: 'conv-tom', live: undefined }, salon({ events: [{ ...tomsAppointment, conversationId: 'conv-tom' }] }))),
-    /Confirm moves the appointment in your calendar\. Confirm/);
+    /Confirm moves the appointment in your calendar and puts the confirmation in the chat\. Confirm/);
 });
 
 // ---------- an answer that is held for a moment (Home's inbox) ----------

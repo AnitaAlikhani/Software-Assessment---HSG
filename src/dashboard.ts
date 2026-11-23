@@ -34,6 +34,16 @@ export interface TodayOverview {
 }
 
 /**
+ * Set on a date the salon does not open: `name` is the name of the closure ("Team day"), or
+ * empty on a weekday that is always closed. Null on an open day.
+ */
+export function closedOn(salon: { bookingHours: BookingHoursDay[]; closedDates?: ClosedDate[] }, date: string): { name: string } | null {
+  const closure = salon.closedDates?.find(item => date >= item.start && date <= item.end);
+  if (closure) return { name: closure.name.trim() };
+  return salon.bookingHours.find(day => day.day === openingHoursDay(date))?.isOpen ? null : { name: '' };
+}
+
+/**
  * Home's "Today": the day's appointments by the salon's clock, and whether the salon is open.
  * An appointment is over once its end has passed. Of those that have not started, the earliest
  * is the next one; two stylists who start at the same minute are both next.
@@ -50,13 +60,11 @@ export function todayOverview(
     event,
     state: (event.endTime <= clock.time ? 'done' : event.startTime <= clock.time ? 'now' : event.startTime === nextStart ? 'next' : 'later') as TodayState,
   }));
-  const closure = salon.closedDates?.find(item => clock.date >= item.start && clock.date <= item.end);
-  const hours = salon.bookingHours.find(day => day.day === openingHoursDay(clock.date));
   const stillToCome = appointments.some(item => item.state !== 'done');
   return {
     date: clock.date,
     appointments,
-    closed: closure ? { name: closure.name.trim() } : hours?.isOpen ? null : { name: '' },
+    closed: closedOn(salon, clock.date),
     following: stillToCome ? null : salon.events.filter(event => event.date > clock.date)
       .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`) || a.id.localeCompare(b.id))[0] ?? null,
   };
@@ -69,6 +77,35 @@ export function nextUpcomingAppointment(events: CalendarEvent[], now = new Date(
   return events.filter(event => `${event.date} ${event.startTime}` >= cutoff)
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`) || a.id.localeCompare(b.id))[0] ?? null;
 }
+
+/** Where the salon's day stands by its opening hours: what Home says beside its greeting. */
+export type OpenState =
+  /** Not open today: a weekday that is always closed (`name` is empty), or a closure with its name ("Team day"). */
+  | { state: 'closed'; name: string }
+  /** Opens later today, at this time. */
+  | { state: 'before'; opens: string }
+  /** Open now, until this time. */
+  | { state: 'open'; closes: string }
+  /** Was open today and has closed. */
+  | { state: 'after' };
+
+/**
+ * Whether the salon is open at this moment, by the opening hours in Settings and the closed
+ * dates. The same rule as wasClosedAt: open from the opening time up to, not including, the
+ * closing time.
+ */
+export function openState(salon: { bookingHours: BookingHoursDay[]; closedDates?: ClosedDate[]; timeZone?: string }, now: Date): OpenState {
+  const clock = getSalonNow(salon.timeZone, now);
+  const closed = closedOn(salon, clock.date);
+  const hours = salon.bookingHours.find(day => day.day === openingHoursDay(clock.date));
+  if (closed || !hours) return { state: 'closed', name: closed?.name ?? '' };
+  if (clock.time < hours.from) return { state: 'before', opens: hours.from };
+  return clock.time < hours.to ? { state: 'open', closes: hours.to } : { state: 'after' };
+}
+
+/** The part of the day at a clock time ("09:41"): Home greets by it. */
+export const dayPart = (time: string): 'morning' | 'afternoon' | 'evening' =>
+  time < '12:00' ? 'morning' : time < '18:00' ? 'afternoon' : 'evening';
 
 export interface HomeFigures {
   /** The current calendar month, the period the block is about. */
@@ -210,6 +247,59 @@ export const changeInPercent = (now: number, before: number): Change | null =>
 /** A change as a number of things: three more, one fewer. Small numbers say more this way than a percentage does. */
 export const changeInCount = (now: number, before: number): Change => signed(now - before, '');
 
+// ---------- the month, day by day ----------
+
+/** A point of Home's chart: by the end of this day of the month, the month's appointments up to it are worth this much at list prices. */
+export interface CurvePoint { day: number; value: number }
+
+/** A moment on the chart's scale: the days of the month that have passed (4.5 at noon on the 5th), and the value reached by then. */
+export interface CurveMoment { at: number; value: number }
+
+export interface MonthCurve {
+  /** The current month, one point per day. Every appointment in the calendar counts, those still to come included. */
+  days: CurvePoint[];
+  /** Where the month stands right now: what has taken place, monthPace's "so far". */
+  now: CurveMoment;
+  /**
+   * The month before, added up the same way, and where it stood at the same point (monthPace's
+   * `before`). Null while that month holds no appointment at all.
+   */
+  before: { month: Period; days: CurvePoint[]; then: CurveMoment } | null;
+}
+
+/**
+ * The month as a line: what its appointments are worth at list prices, added up day by day, with
+ * the month before beside it. The figures of "This month" say where the month stands; the line
+ * shows how it got there, and what is already booked for the days to come.
+ *
+ * It is drawn from monthPace, so the point for "now" is the figure "Booked value so far", and
+ * the line's last point is that figure plus what is still to come.
+ */
+export function monthCurve(events: CalendarEvent[], services: Pick<ServiceItem, 'id' | 'name' | 'priceCHF'>[], now: Date, timeZone?: string): MonthCurve {
+  const clock = getSalonNow(timeZone, now);
+  const pace = monthPace(events, services, now, timeZone);
+  const passed = minutesOf(clock.time) / (24 * 60);
+  const curve = (period: Period): CurvePoint[] => {
+    const perDay = new Map<string, CalendarEvent[]>();
+    for (const event of events) {
+      if (event.date >= period.from && event.date <= period.to) perDay.set(event.date, [...(perDay.get(event.date) ?? []), event]);
+    }
+    const points: CurvePoint[] = [];
+    let cents = 0;
+    for (let date = period.from; date <= period.to; date = addDays(date, 1)) {
+      cents += Math.round(bookedValue(perDay.get(date) ?? [], services).value * 100);
+      points.push({ day: Number(date.slice(8)), value: cents / 100 });
+    }
+    return points;
+  };
+  const moment = (date: string, value: number): CurveMoment => ({ at: Number(date.slice(8)) - 1 + passed, value });
+  return {
+    days: curve(pace.month),
+    now: moment(clock.date, pace.soFar.value),
+    before: pace.before ? { month: pace.before.month, days: curve(pace.before.month), then: moment(pace.before.until.date, pace.before.value) } : null,
+  };
+}
+
 // ---------- how full the day is ----------
 
 /** What the team's working time is looked up in: the salon as the slot rules see it. */
@@ -306,6 +396,38 @@ export const weekDates = (date: string): string[] => {
   const { week } = analyticsPeriods(date);
   return Array.from({ length: 7 }, (_, offset) => addDays(week.from, offset));
 };
+
+/** One day of Home's "This week". */
+export interface WeekDay {
+  /** The salon's date (YYYY-MM-DD). */
+  date: string;
+  /** How many appointments the day holds: everybody's, or those of the people named. */
+  appointments: number;
+  /** Whole per cent of the day's working time that is booked (see bookedShare). Null on a day nobody works. */
+  share: number | null;
+  /** Set on a day the salon does not open, as in TodayOverview. */
+  closed: { name: string } | null;
+  /** Where the day stands by the salon's clock: over, today, or still to come. */
+  when: 'past' | 'today' | 'ahead';
+}
+
+/**
+ * Home's "This week": the seven days of the current week, Monday first, each with its
+ * appointments and with how full it is. Where time is still free there is room for a booking, so
+ * the days are set side by side: for the whole team, or for the people named.
+ */
+export function weekLoad(salon: StaffedSalon & { timeZone?: string }, now: Date, employeeIds?: readonly string[]): WeekDay[] {
+  const today = getSalonNow(salon.timeZone, now).date;
+  const people = staffOf(salon, employeeIds);
+  const counts = (event: CalendarEvent) => employeeIds === undefined || people.some((person) => isOf(person)(event));
+  return weekDates(today).map((date) => ({
+    date,
+    appointments: salon.events.filter((event) => event.date === date && counts(event)).length,
+    share: bookedShare(salon, [date], employeeIds).share,
+    closed: closedOn(salon, date),
+    when: date < today ? 'past' : date === today ? 'today' : 'ahead',
+  }));
+}
 
 // ---------- what the AI receptionist did ----------
 

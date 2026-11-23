@@ -334,11 +334,11 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   const home = shown(all.home);
   assert.match(home, /Today Monday, 05\.10\.2026 The salon is closed today\. No appointments\./);
   assert.match(home, /Next appointment Tue, 06\.10\.2026, \d\d:\d\d–\d\d:\d\d/);
-  assert.match(home, /WED 07\.10\. Booking request 12 min Waiting for 12 minutes/);
-  assert.match(home, /· 10:00–10:30 with Selina Keller \+41 7\d 555 \d\d \d\d · Booking page/);
-  // A request that waits in a chat, with the time it would take; and one the owner has just moved, with its ready text.
-  assert.match(home, /THU 08\.10\. Booking request from a chat 11:58 Tom Haircut · 15:00–15:30/);
-  assert.match(home, /Moved from Fri, 09\.10\.2026, 11:00–11:30/);
+  assert.match(home, /WED 07\.10\. \S+ \S+ 12 min Waiting for 12 minutes/);
+  assert.match(home, /· 10:00–10:30 · with Selina Keller Booking request · \+41 7\d 555 \d\d \d\d · Booking page/);
+  // A request that waits in a chat, with the time it would take; and one the owner has just suggested another time for, with its ready text.
+  assert.match(home, /THU 08\.10\. Tom 11:58 Haircut · 15:00–15:30 · with \S+ \S+ Booking request from a chat · /);
+  assert.match(home, /Other time suggested, instead of Fri, 09\.10\.2026, 11:00–11:30/);
   assert.match(home, /(am|on|le|,) \S+,? 08\.10\.2026 (um|at|à|alle) 14:30/);
   assert.match(home, /AI receptionist October 2026, by the day of the appointment .*Haircut · Thu, 08\.10\.2026, 13:30–14:00/);
   assert.match(home, /This month October 2026 · \d+ appointments, past and upcoming/);

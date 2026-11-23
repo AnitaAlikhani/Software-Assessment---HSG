@@ -49,6 +49,52 @@ const CARD = 'rounded-2xl border px-4 py-3 sm:px-5 sm:py-4';
 
 const isLive = (conversation: Pick<Conversation, 'id' | 'live'>) => conversation.live === true || isLiveConversation(conversation.id);
 
+// ---------- the three answers to a request ----------
+
+export interface RequestAnswerButtonsProps {
+  /** Left out where the request cannot be confirmed as it stands: "Suggest another time" is the filled button then. */
+  onConfirm?: (event: React.MouseEvent) => void;
+  /** Left out where no other time would help either. */
+  onSuggest?: (event: React.MouseEvent) => void;
+  onDecline: (event: React.MouseEvent) => void;
+  /** While an answer is on its way or on hold. */
+  locked?: boolean;
+  /** The button that opens the times: the focus returns to it when they close. */
+  suggestRef?: React.Ref<HTMLButtonElement>;
+}
+
+/**
+ * The three answers to a booking request: Confirm, Suggest another time, Decline. One row with
+ * one set of words, wherever the request came from: the customers' booking page (Home's inbox)
+ * or a chat (Home's inbox, and the chat itself). They are the words the customer reads on the
+ * other side too: "Appointment confirmed", "The salon suggests another time", "Request declined".
+ *
+ * The row goes by the width of the element around it, which has to be a container (`@container`):
+ * a card in a chat on one screen, half a column of Home's inbox on another.
+ */
+export const RequestAnswerButtons: React.FC<RequestAnswerButtonsProps> = ({ onConfirm, onSuggest, onDecline, locked = false, suggestRef }) => (
+  // Too narrow for the three in one row (a phone, a narrow column): Confirm and Decline share
+  // a row, "Suggest another time" takes a row of its own so its words fit.
+  <div className="mt-3 grid grid-cols-2 gap-2 @[27rem]:flex @[27rem]:flex-wrap">
+    {onConfirm && (
+      <button type="button" disabled={locked} onClick={onConfirm} className={PRIMARY}>
+        <Check className={ICON} aria-hidden="true" />Confirm
+      </button>
+    )}
+    {onSuggest && (
+      <button
+        ref={suggestRef} type="button" disabled={locked} onClick={onSuggest}
+        className={`${onConfirm ? OUTLINE : PRIMARY} col-span-2 ${onConfirm ? 'order-last @[27rem]:order-none' : ''}`}
+      >
+        <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />Suggest another time
+      </button>
+    )}
+    <button type="button" disabled={locked} onClick={onDecline} className={`${DANGER} ${onConfirm ? '' : 'col-span-2'}`}>
+      <X className={ICON} aria-hidden="true" />Decline
+    </button>
+  </div>
+);
+
 /** What the card says while an answer is on its way. A live chat waits for the server, which sends the customer's message. */
 const sendingText = (type: ChatBookingAction['type'], live: boolean): string => {
   if (!live) return { confirm: 'Confirming…', suggest: 'Suggesting the time…', decline: 'Declining…', cancel: 'Cancelling the appointment…', keep: 'Saving…' }[type];
@@ -184,6 +230,10 @@ export interface ChatRequestAnswersProps {
   hold?: AnswerHold;
 }
 
+// The sentence about what was checked ends on the same words every time (src/requestAnswers.ts).
+// The card says who is free in the colour of its text and the list of what was checked more quietly.
+const CHECKED_AGAINST = ' Checked against ';
+
 /**
  * What was checked and the three answers. Home's inbox shows this under its own lines about the
  * request; the chat shows it inside ChatRequestCard.
@@ -212,18 +262,27 @@ export const ChatRequestAnswers: React.FC<ChatRequestAnswersProps> = ({ conversa
   const canConfirm = Boolean(onAnswer && plan.endTime && (held || stylist));
   const chooseStylist = !held && (freeEmployees.length > 1 || (!plan.employee && freeEmployees.length > 0));
   const moves = plan.booking.kind === 'change' && plan.previous !== null;
+  // What Confirm does, and how the customer learns of it: a request from a chat is answered in
+  // the chat. A live chat has the customer on the other side, so the confirmation is sent; one of
+  // the salon's own chats has nobody there, so nothing claims that. (A request from the booking
+  // page says in the same place that the owner tells the customer herself: see HomeInbox.)
   const confirmDoes = held
     ? live ? `Confirm sends ${plan.customerName} the confirmation in the chat.` : 'Confirm marks the request as booked.'
-    : `Confirm ${moves ? 'moves the appointment in' : 'adds it to'} your calendar${live ? ` and sends ${plan.customerName} the confirmation in the chat` : ''}.`;
+    : `Confirm ${moves ? 'moves the appointment in' : 'adds it to'} your calendar and ${live ? `sends ${plan.customerName} the confirmation in the chat` : 'puts the confirmation in the chat'}.`;
   const locked = sending !== null || onHold !== null;
   const tap = (event: React.MouseEvent, then: () => void) => { if (!allowTap || allowTap(event)) then(); };
   const checked = held ? plan.checked : stylist && plan.endTime
     ? plan.employee && stylist.id === plan.employee.id && plan.checked ? plan.checked
       : `${stylist.name} is free then. Checked against the opening hours, the working hours, time off and your calendar.`
     : null;
+  // "Anna Weber is free then." is what the owner reads; what it was checked against follows more quietly.
+  const checkedAt = checked?.indexOf(CHECKED_AGAINST) ?? -1;
+  const [found, against] = checked && checkedAt > 0 ? [checked.slice(0, checkedAt), checked.slice(checkedAt + 1)] : [checked, ''];
 
   return (
-    <div>
+    // The row of answers goes by the width of this block, not of the screen: the block is a card in
+    // a chat on one screen and half a column of Home's inbox on another.
+    <div className="@container">
       {plan.refusal && (
         <p className="mt-3 flex gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-medium leading-relaxed text-amber-900">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -231,20 +290,21 @@ export const ChatRequestAnswers: React.FC<ChatRequestAnswersProps> = ({ conversa
         </p>
       )}
       {checked && !plan.refusal && (
-        <p className="mt-3 flex gap-2 text-[13px] leading-relaxed text-slate-700">
+        <p className="mt-3 flex gap-2 text-[13px] leading-relaxed text-slate-600">
           <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
-          <span>{checked}</span>
+          <span><span className="font-medium text-slate-900">{found}</span>{against && <> {against}</>}</span>
         </p>
       )}
       {chooseStylist && onAnswer && (
-        <div className="mt-3">
-          <label htmlFor={`${ids}-stylist`} className="block text-[13px] font-semibold text-slate-700">Stylist who is free then</label>
+        // The name of the list and the list on one line where they fit; on a narrow phone the list takes the next one.
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label htmlFor={`${ids}-stylist`} className="text-[13px] font-semibold text-slate-700">Stylist who is free then</label>
           <select
             id={`${ids}-stylist`}
             value={stylist?.id ?? ''}
             disabled={locked}
             onChange={(event) => setStylistId(event.target.value)}
-            className="mt-1 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF] sm:w-auto sm:min-w-[14rem] sm:text-sm"
+            className="min-h-11 min-w-0 flex-1 basis-40 rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 focus-visible:outline-2 focus-visible:outline-[#5551FF] sm:max-w-[14rem] sm:text-sm"
           >
             {freeEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
           </select>
@@ -257,26 +317,12 @@ export const ChatRequestAnswers: React.FC<ChatRequestAnswersProps> = ({ conversa
       )}
 
       {onAnswer && !suggesting && (
-        // Phones: Confirm and Decline share a row, "Suggest another time" takes a row of its own so its words fit.
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          {canConfirm && (
-            <button type="button" disabled={locked} onClick={(event) => tap(event, () => void run(held ? { type: 'confirm' } : { type: 'confirm', employeeId: stylist!.id, staffName: stylist!.name }))} className={PRIMARY}>
-              <Check className={ICON} aria-hidden="true" />Confirm
-            </button>
-          )}
-          {plan.movable && (
-            <button
-              ref={suggestRef} type="button" disabled={locked}
-              onClick={(event) => tap(event, () => { setSuggesting(true); setChoice(''); })}
-              className={`${canConfirm ? OUTLINE : PRIMARY} col-span-2 ${canConfirm ? 'order-last sm:order-none' : ''}`}
-            >
-              <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />Suggest another time
-            </button>
-          )}
-          <button type="button" disabled={locked} onClick={(event) => tap(event, () => void run({ type: 'decline' }))} className={`${DANGER} ${canConfirm ? '' : 'col-span-2'}`}>
-            <X className={ICON} aria-hidden="true" />Decline
-          </button>
-        </div>
+        <RequestAnswerButtons
+          locked={locked} suggestRef={suggestRef}
+          onConfirm={canConfirm ? (event) => tap(event, () => void run(held ? { type: 'confirm' } : { type: 'confirm', employeeId: stylist!.id, staffName: stylist!.name })) : undefined}
+          onSuggest={plan.movable ? (event) => tap(event, () => { setSuggesting(true); setChoice(''); }) : undefined}
+          onDecline={(event) => tap(event, () => void run({ type: 'decline' }))}
+        />
       )}
 
       {onAnswer && suggesting && (

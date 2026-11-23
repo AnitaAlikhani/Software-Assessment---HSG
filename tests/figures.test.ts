@@ -208,8 +208,8 @@ test('Home and Analytics show the same figures for the month', () => {
 });
 
 test('the month so far is set against the month before at the same point, in a short label and in words', () => {
-  /** What Home says about the month, from its heading to the line that names the comparison. */
-  const month = (events: CalendarEvent[]) => /This month .*?(?=Booking link|$)/.exec(text(home(events, [], [])))?.[0].trim() ?? '';
+  /** What Home says about the month, from its heading to the line that names the comparison. The chart that follows is read in tests/homeDashboard.test.ts. */
+  const month = (events: CalendarEvent[]) => /This month .*?(?=Booked value by day|Booking link|$)/.exec(text(home(events, [], [])))?.[0].trim() ?? '';
   // By Monday 5 October, 12:00: three appointments (one of them at 09:00 this morning). By Saturday
   // 5 September, 12:00: two. All are the same service, so the value rises by a half and the count by one.
   const each = bookedValue(HAND_COUNTED.slice(0, 1), initialServices).value;

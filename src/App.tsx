@@ -60,7 +60,7 @@ import { appointmentForConversation, belongsToConversation, appointmentFromReque
 import { answerIsShown, inboxCounts, inboxItems, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
 import { acceptedAppointmentState, chatOfFormBooking, checkRequest, movedRequest, restoreConfirmedBooking } from './requestAnswers';
 import { arrivedRequests, isRequestersAppointment, withOutcome, type RequestOutcomes } from './sharedRequests';
-import { BookingLinkCompact } from './components/BookingLinkCard';
+import { BookingLinkButtons, BookingLinkCompact } from './components/BookingLinkCard';
 
 import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
@@ -366,9 +366,9 @@ export default function App() {
       const appointment = calendarEvents.find((event) => event.id === appointmentIdForRequest(id));
       const standing = acceptedAppointmentState(before, appointment);
       // Moved or edited in the calendar since: taking the acceptance back would throw that away.
-      if (standing === 'changed') return 'The appointment was changed in the calendar after you accepted. Change or cancel it there.';
+      if (standing === 'changed') return 'The appointment was changed in the calendar after you confirmed. Change or cancel it there.';
       // Cancelled in the calendar since (Home no longer shows the answer then): that decision stands.
-      if (standing === 'gone') return 'The appointment was cancelled in the calendar after you accepted. If the customer still wants it, add it by hand in the calendar.';
+      if (standing === 'gone') return 'The appointment was cancelled in the calendar after you confirmed. If the customer still wants it, add it by hand in the calendar.';
       // The appointment that the acceptance created goes, and with it what held the time.
       setCalendarEvents((previous) => previous.filter((event) => event.id !== appointmentIdForRequest(id)));
       setRequests((previous) => restoreAt(previous, before, answer.index));
@@ -1116,12 +1116,13 @@ export default function App() {
               onChatBooking={handleChatBooking}
               onSimulateNewRequest={handleSimulateNewRequest}
               now={now}
-              onOpenCalendar={() => setCurrentTab('calendar')}
+              onOpenCalendar={(date) => { if (date) navigate({ tab: 'calendar', view: 'day', date }); else setCurrentTab('calendar'); }}
               onOpenAnalytics={() => setCurrentTab('analytics')}
               conversations={allConversations}
               onOpenConversations={openConversation}
               onOpenCustomer={(id) => navigate({ tab: 'customers', customerId: id })}
               bookingLink={<BookingLinkCompact />}
+              bookingLinkButtons={<BookingLinkButtons />}
               me={accountOwner(employees)}
               onOpenScreen={setCurrentTab}
             />

@@ -1,8 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CalendarCheck, CalendarClock, CalendarX, Check, CheckCircle2, ChevronRight, Clock, Copy, ExternalLink, MessageSquare, Phone, Plus, Undo2, X } from 'lucide-react';
+import { AlertTriangle, CalendarCheck, CalendarClock, CalendarX, Check, CheckCircle2, ChevronRight, Clock, Copy, ExternalLink, Inbox, MessageSquare, Phone, Plus, Undo2, X } from 'lucide-react';
 import { ANSWER_HOLD_MS } from '../answerHold';
 import { ChannelBadge, channelLabel } from '../components/ChannelBadge';
-import { ChatCancellationAnswers, ChatRequestAnswers, type AnswerChat, type AnswerHold } from '../components/ChatBookingCards';
+import { ChatCancellationAnswers, ChatRequestAnswers, RequestAnswerButtons, type AnswerChat, type AnswerHold } from '../components/ChatBookingCards';
 import { appointmentIdForRequest, requestTimes } from '../appointmentActions';
 import type { AvailabilityContext } from '../availability';
 import { chatBookingName } from '../bookingData';
@@ -103,19 +103,40 @@ const Waited = ({ since, source, clock, fallback = '' }: { since: string | undef
   );
 };
 
-/** The first line of an entry: what kind of entry it is, and how long it has waited. */
-const Meta = ({ children, waited }: { children: React.ReactNode; waited: React.ReactNode }) => (
-  <p className="flex items-center justify-between gap-2">
-    <span className={`min-w-0 ${SMALL} font-medium text-slate-500`}>{children}</span>
+/**
+ * An entry that waits is read from the top: who it is from and how long they have waited (Lead),
+ * what is asked for and when (WHAT), then, small, what kind of entry it is and how the customer
+ * can be reached (Note). Three lines on a laptop, so that six entries are a list and not a page.
+ */
+const Lead = ({ children, waited }: { children: React.ReactNode; waited: React.ReactNode }) => (
+  <p className="flex items-start justify-between gap-2">
+    <span className="min-w-0 text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{children}</span>
     {waited}
   </p>
 );
+const WHAT = 'mt-0.5 text-sm text-slate-700';
+const NOTE = `mt-0.5 ${SMALL} text-slate-500`;
+// The dot between two facts on one line. The space before it does not break: a dot ends a line, it never starts one.
+const DOT = `${String.fromCharCode(160)}· `;
+// A fact that moves to the next line as a whole ("with Anna Weber"), and breaks only where it is longer than a line.
+const WHOLE = 'inline-block max-w-full';
+/**
+ * The small line. `link` is the way into the chat an entry belongs to: it ends the line where the
+ * two fit side by side, under the label of the wait, and takes the next line where they do not.
+ */
+const Note = ({ parts, link }: { parts: string[]; link?: React.ReactNode }) => (
+  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+    <p className={NOTE}>
+      {parts.map((part, index) => <React.Fragment key={index}>{index > 0 && DOT}<span className="whitespace-nowrap">{part}</span></React.Fragment>)}
+    </p>
+    {link}
+  </div>
+);
 
-const BUTTON = 'inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors sm:px-4';
+const BUTTON = 'inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF] sm:px-4';
 const PRIMARY = `${BUTTON} bg-[#5551FF] text-white hover:bg-[#433fd8]`;
 const OUTLINE = `${BUTTON} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`;
 const OUTLINE_BRAND = `${BUTTON} border border-[#5551FF]/40 bg-white text-[#5551FF] hover:bg-indigo-50`;
-const DANGER = `${BUTTON} text-rose-700 hover:bg-rose-50`;
 const QUIET = `${BUTTON} text-[#5551FF] hover:bg-indigo-50`;
 // On the narrowest phones three buttons share a row: their icons appear where there is room for them.
 const ICON = 'hidden h-4 w-4 shrink-0 min-[400px]:block';
@@ -124,11 +145,14 @@ const ICON = 'hidden h-4 w-4 shrink-0 min-[400px]:block';
 // side (1024 to 1279 px): there the buttons need the full width of the entry to stand in one row.
 const INDENT = 'sm:ml-[3.75rem] lg:max-xl:ml-0';
 
-/** The day a request is for: the weekday above the day, written like every short date ("FRI" over "20.11."). */
+/**
+ * The day a request is for, as a leaf of a calendar: the weekday on its band, the day below it,
+ * written like every short date ("FRI" over "20.11.").
+ */
 const DateTile = ({ date }: { date: string }) => (
-  <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-slate-200 bg-white">
-    <span className="text-[11px] font-bold leading-none tracking-wider text-slate-500">{weekdayName(date, 'short').toUpperCase()}</span>
-    <span className="text-[13px] font-bold leading-none tabular-nums text-slate-900">{formatDayMonth(date)}</span>
+  <div className="flex h-12 w-12 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-center">
+    <span className="bg-slate-100 py-1 text-[11px] font-bold leading-none tracking-wider text-slate-600">{weekdayName(date, 'short').toUpperCase()}</span>
+    <span className="flex flex-1 items-center justify-center text-[13px] font-bold leading-none tracking-tight tabular-nums text-slate-900">{formatDayMonth(date)}</span>
   </div>
 );
 
@@ -142,8 +166,8 @@ const requestSource = (channel: AppointmentRequest['channel']): string => channe
  * A chat's contact: the customer's number where the salon has one (WhatsApp brings a masked
  * one), then the channel. A stand-in label is never shown as a number.
  */
-const chatContact = (conversation: Conversation): string =>
-  [/\d/.test(conversation.phone) || conversation.phone.startsWith('@') ? formatPhone(conversation.phone) : '', channelLabel(conversation.channel)].filter(Boolean).join(' · ');
+const chatContact = (conversation: Conversation): string[] =>
+  [/\d/.test(conversation.phone) || conversation.phone.startsWith('@') ? formatPhone(conversation.phone) : '', channelLabel(conversation.channel)].filter(Boolean);
 
 /** Puts a text on the clipboard. True only when the browser says it is there. */
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -170,10 +194,14 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /**
- * "Waiting for you": the one list of everything that needs the owner. Booking requests from the
- * booking page (Accept, Move, Reject), booking requests the AI collected in a chat (Confirm,
- * Suggest another time, Decline, as the chat's own card offers them), a customer's wish to cancel
+ * "Waiting for you": the one list of everything that needs the owner. Booking requests, from the
+ * customers' booking page and those the AI collected in a chat, a customer's wish to cancel
  * (Cancel appointment, Keep appointment) and chats in which a customer waits.
+ *
+ * Every booking request has the same three answers in the same words: Confirm, Suggest another
+ * time, Decline (RequestAnswerButtons). Where it came from changes one thing only, and the line
+ * above the answers says which: a request from a chat is answered in the chat, and after a
+ * request from the booking page the owner tells the customer herself.
  *
  * An answered request does not disappear at once. It stays where it was, says what was done and
  * offers "Undo". For a request from the booking page it also says what the app does not do:
@@ -291,8 +319,13 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
     // away) is no place to start: the dialog opens on the stylist's next free day.
     const from = request.date < today ? today : request.date;
     const firstFreeDay = freeStartsForRequest(salon, request, from).length > 0 ? from : nextFreeDayForRequest(salon, request, from);
-    setRescheduleDate(firstFreeDay ?? from);
-    setRescheduleStart(requestTimes(request)?.start ?? '');
+    const day = firstFreeDay ?? from;
+    setRescheduleDate(day);
+    // The time the request stands at is no other time. The list opens on the next free time
+    // after it, or late in the day on the one before it; the time itself stays in the list.
+    const own = requestTimes(request)?.start ?? '';
+    const others = freeStartsForRequest(salon, request, day).filter((start) => day !== request.date || start !== own);
+    setRescheduleStart(others.find((start) => start > own) ?? others.at(-1) ?? own);
     setMoveError(null);
     setMovingRequestId(request.id);
   };
@@ -324,18 +357,36 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
   const staffName = (request: AppointmentRequest) =>
     (request.employeeId !== undefined ? salon.employees.find((employee) => employee.id === request.employeeId)?.name : undefined) ?? request.staffName ?? '';
 
-  /** A customer's name; a link to the customer's record where there is one. */
+  /**
+   * A customer's name; a link to the customer's record where there is one. The name takes the
+   * room of its letters and no more, also where it runs over two lines beside the label of the
+   * wait. What can be tapped reaches above and below it: a full tap target that pushes nothing away.
+   */
   const nameOf = (key: string, name: string, customerId: string | undefined) => customerId !== undefined && onOpenCustomer ? (
     <button
       type="button"
       onClick={act(key, () => onOpenCustomer(customerId))}
       aria-label={`${name}: open the customer record`}
-      className="-my-3 inline-flex min-h-11 max-w-full items-center gap-0.5 text-left font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2 hover:text-[#5551FF] hover:decoration-[#5551FF]"
+      className="relative inline-flex max-w-full items-center gap-0.5 text-left font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2 before:absolute before:inset-x-0 before:top-1/2 before:h-full before:min-h-11 before:-translate-y-1/2 hover:text-[#5551FF] hover:decoration-[#5551FF]"
     >
       <span className="min-w-0 [overflow-wrap:anywhere]">{name}</span>
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
     </button>
   ) : name;
+
+  /**
+   * The way from a request into the chat it belongs to. It looks like the same words on a chat that
+   * waits: small, at the end of the entry's last line. The row of buttons below holds answers only.
+   */
+  const openChat = (key: string, conversationId: string) => (
+    <button
+      type="button"
+      onClick={act(key, () => onOpenConversations(conversationId))}
+      className="-mx-1.5 -my-3 inline-flex min-h-11 shrink-0 items-center gap-0.5 rounded-lg px-1.5 text-xs font-semibold text-[#5551FF] hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#5551FF]"
+    >
+      Open chat<ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+    </button>
+  );
 
   /** Why the last action on an entry could not be done. Not repeated when the entry says the same already. */
   const problemOf = (key: string, shownAlready?: string | null) => problems[key] && problems[key] !== shownAlready && (
@@ -381,7 +432,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
       <>
         {standing === 'changed' && (
           <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-900">
-            The appointment was changed in the calendar after you accepted. The text below gives it as it stands now.
+            The appointment was changed in the calendar after you confirmed. The text below gives it as it stands now.
           </p>
         )}
         {/* What the app does not do, said as it is: the one thing the owner cannot see for herself. */}
@@ -413,7 +464,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
           <p role="alert" className={`mt-2 ${SMALL} font-medium text-rose-800`}>Copying did not work in this browser. Mark the text above and copy it by hand.</p>
         )}
         <div className="mt-3 flex flex-wrap gap-2">
-          {/* On a request that still waits, "Accept" is the one filled button; there this one is drawn as an outline. */}
+          {/* On a request that still waits, "Confirm" is the one filled button; there this one is drawn as an outline. */}
           <button type="button" onClick={act(key, () => copy(text))} className={answer.outcome === 'moved' ? OUTLINE_BRAND : PRIMARY}>
             {copiedHere?.done ? <Check className={ICON} aria-hidden="true" /> : <Copy className={ICON} aria-hidden="true" />}
             <span aria-live="polite">{copiedHere?.done ? 'Copied' : 'Copy text'}</span>
@@ -469,7 +520,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
             {accepted ? <Check className="h-5 w-5" aria-hidden="true" /> : <X className="h-5 w-5" aria-hidden="true" />}
           </span>
           <div className="min-w-0 flex-1">
-            <p role="status" className={`text-sm font-bold ${accepted ? 'text-emerald-800' : 'text-slate-700'}`}>{accepted ? 'Accepted' : 'Rejected'}</p>
+            <p role="status" className={`text-sm font-bold ${accepted ? 'text-emerald-800' : 'text-slate-700'}`}>{accepted ? 'Confirmed' : 'Declined'}</p>
             <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customerOf(request.customerId)?.name ?? request.customerName, customerOf(request.customerId)?.id)}</p>
             <p className="text-[13px] text-slate-600">
               {appointment?.serviceName ?? serviceName(request)} · <span className="whitespace-nowrap">{formatDate(appointment?.date ?? request.date)},</span>{' '}
@@ -493,55 +544,50 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
     const check = checkRequest(salon, request);
     const staff = staffName(request);
     const contact = [request.customerPhone ? formatPhone(request.customerPhone) : '', requestSource(request.channel)].filter(Boolean);
-    const buttons = (check.refusal ? 0 : 1) + (check.movable ? 1 : 0) + 1;
+    const name = customer?.name ?? request.customerName;
     return (
       <>
         <div className="flex items-start gap-3">
           <DateTile date={request.date} />
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <Meta waited={<Waited since={request.createdAt} source="page" clock={clock} fallback={request.timeAgo} />}>Booking request</Meta>
-            <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customer?.name ?? request.customerName, customer?.id)}</p>
-            <p className="text-sm text-slate-700">
-              {serviceName(request)} · <span className="whitespace-nowrap tabular-nums">{formatStoredTimeRange(request.timeStr)}</span>
+          <div className="min-w-0 flex-1">
+            <Lead waited={<Waited since={request.createdAt} source="page" clock={clock} fallback={request.timeAgo} />}>
+              {nameOf(item.key, name, customer?.id)}
+            </Lead>
+            <p className={WHAT}>
+              {serviceName(request)}{DOT}<span className="whitespace-nowrap tabular-nums">{formatStoredTimeRange(request.timeStr)}</span>
+              {staff && <>{DOT}<span className={WHOLE}>with {staff}</span></>}
             </p>
-            {staff && <p className="text-[13px] text-slate-500">with {staff}</p>}
-            {contact.length > 0 && (
-              <p className="text-[13px] text-slate-500">
-                {contact.map((part, index) => <React.Fragment key={part}>{index > 0 && ' · '}<span className="whitespace-nowrap">{part}</span></React.Fragment>)}
-              </p>
-            )}
-            {chat && (
-              <button type="button" onClick={act(item.key, () => onOpenConversations(chat.id))} className="-ml-3 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold text-[#5551FF] hover:bg-indigo-50">
-                <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
-              </button>
-            )}
+            {/* A customer who has a chat: the request leads there too. */}
+            <Note parts={['Booking request', ...contact]} link={chat && openChat(item.key, chat.id)} />
           </div>
         </div>
         {moved && (
           <div className={`mt-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 ${INDENT}`}>
             <p role="status" className="mb-1 text-sm font-bold text-slate-900">
-              Moved from <span className="whitespace-nowrap">{formatDate(moved.request.date)},</span>{' '}
+              Other time suggested, instead of <span className="whitespace-nowrap">{formatDate(moved.request.date)},</span>{' '}
               <span className="whitespace-nowrap tabular-nums">{formatStoredTimeRange(moved.request.timeStr)}</span>
             </p>
             {telling(item.key, moved, request)}
           </div>
         )}
-        {check.refusal && <p role="status" className={`mt-3 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-medium leading-relaxed text-amber-900 ${INDENT}`}>{check.refusal}</p>}
+        {check.refusal && (
+          <p role="status" className={`mt-3 flex gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-medium leading-relaxed text-amber-900 ${INDENT}`}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="[overflow-wrap:anywhere]">{check.refusal}</span>
+          </p>
+        )}
         {problemOf(item.key, check.refusal)}
-        <div className={`mt-3 grid gap-2 ${buttons === 3 ? 'grid-cols-3' : buttons === 2 ? 'grid-cols-2' : 'grid-cols-1'} sm:flex sm:flex-wrap ${INDENT}`}>
+        {/* What Confirm does, as on a request from a chat, and the one thing that differs here: nobody
+            is in a chat to be told, so the owner tells the customer herself. Then the same three answers. */}
+        <div className={`@container ${INDENT}`}>
           {!check.refusal && (
-            <button type="button" onClick={act(item.key, () => settle(item.key, onAcceptRequest(request.id)))} className={PRIMARY}>
-              <Check className={ICON} aria-hidden="true" />Accept
-            </button>
+            <p className={`mt-2.5 ${SMALL} text-slate-500`}>Confirm adds it to your calendar. You tell {name} yourself.</p>
           )}
-          {check.movable && (
-            <button type="button" onClick={act(item.key, () => openMoveDialog(request))} className={check.refusal ? PRIMARY : OUTLINE}>
-              <CalendarClock className={ICON} aria-hidden="true" />Move
-            </button>
-          )}
-          <button type="button" onClick={act(item.key, () => { onRejectRequest(request.id); settle(item.key, null); })} className={DANGER}>
-            <X className={ICON} aria-hidden="true" />Reject
-          </button>
+          <RequestAnswerButtons
+            onConfirm={check.refusal ? undefined : act(item.key, () => settle(item.key, onAcceptRequest(request.id)))}
+            onSuggest={check.movable ? act(item.key, () => openMoveDialog(request)) : undefined}
+            onDecline={act(item.key, () => { onRejectRequest(request.id); settle(item.key, null); })}
+          />
         </div>
       </>
     );
@@ -574,30 +620,28 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
       <>
         <div className="flex items-start gap-3">
           <DateTile date={booking.date} />
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <Meta waited={<Waited since={conversation.lastMessageAt} source="chat" clock={clock} fallback={conversation.lastTime} />}>{change ? 'Change request from a chat' : 'Booking request from a chat'}</Meta>
-            <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customer?.name ?? name, customer?.id)}</p>
-            <p className="text-sm text-slate-700">
-              {plan?.serviceName ?? booking.service} ·{' '}
+          <div className="min-w-0 flex-1">
+            <Lead waited={<Waited since={conversation.lastMessageAt} source="chat" clock={clock} fallback={conversation.lastTime} />}>
+              {nameOf(item.key, customer?.name ?? name, customer?.id)}
+            </Lead>
+            <p className={WHAT}>
+              {plan?.serviceName ?? booking.service}{DOT}
               <span className="whitespace-nowrap tabular-nums">{plan?.endTime ? formatTimeRange(booking.time, plan.endTime) : booking.time}</span>
+              {plan?.employee
+                ? <>{DOT}<span className={WHOLE}>with {plan.employee.name}{plan.asked ? ', as asked' : ''}</span></>
+                : plan?.asked && <>{DOT}<span className={WHOLE}>asked for {plan.asked.name}</span></>}
             </p>
             {change && (
-              <p className="text-[13px] text-slate-500">
+              <p className={NOTE}>
                 instead of <span className="whitespace-nowrap">{formatDate(plan?.previous?.date ?? booking.previous!.date)},</span>{' '}
                 <span className="whitespace-nowrap tabular-nums">{plan?.previous ? formatTimeRange(plan.previous.startTime, plan.previous.endTime) : booking.previous!.time}</span>
               </p>
             )}
-            {plan?.employee
-              ? <p className="text-[13px] text-slate-500">with {plan.employee.name}{plan.asked ? ', as asked' : ''}</p>
-              : plan?.asked && <p className="text-[13px] text-slate-500">asked for {plan.asked.name}</p>}
-            <p className="text-[13px] text-slate-500">{chatContact(conversation)}</p>
+            <Note parts={[change ? 'Change request from a chat' : 'Booking request from a chat', ...chatContact(conversation)]} link={openChat(item.key, conversation.id)} />
           </div>
         </div>
         <div className={INDENT}>
           <ChatRequestAnswers conversation={conversation} salon={salon} onAnswer={chatAnswer(item.key)} allowTap={(event) => counts(event, item.key)} hold={holdFor(conversation.id)} />
-          <button type="button" onClick={act(item.key, () => onOpenConversations(conversation.id))} className={`mt-2 ${QUIET} -ml-3`}>
-            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
-          </button>
         </div>
       </>
     );
@@ -612,22 +656,20 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
       <>
         <div className="flex items-start gap-3">
           <DateTile date={appointment?.date ?? cancellation.date} />
-          <div className="min-w-0 flex-1 space-y-0.5">
-            <Meta waited={<Waited since={conversation.lastMessageAt} source="chat" clock={clock} fallback={conversation.lastTime} />}>Cancellation request from a chat</Meta>
-            <p className="text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]">{nameOf(item.key, customer?.name ?? conversation.customerName, customer?.id)} wants to cancel</p>
-            <p className="text-sm text-slate-700">
-              {appointment?.serviceName ?? cancellation.service} ·{' '}
+          <div className="min-w-0 flex-1">
+            <Lead waited={<Waited since={conversation.lastMessageAt} source="chat" clock={clock} fallback={conversation.lastTime} />}>
+              {nameOf(item.key, customer?.name ?? conversation.customerName, customer?.id)} wants to cancel
+            </Lead>
+            <p className={WHAT}>
+              {appointment?.serviceName ?? cancellation.service}{DOT}
               <span className="whitespace-nowrap tabular-nums">{appointment ? formatTimeRange(appointment.startTime, appointment.endTime) : cancellation.time}</span>
+              {appointment && <>{DOT}<span className={WHOLE}>with {appointment.staffName}</span></>}
             </p>
-            {appointment && <p className="text-[13px] text-slate-500">with {appointment.staffName}</p>}
-            <p className="text-[13px] text-slate-500">{chatContact(conversation)}</p>
+            <Note parts={['Cancellation request from a chat', ...chatContact(conversation)]} link={openChat(item.key, conversation.id)} />
           </div>
         </div>
         <div className={INDENT}>
           <ChatCancellationAnswers conversation={conversation} salon={salon} onAnswer={chatAnswer(item.key)} allowTap={(event) => counts(event, item.key)} hold={holdFor(conversation.id)} />
-          <button type="button" onClick={act(item.key, () => onOpenConversations(conversation.id))} className={`mt-2 ${QUIET} -ml-3`}>
-            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />Open chat
-          </button>
         </div>
       </>
     );
@@ -709,8 +751,9 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
 
   // ---------- a chat in which the customer waits ----------
 
-  // Two lines: who waits and for how long, then why. The kind of entry is in its picture (the
-  // customer's initials with the channel) and in the way on ("Open chat"), so no line is spent on it.
+  // Two lines: who waits and for how long, then why, with the way on at its end. The kind of entry
+  // is in its picture (the customer's initials with the channel) and in the way on ("Open chat"), so
+  // no line is spent on it. The right-hand edge reads like a request's: how long, then the way in.
   const renderChat = ({ key, conversation }: Extract<InboxItem, { kind: 'chat' }>) => (
     <button
       type="button"
@@ -718,7 +761,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
       className="-m-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-slate-50"
     >
       <span className="relative shrink-0">
-        <span className={`flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold ${conversation.avatarColor}`}>{conversation.initials}</span>
+        <span className={`flex h-12 w-12 items-center justify-center rounded-full text-xs font-bold ${conversation.avatarColor}`}>{conversation.initials}</span>
         <ChannelBadge channel={conversation.channel} />
       </span>
       <span className="min-w-0 flex-1 space-y-0.5">
@@ -731,11 +774,13 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
           </span>
           <span className="ml-auto flex shrink-0"><Waited since={conversation.lastMessageAt} source="chat" clock={clock} fallback={conversation.lastTime} /></span>
         </span>
-        <span className={`line-clamp-3 ${SMALL} leading-snug text-slate-600`}>{conversation.attentionReason?.trim() || 'The customer is waiting for your answer.'}</span>
-      </span>
-      <span className="flex shrink-0 items-center gap-0.5 self-center text-xs font-semibold text-[#5551FF]">
-        <span className="sr-only sm:not-sr-only">Open chat</span>
-        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        <span className="flex items-start gap-3">
+          <span className={`min-w-0 flex-1 line-clamp-3 ${SMALL} leading-snug text-slate-600`}>{conversation.attentionReason?.trim() || 'The customer is waiting for your answer.'}</span>
+          <span className="flex shrink-0 items-center gap-0.5 text-xs font-semibold text-[#5551FF]">
+            <span className="sr-only sm:not-sr-only">Open chat</span>
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </span>
+        </span>
       </span>
     </button>
   );
@@ -767,7 +812,8 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
   return (
     <section aria-labelledby="home-inbox-title" className="rounded-2xl border border-slate-200/70 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
       <div className="flex items-center gap-2 px-4 pt-4 sm:px-5">
-        <h2 id="home-inbox-title" ref={headingRef} tabIndex={-1} className="text-base font-bold tracking-tight text-slate-900">Waiting for you</h2>
+        <h2 id="home-inbox-title" ref={headingRef} tabIndex={-1} className="flex items-center gap-2 text-base font-bold tracking-tight text-slate-900">
+          <Inbox className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />Waiting for you</h2>
         {waiting > 0 && (
           <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold tabular-nums text-white">
             {waiting}<span className="sr-only"> {waiting === 1 ? 'entry' : 'entries'}</span>
@@ -853,7 +899,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
             }}
           >
             <div className="flex items-start justify-between gap-3 mb-2">
-              <h3 id="move-appointment-title" className="text-base font-bold text-slate-900">Move booking request</h3>
+              <h3 id="move-appointment-title" className="text-base font-bold text-slate-900">Suggest another time</h3>
               <button type="button" onClick={() => setMovingRequestId(null)} aria-label="Close" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100">
                 <X className="w-4 h-4" />
               </button>
@@ -915,7 +961,7 @@ export const HomeInbox: React.FC<HomeInboxProps> = ({
                   disabled={!selectedMoveStart || !rescheduleDate}
                   className="min-h-11 flex-1 py-2 text-sm font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Move request
+                  Suggest this time
                 </button>
               </div>
             </div>
