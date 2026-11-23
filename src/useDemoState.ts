@@ -1,5 +1,7 @@
 import { useCallback, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react';
 import { DemoStore, SALON_KEY, type PageEvents } from './demoStore';
+import { currentLiveKey } from './liveWhatsApp';
+import { browserTabs, fetchSalon, SharedSalon, type SalonStatus } from './sharedSalon';
 
 // Bump the version whenever the starting data or their shape change, so that what an earlier
 // build stored is not read by the new one (v4: the salon moved from each tab's own storage to
@@ -97,12 +99,125 @@ function demoStore(): DemoStore {
 }
 
 /**
+ * The salon on the server, for the page that is open (src/sharedSalon.ts): one per page load, as
+ * the store above. It starts loading at once when this browser holds the owner's key, so that the
+ * first screen is "Loading your salon…" and never the browser's own salon for a moment. The
+ * customers' booking page ("?booking=1") of such a browser reads it too and never writes to it; the
+ * customer's chat ("?chat=") never uses it.
+ */
+let pageSalon: { salon: SharedSalon; page: PageEvents } | null = null;
+
+export function salonOnServer(): SharedSalon | null {
+  if (typeof window === 'undefined') return null;
+  const page: PageEvents = window;
+  if (pageSalon && pageSalon.page === page) return pageSalon.salon;
+  const salon = new SharedSalon({
+    request: fetchSalon,
+    builtAt: () => demoStore().builtAt,
+    tabs: browserTabs(),
+    report: (message) => console.warn(`[booking data] ${message}`),
+  });
+  pageSalon?.salon.close();
+  pageSalon = { salon, page };
+  const search = new URLSearchParams(window.location?.search ?? '');
+  // The customer's chat never uses the owner's key. The customers' booking page in a browser that
+  // holds it shows the same salon as the owner's app there, read-only (src/App.tsx).
+  const key = search.has('chat') ? null : currentLiveKey();
+  if (key) void salon.begin(key, { readOnly: search.get('booking') === '1' });
+  return salon;
+}
+
+/** Tests only: forget the salon of the page, so the next call builds it again (with the stand-ins of the test). */
+export function forgetSalonOnServerForTests(salon?: SharedSalon): void {
+  pageSalon?.salon.close();
+  pageSalon = salon && typeof window !== 'undefined' ? { salon, page: window } : null;
+}
+
+const noSalon: SalonStatus = { phase: 'local', loadError: null, saving: false, savedAt: null, notice: null, replaced: 0, updated: 0 };
+const noWatch = () => () => {};
+
+/** Where the salon on the server stands: loading, ready, saving, a message for the owner. */
+export function useSalonStatus(): SalonStatus {
+  const [salon] = useState(salonOnServer);
+  const subscribe = useCallback((listener: () => void) => salon?.watchStatus(listener) ?? noWatch(), [salon]);
+  const read = () => salon?.current ?? noSalon;
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * What the server has of a shared part on a signed-in device (src/sharedSalon.ts serverValue),
+ * or `shown` everywhere else (a browser that is not signed in saves at once; a test without a
+ * page). An open form compares with it (src/formFollow.ts): its own save counts only once taken.
+ */
+export function useServerValue<T>(key: string, shown: T): T {
+  const [salon] = useState(salonOnServer);
+  const subscribe = useCallback((listener: () => void) => salon?.listen(key, listener) ?? noWatch(), [salon, key]);
+  const read = () => salon && salon.serves(key) && salon.current.phase === 'ready' ? salon.serverValue<T>(key, shown) : shown;
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * For a message that says a change is done: while the action that is running has changed a part
+ * the server keeps, whether the server took it. Null when nothing waits for the server.
+ */
+export const pendingSalonSave = (): Promise<boolean> | null => pageSalon?.salon.pendingSave() ?? null;
+
+/**
+ * For a form that sends what it holds (a service, a person, a day's hours, a closure, an
+ * absence): call it right after the form's save. Null when nothing waits for the server (a
+ * browser that is not signed in): the form closes at once. Otherwise the form stays as typed until
+ * the promise says the server took it; not taken, it stays open and its own Save is the way to try
+ * again (the message offers no "Try again", src/sharedSalon.ts).
+ */
+export const pendingFormSave = (): Promise<boolean> | null => pageSalon?.salon.pendingFormSave() ?? null;
+
+/**
+ * Why the form's save was not taken, for the form itself to say: an open form or sheet covers the
+ * message at the foot of the screen, so the form shows the same sentence where the owner looks.
+ */
+export const notSavedText = (): string => pageSalon?.salon.current.notice?.text ?? 'Your change was not saved.';
+
+/**
+ * A form that holds a copy of the salon opens: the record is asked for again, quietly, so the form
+ * starts from the latest save of another device and its own save does not meet a 409 it could
+ * have avoided. Nothing on a device that is not signed in.
+ */
+export const refreshSharedSalon = (): void => { if (pageSalon && !pageSalon.salon.readOnly) pageSalon.salon.reload(); };
+
+/**
+ * Shows `message` once the change it speaks of is saved: at once in this browser, after the
+ * server's answer on a signed-in device. A change the server did not take shows its own message
+ * instead (src/sharedSalon.ts), so `message` is then not shown at all.
+ */
+export function whenSaved(message: () => void): void {
+  const pending = pendingSalonSave();
+  if (!pending) { message(); return; }
+  void pending.then((saved) => { if (saved) message(); });
+}
+
+/**
+ * As whenSaved, for a page form that keeps what it holds on screen whatever happens (Settings ›
+ * Salon and Opening hours, the AI receptionist): a save that is not taken stays in the form,
+ * shown as unsaved, and the form's own Save is the way to try again. So the message offers no
+ * "Try again", and no copy of the change is kept that a later "Try again" could send over a newer save.
+ */
+export function whenFormSaved(message: () => void): void {
+  const pending = pendingFormSave();
+  if (!pending) { message(); return; }
+  void pending.then((saved) => { if (saved) message(); });
+}
+
+/**
  * State that outlives the page. It reads and sets like useState.
  *
  * The salon's data are kept in the browser's lasting storage: they survive a closed tab, and a
  * change made in one tab shows in the others without a reload. A few keys stay with one tab
- * (PER_TAB_KEYS). Another device or browser is never reached. Where storage is blocked, the
- * values live in memory for this page load.
+ * (PER_TAB_KEYS). Where storage is blocked, the values live in memory for this page load.
+ *
+ * On a device signed in with the owner's key, the parts of the salon the server keeps (services,
+ * team, hours, closed dates, absences, single days, the salon's details and the AI's settings)
+ * are read from and written to the server instead (src/sharedSalon.ts). The calendar, requests,
+ * customers and the built-in chats stay in this browser either way.
  *
  * `initial` is the value while nothing is stored: the value itself, or a function that builds
  * it. The function is given the moment the stored salon was started, the same in every tab, so
@@ -110,10 +225,27 @@ function demoStore(): DemoStore {
  */
 export function useDemoState<T>(key: string, initial: T | ((builtAt: Date) => T)) {
   const [store] = useState(demoStore);
-  const read = () => store.read<T>(key, initial);
-  const subscribe = useCallback((listener: () => void) => store.listen(key, listener), [store, key]);
+  const [salon] = useState(salonOnServer);
+  const read = () => salon?.serves(key) ? salon.read<T>(key, initial) : store.read<T>(key, initial);
+  const subscribe = useCallback((listener: () => void) => {
+    const stopLocal = store.listen(key, listener);
+    const stopServer = salon?.listen(key, listener);
+    return () => { stopLocal(); stopServer?.(); };
+  }, [store, salon, key]);
   const value = useSyncExternalStore(subscribe, read, read);
-  const setValue: Dispatch<SetStateAction<T>> = useCallback((next) => store.write<T>(key, next), [store, key]);
+  const setValue: Dispatch<SetStateAction<T>> = useCallback((next) => {
+    if (salon?.serves(key)) { salon.write<T>(key, next); return; }
+    const before = store.read<T>(key, initial);
+    store.write<T>(key, next);
+    const after = store.read<T>(key, initial);
+    // On a signed-in device an action may change a shared part and this browser's own parts
+    // together: the browser's part goes back with the shared one when the server does not take it.
+    if (salon && !Object.is(before, after)) {
+      salon.noteLocalChange({ before, after, read: () => store.read<T>(key, initial), write: (value) => store.write<T>(key, value as T) });
+    }
+  // `initial` is read again where needed; a new function of it each render is no new setter.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store, salon, key]);
   return [value, setValue] as const;
 }
 

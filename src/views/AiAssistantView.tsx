@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { AiAssistantSettings, ChatLanguage } from '../types';
 import { LANGUAGE_NAMES } from '../conversationData';
 import type { LiveStatus } from '../liveWhatsApp';
 import { ChannelIcon, channelLabel, type ChannelKind } from '../components/ChannelBadge';
 import { formatPhone } from '../format';
+import { refreshSharedSalon, useServerValue, whenFormSaved } from '../useDemoState';
+import { BY_KEY, useStoredForm } from '../formFollow';
 
 /** What the app really knows about the channels. Nothing here is a switch the owner can flip. */
 export interface ChannelFacts {
@@ -123,8 +125,13 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   onSave,
   channels = { live: 'off' },
 }) => {
-  const [form, setForm] = useState<AiAssistantSettings>(initial);
+  // Compared with and following what the server has (src/formFollow.ts): a switch the owner has not
+  // touched shows another device's change; the handover rules are followed one by one.
+  const stored = useServerValue('aiSettings', initial);
+  const { form, setForm } = useStoredForm<AiAssistantSettings>(stored, { lists: { handoverRules: (rule: AiAssistantSettings['handoverRules'][number]) => rule.id, answerLanguages: BY_KEY } });
   const [saved, setSaved] = useState(false);
+  // The form starts from the latest record (src/useDemoState.ts refreshSharedSalon).
+  useEffect(() => { refreshSharedSalon(); }, []);
 
   const update = <K extends keyof AiAssistantSettings>(
     key: K,
@@ -139,8 +146,11 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
   const handleSave = () => {
     onSave(form);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    // "Saved!" only once it is: on a signed-in device that is when the server has taken it.
+    whenFormSaved(() => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    });
   };
 
   const languages: ChatLanguage[] = ['DE', 'FR', 'IT', 'EN'];

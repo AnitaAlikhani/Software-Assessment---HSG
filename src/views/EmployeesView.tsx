@@ -8,11 +8,14 @@ import {
   X,
 } from 'lucide-react';
 import { AppointmentRequest, BookingHoursDay, CalendarEvent, Employee, ServiceItem, ShiftEntry } from '../types';
-import { formatDate, formatMoney, formatPhone, formatTimeRange, weekdayName } from '../format';
+import { formatDate, formatMoney, formatPhone, formatTimeRange, normalizePhone, weekdayName } from '../format';
 import { requestTimes } from '../appointmentActions';
 import { getSalonNow } from '../scheduling';
 import { useCloseOnBack } from '../backGesture';
 import { staffAvatarStyle, staffColorFor } from '../staffColors';
+import { notSavedText, pendingFormSave, refreshSharedSalon, useServerValue } from '../useDemoState';
+import { BY_POSITION, useStoredForm } from '../formFollow';
+import { useFormSave } from '../formSave';
 import { personFormFor, personFromForm, weekFromRows, type DayRow, type PersonForm } from '../personForm';
 import { BOOKING_GAP_REASON, bookingGaps, setupSteps, type BookingGap, type FormSection, type SetupStep } from '../teamBooking';
 import { bookingsLeftOutside, dateOfWeekday, timeChoices, WEEKDAY_KEYS, weeklyHoursFromOpeningHours } from '../workingHours';
@@ -20,7 +23,8 @@ import { bookingsLeftOutside, dateOfWeekday, timeChoices, WEEKDAY_KEYS, weeklyHo
 interface EmployeesViewProps {
   employees: Employee[];
   /** Adds the person with the services ticked in their form. Gives back the new person's id where the app has one. */
-  onAddEmployee: (emp: Omit<Employee, 'id' | 'initials' | 'name'>, serviceIds: string[]) => string | void;
+  /** `id`: the id the form chose for this new person, the same for every try of one opening of the form. */
+  onAddEmployee: (emp: Omit<Employee, 'id' | 'initials' | 'name'>, serviceIds: string[], id?: string) => string | void;
   onUpdateEmployee: (id: string, employee: Partial<Employee>, serviceIds?: string[]) => void;
   /** Deletes the person, or returns why that is not possible. */
   onDeleteEmployee: (id: string) => string | null | void;
@@ -57,6 +61,16 @@ interface EmployeesViewProps {
   onUnsavedChange?: (question: string | null) => void;
 }
 
+/** Whether two fillings of the person form say the same once saved: a number typed with or without spaces is one number. */
+const samePerson = (a: PersonForm, b: PersonForm): boolean => {
+  const saved = (form: PersonForm) => JSON.stringify({
+    ...form, firstName: form.firstName.trim(), lastName: form.lastName.trim(), email: form.email.trim(),
+    phone: form.phone.trim() ? normalizePhone(form.phone) : '',
+  });
+  return saved(a) === saved(b);
+};
+const NO_SERVICES: ServiceItem[] = [];
+const NO_HOURS: BookingHoursDay[] = [];
 const fieldClass = 'min-h-11 w-full px-3.5 py-2.5 bg-slate-50 border-b border-slate-300 focus:border-[#5551FF] focus:bg-white focus:outline-hidden text-base sm:text-sm transition-all rounded-t-lg';
 const timeFieldClass = 'block min-h-11 w-full min-w-[7.75rem] px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-base sm:text-sm text-slate-900 tabular-nums';
 const switchTrack = "relative w-11 h-6 shrink-0 bg-slate-200 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-[#5551FF] peer-focus-visible:ring-offset-2 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#5551FF]";
@@ -94,6 +108,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [formError, setFormError] = useState('');
+  // The form's save is on its way to the server (signed-in device): this opening of the form waits
+  // for its answer; another opening (another person, the same one again, the next new one) is not
+  // touched by it (src/formSave.ts).
+  const { saving, notSaved, newOpening, afterSave } = useFormSave();
+  /** Back to the list: the form's opening ends, and an answer still on its way no longer concerns it. */
+  const leaveEditor = () => { setIsAddingMode(false); newOpening(); };
   // Before the screen is drawn, so that the page's own title and tabs never show next to the form.
   useLayoutEffect(() => {
     onEditingChange?.(isAddingMode);
@@ -107,7 +127,25 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   const today = getSalonNow(timeZone, now).date;
   const tableRef = useRef<HTMLDivElement>(null);
   const tableScrolls = useHorizontalOverflow(tableRef, [isAddingMode]);
-  const [form, setForm] = useState<PersonForm>(() => personFormFor(null, salon));
+  // The open form compares with what the server has of the person and follows it (src/formFollow.ts):
+  // a field the owner has not changed shows a change made on another device, one she changed keeps
+  // what she typed. A new person starts from fixed values and follows nothing.
+  const storedEmployees = useServerValue('employees', employees);
+  const storedServices = useServerValue('services', services ?? NO_SERVICES);
+  const storedHours = useServerValue('bookingHours', bookingHours ?? NO_HOURS);
+  const storedPerson = editingEmployee ? storedEmployees.find((item) => item.id === editingEmployee.id) : undefined;
+  const [newFrom, setNewFrom] = useState<PersonForm>(() => personFormFor(null, salon));
+  // The week is followed day by day (its seven rows never move); the services as ticks.
+  const { form, setForm, startedFrom, restart } = useStoredForm<PersonForm>(storedPerson ? personFormFor(storedPerson, { services: storedServices, bookingHours: storedHours }) : newFrom, { lists: { days: BY_POSITION } });
+  // The person whose form is open was deleted on another device: the form closes and says so.
+  const [removedNote, setRemovedNote] = useState('');
+  const openGone = Boolean(isAddingMode && editingEmployee && !storedPerson && !employees.some((item) => item.id === editingEmployee.id));
+  useEffect(() => {
+    if (!openGone || !editingEmployee) return;
+    setRemovedNote(`${editingEmployee.name} was removed on another device.`);
+    leaveEditor();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openGone]);
   // A changed regular week may leave bookings of this person outside their hours. The form says
   // so before saving, as the editor of a single day does; the bookings themselves are not touched.
   const hoursWarning = (() => {
@@ -136,27 +174,38 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   const [addedId, setAddedId] = useState<string | null>(null);
   const added = addedId ? employees.find((employee) => employee.id === addedId) : undefined;
 
-  // What the form showed when it was opened. Anything else in it now is a change that would be lost.
-  const [openedWith, setOpenedWith] = useState('');
-  const formChanged = isAddingMode && JSON.stringify(form) !== openedWith;
+  // What the server has (or the form opened with, for a new person): anything else in it is a change that would be lost.
+  const formChanged = isAddingMode && JSON.stringify(form) !== JSON.stringify(startedFrom);
+  // Why the last save was not taken, said only while the form still holds something the server does
+  // not have: once the server has exactly this (its answer got lost), the sentence goes.
+  const shownError = formError || (notSaved && isAddingMode && !samePerson(form, startedFrom) ? notSaved : '');
   const discardQuestion = editingEmployee
     ? `Discard your changes to ${editingEmployee.name}? They are not saved yet.`
     : 'Discard this new employee? It is not saved yet.';
 
   // What opened the form: a person's name in the list, or "New employee". Focus goes back there when the form closes.
   const openedFrom = useRef('new');
+  // The id a new person gets: one per opening of the form. A save that is tried again (its answer
+  // got lost, or the server could not be reached) is then the same person and never a second one.
+  const [newPersonId, setNewPersonId] = useState('');
   const openEditor = (employee: Employee | null = null, section: FormSection | null = null) => {
     openedFrom.current = employee?.id ?? 'new';
-    const shown = personFormFor(employee, salon);
-    setEditingEmployee(employee); setForm(shown);
-    setOpenedWith(JSON.stringify(shown));
+    if (!employee) setNewPersonId(`emp-${Date.now()}`);
+    refreshSharedSalon();
+    const stored = employee ? storedEmployees.find((item) => item.id === employee.id) ?? employee : null;
+    const shown = stored ? personFormFor(stored, { services: storedServices, bookingHours: storedHours }) : personFormFor(null, salon);
+    setEditingEmployee(stored);
+    if (!stored) setNewFrom(shown);
+    restart(shown);
+    setRemovedNote('');
     setOpenSection(section);
     setFormError(''); setIsAddingMode(true);
+    newOpening();
   };
   /** Back to the list. A form with changes asks first: a tap on the arrow or the Back gesture is quickly done. */
   const closeEditor = () => {
     if (formChanged && !window.confirm(discardQuestion)) return;
-    setIsAddingMode(false);
+    leaveEditor();
   };
   // The form is a page inside Team: the phone's Back gesture leads back to the list, not out of Team.
   const editorRef = useRef<HTMLDivElement>(null);
@@ -198,19 +247,47 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     event.preventDefault();
     const person = personFromForm(form, { services: salon.services, companyName });
     if ('error' in person) { setFormError(person.error); return; }
+    if (saving) return;
+    let addedNow: string | null = null;
     if (editingEmployee) onUpdateEmployee(editingEmployee.id, person.details, person.serviceIds);
     else {
-      const id = onAddEmployee(person.details, person.serviceIds);
-      setAddedId(typeof id === 'string' ? id : null);
+      const id = onAddEmployee(person.details, person.serviceIds, newPersonId || undefined);
+      addedNow = typeof id === 'string' ? id : null;
     }
     const addAnother = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'another';
-    if (addAnother) {
-      openEditor();
-      event.currentTarget.querySelector<HTMLInputElement>('#employee-first-name')?.focus();
-    } else {
-      setIsAddingMode(false);
-    }
+    const formElement = event.currentTarget;
+    const pending = pendingFormSave();
+    // On a signed-in device the form stays as typed until the server has it; not taken, it stays
+    // open and says why, so nothing typed is lost. Taken, it goes back to the list or, for "Save
+    // and add another", starts the next person. Elsewhere that happens at once.
+    afterSave(pending, () => {
+      if (!editingEmployee) setAddedId(addedNow);
+      if (addAnother) {
+        openEditor();
+        formElement.querySelector<HTMLInputElement>('#employee-first-name')?.focus();
+      } else {
+        leaveEditor();
+      }
+    }, notSavedText);
   };
+
+  // The new person turns out to be on the server although the save was reported as not taken (its
+  // answer got lost on the way). The form has done its work and goes back to the list, which shows
+  // them. If the owner has typed more into the form since, nothing of that is dropped: the form
+  // goes on as that person's form, with what she typed, still to save.
+  const arrived = isAddingMode && !editingEmployee && Boolean(newPersonId) && !saving ? storedEmployees.find((item) => item.id === newPersonId) : undefined;
+  useEffect(() => {
+    if (!arrived) return;
+    if (samePerson(form, personFormFor(arrived, { services: storedServices, bookingHours: storedHours }))) {
+      setAddedId(arrived.id);
+      leaveEditor();
+      return;
+    }
+    setEditingEmployee(arrived);
+    setFormError('');
+    newOpening();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrived?.id]);
 
   /** What the list says about one person and the booking page: bookable, or what is in the way. */
   const gapsOf = (employee: Employee): BookingGap[] => bookingGaps(salon, employee, today);
@@ -247,21 +324,23 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             />
 
             {/* Buttons matching Figma */}
-            {formError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{formError}</p>}
+            {shownError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{shownError}</p>}
             <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row gap-3 justify-end">
               <button
                 type="submit"
                 name="intent"
                 value="save"
-                className="min-h-11 px-6 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors sm:order-last"
+                disabled={saving}
+                className="min-h-11 px-6 py-2.5 text-xs font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs transition-colors sm:order-last disabled:opacity-60"
               >
-                Save employee
+                {saving ? 'Saving…' : 'Save employee'}
               </button>
               {!editingEmployee && <button
                 type="submit"
                 name="intent"
                 value="another"
-                className="min-h-11 px-5 py-2.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/10 hover:bg-[#5551FF]/18 rounded-xl transition-colors"
+                disabled={saving}
+                className="min-h-11 px-5 py-2.5 text-xs font-semibold text-[#5551FF] bg-[#5551FF]/10 hover:bg-[#5551FF]/18 rounded-xl transition-colors disabled:opacity-60"
               >
                 Save and add another employee
               </button>}
@@ -273,7 +352,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           {editingEmployee && (
             <DeleteEmployee key={editingEmployee.id} employee={editingEmployee}
               blocked={deletionBlocker?.(editingEmployee) ?? null}
-              onDelete={() => onDeleteEmployee(editingEmployee.id)} onDeleted={() => setIsAddingMode(false)} />
+              onDelete={() => onDeleteEmployee(editingEmployee.id)} onDeleted={leaveEditor} />
           )}
         </div>
       ) : (
@@ -292,6 +371,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           </div>
 
           {/* Right after somebody was added: what is still missing before customers can book them, at most two steps. */}
+          {removedNote && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{removedNote}</p>}
           {added && knowsSalon && (
             <AddedPersonSteps
               employee={added}
@@ -532,7 +612,7 @@ export const PersonFields: React.FC<PersonFieldsProps> = ({ form, hoursWarning =
             First name *
           </label>
           <input
-            id="employee-first-name"
+            id="employee-first-name" maxLength={120}
             autoFocus={focusName}
             type="text"
             required
@@ -548,7 +628,7 @@ export const PersonFields: React.FC<PersonFieldsProps> = ({ form, hoursWarning =
             Last name *
           </label>
           <input
-            id="employee-last-name"
+            id="employee-last-name" maxLength={120}
             type="text"
             required
             placeholder="e.g. Schmid"
@@ -566,7 +646,7 @@ export const PersonFields: React.FC<PersonFieldsProps> = ({ form, hoursWarning =
             Email
           </label>
           <input
-            id="employee-email"
+            id="employee-email" maxLength={254}
             type="email"
             placeholder="jessica.schmid@example.com"
             value={form.email}
@@ -580,7 +660,7 @@ export const PersonFields: React.FC<PersonFieldsProps> = ({ form, hoursWarning =
             Mobile phone
           </label>
           <input
-            id="employee-phone"
+            id="employee-phone" maxLength={40}
             type="tel"
             placeholder="079 123 45 67"
             value={form.phone}

@@ -2,6 +2,7 @@ import { analyzeIncoming, type IncomingAnalysis } from './ai.js';
 import { fixedReply, fixedReplyGermanEnglish } from './chatReplies.js';
 import { countMessengerMessage, LIMIT_TEXTS } from './limits.js';
 import { applyAnalysis, chatStateLines, storeCustomerMessage, UNANSWERED } from './recordAnalysis.js';
+import { BUILT_IN_SALON, loadChatAndSalon, type Salon } from './salon.js';
 import { changeConversation, loadForUpdate, type LoadedChat } from './store.js';
 import { addReply, needsOwner, type IncomingMessage, type LiveConversation, type Translated } from './whatsappCore.js';
 import type { ChatLanguage } from '../src/types.js';
@@ -19,6 +20,10 @@ import type { ChatLanguage } from '../src/types.js';
  *
  * Every save adds to the chat as it is at that moment (changeConversation in store.ts), so two
  * messages, or a message and an owner action, that arrive close together never overwrite each other.
+ *
+ * The salon (server/salon.ts) is read in the same command as the chat in step 1, and the AI's
+ * instructions and the check of a booking request take it from there: a change the owner saved
+ * holds for the next message, and knowing it costs no command more.
  */
 
 /** A chat that was saved: what the request knows of it now. */
@@ -31,12 +36,12 @@ export async function storeIncoming(incoming: IncomingMessage, loaded?: LoadedCh
 }
 
 /** The AI's reading of a message already in the chat, or null when the AI could not answer. */
-export async function askAi(conversation: LiveConversation, messageId: string, now = Date.now()): Promise<IncomingAnalysis | null> {
+export async function askAi(conversation: LiveConversation, messageId: string, now = Date.now(), salon: Salon = BUILT_IN_SALON): Promise<IncomingAnalysis | null> {
   const index = conversation.messages.findIndex(message => message.id === messageId);
   if (index < 0) return null;
   try {
     const started = Date.now();
-    const analysis = await analyzeIncoming(conversation.messages.slice(0, index), conversation.messages[index].original, new Date(now), chatStateLines(conversation, messageId, new Date(now)));
+    const analysis = await analyzeIncoming(conversation.messages.slice(0, index), conversation.messages[index].original, new Date(now), chatStateLines(conversation, messageId, new Date(now)), salon);
     console.log(`AI reply took ${Date.now() - started} ms`);
     return analysis;
   } catch (error) {
@@ -50,7 +55,7 @@ export async function askAi(conversation: LiveConversation, messageId: string, n
  * (the website chat, which reads its replies from the storage) the reply is saved with it.
  * Returns null when the chat is gone (the customer deleted it meanwhile).
  */
-export async function applyAi(saved: Saved, messageId: string, analysis: IncomingAnalysis | null, storeReply: boolean, now = Date.now()) {
+export async function applyAi(saved: Saved, messageId: string, analysis: IncomingAnalysis | null, storeReply: boolean, now = Date.now(), salon: Salon = BUILT_IN_SALON) {
   const outcome = await changeConversation<Translated | null>(saved.loaded, chat => {
     if (!chat?.messages.some(message => message.id === messageId)) return { conversation: null, value: null };
     if (!analysis) {
@@ -58,7 +63,7 @@ export async function applyAi(saved: Saved, messageId: string, analysis: Incomin
       if (!chat.takenOver) needsOwner(chat, UNANSWERED);
       return { conversation: chat, value: null };
     }
-    const reply = applyAnalysis(chat, messageId, analysis, new Date(now));
+    const reply = applyAnalysis(chat, messageId, analysis, new Date(now), salon);
     if (reply && storeReply) addReply(chat, 'ai', reply, now);
     return { conversation: chat, value: reply };
   }, now);
@@ -134,13 +139,17 @@ const WITHOUT_AI_REASON = {
 } as const;
 
 export async function answerMessengerMessage(incoming: IncomingMessage, beforeAi?: (saved: Saved) => Promise<unknown>, now = Date.now()) {
-  const stored = await storeIncoming(incoming);
+  const { loaded, salon } = await loadChatAndSalon(incoming.waId);
+  const stored = await storeIncoming(incoming, loaded);
   if (!stored) return null; // deleted in the moment it arrived
   const check = await countMessengerMessage(incoming.waId, now);
-  if (check !== 'ok') return answerWithoutAi(stored, incoming.id, false, now, WITHOUT_AI_REASON[check]);
+  if (check !== 'ok') {
+    const answered = await answerWithoutAi(stored, incoming.id, false, now, WITHOUT_AI_REASON[check]);
+    return answered && { ...answered, salon };
+  }
   await beforeAi?.(stored);
-  const answered = await applyAi(stored, incoming.id, await askAi(stored.conversation, incoming.id, now), false, now);
-  return answered && { ...answered, promise: false };
+  const answered = await applyAi(stored, incoming.id, await askAi(stored.conversation, incoming.id, now, salon), false, now, salon);
+  return answered && { ...answered, promise: false, salon };
 }
 
 /**

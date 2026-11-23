@@ -100,6 +100,33 @@ export async function refusalSentence(response: Response): Promise<string> {
   return sentenceOf(data, chatAnswer(response.status));
 }
 
+/** What this page shows of the salon's profile (GET /api/salon/profile, server/salon.ts salonProfile). */
+export interface ProfileFacts {
+  name: string | null;
+  timeZone: string | null;
+  /** The salon's number as it set it; '' when it has none; null when the answer does not say. */
+  phone: string | null;
+}
+
+/** Takes the salon's name (`companyName`), time zone and phone from the profile, where the answer has them. */
+export function profileFacts(data: unknown): ProfileFacts {
+  const record = typeof data === 'object' && data !== null && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  const text = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null;
+  return {
+    name: text(record.companyName),
+    timeZone: text(record.timeZone),
+    phone: typeof record.phone === 'string' ? record.phone.trim() : null,
+  };
+}
+
+const NO_PROFILE: ProfileFacts = { name: null, timeZone: null, phone: null };
+
+/**
+ * How long the page keeps the salon's name back while the profile is on its way. Showing the
+ * built-in name and then another one would flicker; after this moment the built-in name shows.
+ */
+export const NAME_WAIT_MS = 1200;
+
 function stored(key: string) {
   try { return localStorage.getItem(key); } catch { return null; }
 }
@@ -209,12 +236,44 @@ export default function CustomerChat({ token }: { token?: string | null }) {
   /** Counts the messages sent from here, so an answer to a poll that started before one of them is not taken for news. */
   const sends = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
-  const { companyName: salon, businessPhone } = initialCompanySettings;
+  // The salon's name and time zone as the salon has set them (GET /api/salon/profile), asked for
+  // once the link has been accepted, so a refused link costs no second wrong try. Until the
+  // answer comes, and when it fails, the page uses the built-in ones.
+  const [profile, setProfile] = useState<ProfileFacts | null>(null);
+  const [nameWaited, setNameWaited] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setNameWaited(true), NAME_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  const askedProfile = useRef(false);
+  useEffect(() => {
+    if (!key || !linkConfirmed || refused.current || askedProfile.current) return;
+    askedProfile.current = true;
+    let stopped = false;
+    fetch('/api/salon/profile', { headers: chatHeaders(key), cache: 'no-store' })
+      .then(async response => {
+        if (stopped) { done(response); return; }
+        if (chatAnswer(response.status) === 'link-not-valid') { void linkRefused(response); return; }
+        if (!response.ok) { done(response); setProfile(NO_PROFILE); return; }
+        const facts = profileFacts(await response.json().catch(() => null));
+        if (!stopped) setProfile(facts);
+      })
+      .catch(() => { if (!stopped) setProfile(NO_PROFILE); });
+    return () => { stopped = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, linkConfirmed]);
+  const salon = profile?.name ?? initialCompanySettings.companyName;
+  const salonTimeZone = profile?.timeZone ?? initialCompanySettings.timeZone;
+  // The name shows once it is known, or once waiting longer would only keep the page empty.
+  const nameShown = profile !== null || nameWaited || !linkWorks;
+  const nameClass = `transition-opacity duration-200 ${nameShown ? 'opacity-100' : 'opacity-0'}`;
+  // The salon's number from the profile once it is there (none when the salon has none); the built-in one until then.
+  const businessPhone = profile?.phone ?? initialCompanySettings.businessPhone;
   // The salon's number is written the way every number is: "+41 71 123 45 67".
   const salonPhone = businessPhone.trim() ? formatPhone(businessPhone) : '';
   const copy = chatCopy(study, salon, salonPhone, earlier.length);
   // The browser tab names the salon, not the product: "Chat with Bella Hair Salon".
-  usePageHead(chatPageHead(salon, key && linkWorks ? HEADER_COLOR : undefined));
+  usePageHead(chatPageHead(nameShown ? salon : '', key && linkWorks ? HEADER_COLOR : undefined));
 
   /** The link was refused: the page shows the server's sentence and nothing to type into. */
   const linkRefused = async (response: Response) => {
@@ -525,10 +584,10 @@ export default function CustomerChat({ token }: { token?: string | null }) {
       <div className="w-full max-w-lg flex flex-col h-full min-h-0 bg-[#efeae2]" onKeyDown={event => { if (event.key === 'Escape' && menuOpen) closeMenu(); }}>
         <header className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#075e54] text-white">
           <div aria-hidden="true" className="w-10 h-10 shrink-0 rounded-full bg-white/20 flex items-center justify-center font-bold">
-            {salon.slice(0, 1)}
+            <span className={nameClass}>{salon.slice(0, 1)}</span>
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-base font-semibold truncate">{salon}</h1>
+            <h1 className={`text-base font-semibold truncate ${nameClass}`} aria-busy={!nameShown}>{salon}</h1>
             <p className="text-xs leading-snug text-white/80">{copy.subtitle}</p>
           </div>
           {session && (
@@ -586,7 +645,7 @@ export default function CustomerChat({ token }: { token?: string | null }) {
                 <Sparkles className="w-5 h-5 text-[#5551FF] shrink-0 mt-0.5" aria-hidden="true" />
                 <div className="min-w-0 space-y-2 text-sm text-slate-700">
                   <p className="font-semibold text-slate-900">{copy.title}</p>
-                  <p>{copy.intro}</p>
+                  <p className={nameClass}>{copy.intro}</p>
                   <p className="text-xs text-slate-500">{copy.privacy}</p>
                   <details className="text-xs text-slate-500">
                     <summary className="min-h-11 cursor-pointer content-center font-semibold text-slate-600">More about your data</summary>
@@ -616,7 +675,7 @@ export default function CustomerChat({ token }: { token?: string | null }) {
             <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 space-y-2" aria-live="polite">
               <p className="mx-auto max-w-xs text-center text-[11px] leading-snug text-slate-500">{copy.threadNote}</p>
               {/* The times under the messages are the salon's: said only on a device set to another time zone. */}
-              <SalonTimeNote timeZone={initialCompanySettings.timeZone} className="justify-center text-[11px]" />
+              <SalonTimeNote timeZone={salonTimeZone} className="justify-center text-[11px]" />
               {messages.length === 0 && !sending && (study ? (
                 <p className="mx-auto max-w-xs text-center text-xs text-slate-600 bg-[#fff5c4] rounded-lg px-3 py-2">{copy.studyHint}</p>
               ) : (

@@ -3,13 +3,12 @@ import { cleanName } from '../../server/bookingRules.js';
 import { answerMessengerMessage, recordDelivery } from '../../server/chatFlow.js';
 import { addressWaiting, countWrongTry } from '../../server/limits.js';
 import { sendFirstNoticeIfDue } from '../../server/firstNotice.js';
-import { claimMessage, deleteOwnChat, loadConversation, storeConfigured } from '../../server/store.js';
+import { loadConversationAndSalon } from '../../server/salon.js';
+import { claimMessage, deleteOwnChat, storeConfigured } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
 import { parseWebhook, verifySignature } from '../../server/whatsappCore.js';
 import { usesLiveData } from '../../server/environment.js';
 import { chatDeletedNotice, chatNotDeletedNotice } from '../../src/customerNotice.js';
-import { initialCompanySettings } from '../../src/mockData.js';
-import type { ChatLanguage } from '../../src/types.js';
 
 /** Meta calls this once when you save the webhook URL, to check it is really ours. */
 export function GET(request: Request) {
@@ -22,8 +21,13 @@ export function GET(request: Request) {
   return new Response('Forbidden', { status: 403 });
 }
 
-/** A customer writes "/delete": their chat is deleted and they are told so, without the AI. */
-async function deleteChat(waId: string, language: ChatLanguage) {
+/**
+ * A customer writes "/delete": their chat is deleted and they are told so, without the AI. The
+ * chat (for its language) and the salon (for its name) are read in one command.
+ */
+async function deleteChat(waId: string) {
+  const { conversation, salon } = await loadConversationAndSalon(waId);
+  const language = conversation?.language ?? 'EN';
   let deleted = false;
   try {
     await deleteOwnChat(waId);
@@ -32,7 +36,7 @@ async function deleteChat(waId: string, language: ChatLanguage) {
     console.error(error);
   }
   // Only say "deleted" when it is.
-  await sendWhatsAppText(waId, deleted ? chatDeletedNotice(language, initialCompanySettings.companyName) : chatNotDeletedNotice(language))
+  await sendWhatsAppText(waId, deleted ? chatDeletedNotice(language, salon.companySettings.companyName) : chatNotDeletedNotice(language))
     .catch(error => console.error(error));
 }
 
@@ -56,7 +60,7 @@ export async function POST(request: Request) {
   for (const message of incoming) {
     if (!(await claimMessage(message.id))) continue; // Meta retried a webhook we already handled
     if (message.text.trim().toLowerCase() === '/delete') {
-      await deleteChat(message.waId, (await loadConversation(message.waId))?.language ?? 'EN');
+      await deleteChat(message.waId);
       continue;
     }
     // The message is stored before the AI runs, so a slow or failing AI never loses it. The answer
@@ -69,7 +73,7 @@ export async function POST(request: Request) {
     const { conversation, reply } = answered;
     // A notice that cannot be sent must not cost the customer the answer: it is tried again next time.
     const noticeBefore = conversation.noticeSent;
-    await sendFirstNoticeIfDue(conversation);
+    await sendFirstNoticeIfDue(conversation, answered.salon);
     let delivered = false;
     if (reply) {
       try {

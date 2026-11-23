@@ -1,7 +1,7 @@
 import { PRODUCT_NAME } from '../src/brand.js';
 import { firstContactNotice } from '../src/customerNotice.js';
-import { initialCompanySettings } from '../src/mockData.js';
 import { researchSetting } from './researchMode.js';
+import { BUILT_IN_SALON, type Salon } from './salon.js';
 import { sendWhatsAppText } from './whatsappApi.js';
 import type { LiveConversation } from './whatsappCore.js';
 
@@ -14,12 +14,13 @@ import type { LiveConversation } from './whatsappCore.js';
  * The chat is marked only after WhatsApp has accepted the text. When the send fails, the
  * customer still gets their answer, and the text is tried again before the next message that
  * goes to them (an AI answer or a reply from the owner) until it has gone out. Never throws.
+ * The text names the salon as it is now (server/salon.ts).
  */
-export async function sendFirstNoticeIfDue(conversation: LiveConversation): Promise<void> {
+export async function sendFirstNoticeIfDue(conversation: LiveConversation, salon: Salon = BUILT_IN_SALON): Promise<void> {
   if (conversation.noticeSent || (conversation.channel ?? 'WhatsApp') !== 'WhatsApp') return;
   try {
     await sendWhatsAppText(conversation.waId, firstContactNotice(conversation.language, 'WhatsApp', {
-      salon: initialCompanySettings.companyName, study: researchSetting(), product: PRODUCT_NAME,
+      salon: salon.companySettings.companyName, study: researchSetting(), product: PRODUCT_NAME,
     }));
     conversation.noticeSent = true;
   } catch (error) {

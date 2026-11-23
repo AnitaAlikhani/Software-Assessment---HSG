@@ -3,6 +3,8 @@ import { researchMode } from './flags';
 import type { Conversation } from './types';
 
 const KEY_STORAGE = 'slotbee-live-key';
+/** Where the browser keeps the owner's key: other pages of the app follow a sign-in or sign-out there. */
+export const LIVE_KEY_STORAGE = KEY_STORAGE;
 
 export const isLiveConversation = (id: string) => id.startsWith('live-');
 
@@ -45,6 +47,14 @@ export function readLiveKey(): string | null {
     if (fromUrl) keyThisVisit = fromUrl;
     return keyThisVisit;
   }
+}
+
+/**
+ * The key this browser holds, without looking at the address: for the salon on the server
+ * (src/sharedSalon.ts), which starts after the key was taken out of the address (src/main.tsx).
+ */
+export function currentLiveKey(): string | null {
+  try { return localStorage.getItem(KEY_STORAGE) ?? keyThisVisit; } catch { return keyThisVisit; }
 }
 
 /** Takes "live" out of the address without keeping it anywhere. */
@@ -342,6 +352,8 @@ export function useLiveWhatsApp(active = true) {
   const [telegram, setTelegram] = useState<string | null>(null);
   const [actions, setActions] = useState<LiveActionState[]>([]);
   const [waitNotice, setWaitNotice] = useState<string | null>(null);
+  // The revision of the salon on the server, as the chats' answer reports it (src/sharedSalon.ts).
+  const [salonRev, setSalonRev] = useState<number | null>(null);
   const reached = useRef(false);
   const lastSeen = useRef('');
   const lastChange = useRef(Date.now());
@@ -384,9 +396,10 @@ export function useLiveWhatsApp(active = true) {
       try {
         const response = await fetch('/api/whatsapp/conversations', { headers: { 'x-live-key': key }, cache: 'no-store' });
         if (response.ok) {
-          const data = (await response.json()) as { enabled: boolean; conversations?: Conversation[]; channels?: { telegram?: string | null; chatToken?: string | null } };
+          const data = (await response.json()) as { enabled: boolean; conversations?: Conversation[]; channels?: { telegram?: string | null; chatToken?: string | null }; salonRev?: unknown };
           outcome = pollOutcome(response.status, data.enabled);
           if (data.enabled && !stopped) {
+            if (typeof data.salonRev === 'number' && Number.isFinite(data.salonRev)) setSalonRev(data.salonRev);
             takeConversations(data.conversations ?? []);
             setTelegram(data.channels?.telegram ?? null);
             setChatToken(typeof data.channels?.chatToken === 'string' && data.channels.chatToken ? data.channels.chatToken : null);
@@ -522,6 +535,7 @@ export function useLiveWhatsApp(active = true) {
     setChatToken(null);
     setActions([]);
     setWaitNotice(null);
+    setSalonRev(null);
   }
   useEffect(() => {
     reached.current = false;
@@ -560,6 +574,10 @@ export function useLiveWhatsApp(active = true) {
     enabled,
     /** Whether this browser holds an owner key (it may still be refused: see `connection`). */
     signedIn: Boolean(key),
+    /** The key itself, for the salon on the server (src/sharedSalon.ts). It is never shown. */
+    accessKey: key,
+    /** The salon's revision on the server, from the latest answer of the chats; null before one came. */
+    salonRev,
     signOut,
     /** Runs one of the team's checks of the study tools with this device's key. */
     teamCheck: (kind: TeamCheck): Promise<TeamCheckResult> => key

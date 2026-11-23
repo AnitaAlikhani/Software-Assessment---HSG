@@ -1,6 +1,7 @@
 import { formatDate, zonedDateTime } from '../src/format.js';
-import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData.js';
+import type { ServiceItem } from '../src/types.js';
 import type { BookingRequest } from './ai.js';
+import { BUILT_IN_SALON, isBookableStylist, type Salon } from './salon.js';
 import { MAX_WEEKS_AHEAD, MIN_NOTICE_HOURS, SLOT_STEP_MINUTES } from './salonRules.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -57,15 +58,34 @@ export function cleanName(value: unknown, max = 40): string {
   return text;
 }
 
-/** The salon's stylists who can be booked: active and shown. */
-const bookableStylists = () => initialEmployees.filter(employee => employee.status === 'Active' && !employee.hidden);
+/** The salon's stylists customers can book (isBookableStylist: the app's own rule). */
+const bookableStylists = (salon: Salon) => salon.employees.filter(isBookableStylist);
 
-/** The stylist a customer named ("Selina", "selina keller"), or null when nobody on the team has that name. */
-export function matchStylist(name: unknown): { employeeId: string; staffName: string } | null {
+/**
+ * The stylist a customer named ("Selina", "selina keller"), or null when nobody on the team has
+ * that name. Someone who left or is inactive is not on the team any more.
+ */
+export function matchStylist(name: unknown, salon: Salon = BUILT_IN_SALON, who: 'customer' | 'owner' = 'customer'): { employeeId: string; staffName: string } | null {
   const wanted = cleanName(name, 60).toLowerCase();
   if (!wanted) return null;
-  const employee = bookableStylists().find(item => item.name.toLowerCase() === wanted || item.firstName.toLowerCase() === wanted);
+  // The owner may give an appointment to anybody active, as in the app's own form; customers only get who is bookable online.
+  const team = who === 'owner' ? salon.employees.filter(employee => employee.status === 'Active') : bookableStylists(salon);
+  const employee = team.find(item => item.name.trim().toLowerCase() === wanted || item.firstName.trim().toLowerCase() === wanted);
   return employee ? { employeeId: employee.id, staffName: employee.name } : null;
+}
+
+/** True when the stylist offers the service. A service that names nobody is offered by nobody (src/types.ts). */
+const offers = (service: ServiceItem, employeeId: string) => service.assignedEmployeeIds?.includes(employeeId) ?? false;
+
+/**
+ * The service a request names: by its id where the request carries one the salon still has (a
+ * rename then changes nothing), otherwise by its name.
+ */
+export function findService(request: { service?: unknown; serviceId?: unknown }, salon: Salon = BUILT_IN_SALON): ServiceItem | undefined {
+  const byId = typeof request.serviceId === 'string' ? salon.services.find(item => item.id === request.serviceId) : undefined;
+  if (byId) return byId;
+  const asked = typeof request.service === 'string' ? request.service.trim().toLowerCase() : '';
+  return asked ? salon.services.find(item => item.name.trim().toLowerCase() === asked) : undefined;
 }
 
 /** What the check found: a request the owner can confirm, or the reason in plain words why it was not passed on as one. */
@@ -77,6 +97,8 @@ export type BookingCheck =
     ownerOnly: boolean;
     /** The customer named a stylist who is not on the team: said to the owner, never guessed. */
     unknownStylist?: string;
+    /** The customer named a stylist who does not offer this service: said to the owner, who decides. */
+    stylistNotOffering?: string;
   }
   | { ok: false; reason: string };
 
@@ -85,10 +107,10 @@ export type BookingCheck =
  * reach the owner as a "ready to confirm" request. Every refusal says why, so the owner can tell
  * the customer.
  */
-export function checkBookingRequest(request: BookingRequest | undefined, now = new Date()): BookingCheck {
+export function checkBookingRequest(request: BookingRequest | undefined, now = new Date(), salon: Salon = BUILT_IN_SALON): BookingCheck {
   if (!request) return { ok: false, reason: 'the request was empty' };
   const asked = typeof request.service === 'string' ? request.service.trim() : '';
-  const service = initialServices.find(item => item.name.toLowerCase() === asked.toLowerCase());
+  const service = findService(request, salon);
   if (!service) return { ok: false, reason: asked ? `"${cleanName(asked, 40) || 'that'}" is not one of the salon's services` : 'no service was named' };
   const customerName = cleanName(request.customerName);
   if (!customerName) return { ok: false, reason: "the customer's first name is missing or unclear" };
@@ -98,11 +120,18 @@ export function checkBookingRequest(request: BookingRequest | undefined, now = n
   if (!time) return { ok: false, reason: `"${String(request.time ?? '').slice(0, 20)}" is not a valid time` };
 
   const weekday = DAYS[dayIndex(date)];
-  const hours = initialBookingHours.find(day => day.day === weekday);
+  const hours = salon.bookingHours.find(day => day.day === weekday);
   if (!hours?.isOpen) return { ok: false, reason: `the salon is closed on ${weekday}s` };
+  const closure = salon.closedDates.find(item => date >= item.start && date <= item.end);
+  if (closure) {
+    const name = cleanName(closure.name, 60);
+    return { ok: false, reason: `the salon is closed on ${bookingDateLabel(date)}${name ? ` (${name})` : ''}` };
+  }
   const start = toMinutes(time);
   if (start % SLOT_STEP_MINUTES !== 0) return { ok: false, reason: `${time} is not on the ${SLOT_STEP_MINUTES}-minute steps appointments start on` };
-  if (start < toMinutes(hours.from) || start + service.durationMinutes > toMinutes(hours.to)) {
+  // As the app counts a slot (src/availability.ts): the preparation before the start and the
+  // cleanup after the end lie inside the opening hours too.
+  if (start - (service.prepMinutes ?? 0) < toMinutes(hours.from) || start + service.durationMinutes + (service.postMinutes ?? 0) > toMinutes(hours.to)) {
     return { ok: false, reason: `${service.name} at ${time} does not fit into the opening hours on ${weekday}s (${hours.from}–${hours.to})` };
   }
 
@@ -115,14 +144,21 @@ export function checkBookingRequest(request: BookingRequest | undefined, now = n
   // The id travels with the request, so the owner's confirmation still finds the service after a rename.
   const cleaned: BookingRequest = { service: service.name, serviceId: service.id, date, time, customerName };
   const named = cleanName(request.staffName, 60);
-  const stylist = named ? matchStylist(named) : null;
-  if (stylist) Object.assign(cleaned, stylist);
-  return { ok: true, request: cleaned, ownerOnly: !service.onlineBooking, ...(named && !stylist ? { unknownStylist: named } : {}) };
+  const stylist = named ? matchStylist(named, salon) : null;
+  // A stylist who does not offer the service is not put on the request: the owner reads who was
+  // asked for and decides.
+  const offering = stylist && offers(service, stylist.employeeId);
+  if (stylist && offering) Object.assign(cleaned, stylist);
+  return {
+    ok: true, request: cleaned, ownerOnly: !service.onlineBooking,
+    ...(named && !stylist ? { unknownStylist: named } : {}),
+    ...(stylist && !offering ? { stylistNotOffering: stylist.staffName } : {}),
+  };
 }
 
 /** The cleaned request, or null when the rules refuse it. */
-export function validBookingRequest(request: BookingRequest | undefined, now = new Date()): BookingRequest | null {
-  const check = checkBookingRequest(request, now);
+export function validBookingRequest(request: BookingRequest | undefined, now = new Date(), salon: Salon = BUILT_IN_SALON): BookingRequest | null {
+  const check = checkBookingRequest(request, now, salon);
   return check.ok ? check.request : null;
 }
 

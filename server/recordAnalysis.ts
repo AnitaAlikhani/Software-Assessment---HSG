@@ -1,10 +1,11 @@
+import { chatBookingMessage } from '../src/chatTemplates.js';
 import { LANGUAGE_NAMES } from '../src/conversationData.js';
 import { zonedDateTime } from '../src/format.js';
-import { initialServices } from '../src/mockData.js';
 import type { ChatLanguage } from '../src/types.js';
 import { INTENTS, type BookingRequest, type IncomingAnalysis, type Intent } from './ai.js';
-import { bookingDateLabel, checkBookingRequest } from './bookingRules.js';
+import { bookingDateLabel, checkBookingRequest, findService } from './bookingRules.js';
 import { fixedReply } from './chatReplies.js';
+import { BUILT_IN_SALON, isDay, type Salon } from './salon.js';
 import {
   addCustomerMessage,
   needsOwner,
@@ -90,15 +91,17 @@ function cancellationReason(conversation: LiveConversation): string {
  * that was cancelled meanwhile is no longer said to "stay booked". Used whenever a request is
  * made and whenever a chat is settled after an answer, so the sentence has one source.
  */
-export function requestReason(conversation: LiveConversation, now: Date): string {
+export function requestReason(conversation: LiveConversation, now: Date, salon: Salon = BUILT_IN_SALON): string {
   const open = openRequestOf(conversation)!;
   const facts = conversation.requestFacts ?? {};
   const standing = standingBookings(conversation, now);
-  const service = initialServices.find(item => (open.serviceId ? item.id === open.serviceId : sameText(item.name, open.service)));
+  // Looked up in the salon as it is now: a service taken off online booking since says so.
+  const service = findService(open, salon);
   const moving = open.kind === 'change' ? open.previous : undefined;
   const notes = [
     open.staffName ? `The customer asked for ${open.staffName}.` : '',
     facts.unknownStylist ? `The customer asked for "${facts.unknownStylist}", who is not on the team.` : '',
+    facts.stylistNotOffering ? `The customer asked for ${facts.stylistNotOffering}, who does not offer ${open.service}.` : '',
     service && !service.onlineBooking ? `${open.service} is not booked online: you book it personally.` : '',
     facts.moveNotHere ? 'The customer wants to move an appointment that was not booked in this chat.' : '',
     !moving && standing.length === 1 ? `The appointment ${describe(standing[0])} stays booked.` : '',
@@ -116,12 +119,12 @@ export function requestReason(conversation: LiveConversation, now: Date): string
  * "booked" while an appointment from it lies ahead; otherwise the AI handles it. Computed from
  * what still waits, so no reason outlives the thing it was about.
  */
-export function settleStatus(conversation: LiveConversation, now: Date) {
+export function settleStatus(conversation: LiveConversation, now: Date, salon: Salon = BUILT_IN_SALON) {
   const open = openRequestOf(conversation);
   if (!open) conversation.requestFacts = undefined;
   if (open) {
     conversation.status = 'needs-attention';
-    conversation.attentionReason = requestReason(conversation, now);
+    conversation.attentionReason = requestReason(conversation, now, salon);
     return;
   }
   if (conversation.cancellationRequest) {
@@ -187,7 +190,7 @@ function intentOf(conversation: LiveConversation, analysis: IncomingAnalysis, no
  * server did not do, or null when nothing is to be sent (the owner has taken over).
  * Call addReply only after the reply has really gone out.
  */
-export function applyAnalysis(conversation: LiveConversation, messageId: string, analysis: IncomingAnalysis, now = new Date()): Translated | null {
+export function applyAnalysis(conversation: LiveConversation, messageId: string, analysis: IncomingAnalysis, now = new Date(), salon: Salon = BUILT_IN_SALON): Translated | null {
   const message = conversation.messages.find(item => item.id === messageId);
   if (!message) return null;
   message.translation = text(analysis.translationEn) || message.original;
@@ -246,11 +249,14 @@ export function applyAnalysis(conversation: LiveConversation, messageId: string,
   const complete = Boolean(asked && [asked.service, asked.date, asked.time, asked.customerName].every(value => text(value)));
   if ((intent !== 'new' && intent !== 'change') || !complete) return reply;
 
-  const check = checkBookingRequest(asked, now);
+  const check = checkBookingRequest(asked, now, salon);
   if (!check.ok) {
     // The AI's reply says the request went to the salon. It did not: the owner gets it with the
     // reason, and the customer a sentence that promises nothing else.
-    attention(`Booking request not passed on: ${check.reason}. The customer asked for ${text(asked?.service)} on ${text(asked?.date)} at ${text(asked?.time)}. Please reply to the customer.`);
+    // The day as every screen writes it; something that is no date stays as the AI gave it.
+    const askedDate = text(asked?.date);
+    const askedDay = isDay(askedDate) ? bookingDateLabel(askedDate) : askedDate;
+    attention(`Booking request not passed on: ${check.reason}. The customer asked for ${text(asked?.service)} on ${askedDay} at ${text(asked?.time)}. Please reply to the customer.`);
     return fixed('passedOn');
   }
   const request = check.request;
@@ -286,11 +292,21 @@ export function applyAnalysis(conversation: LiveConversation, messageId: string,
   // Only what cannot be read from the chat later is kept; the sentence itself is always written anew.
   const facts = {
     ...(check.unknownStylist ? { unknownStylist: check.unknownStylist } : {}),
+    ...(check.stylistNotOffering ? { stylistNotOffering: check.stylistNotOffering } : {}),
     ...(intent === 'change' && !moving ? { moveNotHere: true } : {}),
   };
   conversation.requestFacts = Object.keys(facts).length > 0 ? facts : undefined;
-  attention(requestReason(conversation, now));
-  return reply;
+  attention(requestReason(conversation, now, salon));
+  // Only a request is stored; the owner has not confirmed anything. The AI's own words may say
+  // more ("I have entered your appointment"), so the customer gets the server's fixed sentence,
+  // which names what was passed on and that nothing is booked yet.
+  if (takenOver) return null;
+  // A wish to move an appointment that was not booked in this chat: which one stays is not known here.
+  return chatBookingMessage(moving ? 'changeRequested' : intent === 'change' ? 'moveRequested' : 'requested', {
+    language: conversation.language, customerName: request.customerName, salonName: salon.companySettings.companyName,
+    serviceName: request.service, staffName: request.staffName, date: request.date, time: request.time,
+    ...(moving ? { askedDate: moving.date, askedTime: moving.time } : {}),
+  });
 }
 
 /** The first name the chat knows: from a booking, else from the name the customer gave, unless that is only a channel's placeholder. */
@@ -338,11 +354,11 @@ export function chatStateLines(conversation: LiveConversation, messageId?: strin
  * booking request. Returns the conversation and the reply to send, or null when the owner has
  * taken over. Call addReply only after the channel has really sent the reply.
  */
-export function recordAnalysis(state: LiveState, incoming: IncomingMessage, analysis: IncomingAnalysis, now = new Date()) {
+export function recordAnalysis(state: LiveState, incoming: IncomingMessage, analysis: IncomingAnalysis, now = new Date(), salon: Salon = BUILT_IN_SALON) {
   const existing = state.conversations.find(item => item.waId === incoming.waId) ?? null;
   const conversation = storeCustomerMessage(existing, incoming);
   if (!existing) state.conversations.push(conversation);
   if (!state.processedIds.includes(incoming.id)) state.processedIds = [...state.processedIds, incoming.id].slice(-500);
-  const reply = applyAnalysis(conversation, incoming.id, analysis, now);
+  const reply = applyAnalysis(conversation, incoming.id, analysis, now, salon);
   return { conversation, reply };
 }

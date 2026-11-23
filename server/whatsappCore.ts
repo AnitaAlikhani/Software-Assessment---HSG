@@ -58,10 +58,11 @@ export interface LiveConversation {
   suggestion?: { service: string; serviceId?: string; date: string; time: string; employeeId?: string; staffName?: string; kind?: 'new' | 'change'; previous?: { date: string; time: string } };
   /**
    * Server only: what the rule check found about the open request that cannot be read from the chat
-   * later (a stylist not on the team; a move of an appointment not booked here). The owner's reason
+   * later (a stylist not on the team, or one who does not offer the service; a move of an
+   * appointment not booked here). The owner's reason
    * is written from these and the chat as it is (requestReason in recordAnalysis.ts).
    */
-  requestFacts?: { unknownStylist?: string; moveNotHere?: boolean };
+  requestFacts?: { unknownStylist?: string; stylistNotOffering?: string; moveNotHere?: boolean };
   /** Server only: counts the saves of this chat, so two requests cannot overwrite each other (see changeConversation in store.ts). */
   rev?: number;
   /**

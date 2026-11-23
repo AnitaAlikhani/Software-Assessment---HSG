@@ -7,8 +7,9 @@ import { sendFirstNoticeIfDue } from '../../server/firstNotice.js';
 import {
   confirmedBookings, confirmedOf, keepConfirmed, openRequestOf, sameBooking, sameSlot, settleStatus, type Slot,
 } from '../../server/recordAnalysis.js';
+import { BUILT_IN_SALON, loadChatAndSalon, type Salon } from '../../server/salon.js';
 import {
-  changeConversation, deletedSince, deleteConversation, listConversations, loadForUpdate, NO_DELETION_SEEN, storeConfigured,
+  changeConversation, deletedSince, deleteConversation, listConversations, NO_DELETION_SEEN, storeConfigured,
   type ChatVersion, type LoadedChat,
 } from '../../server/store.js';
 import { sendWhatsAppText } from '../../server/whatsappApi.js';
@@ -17,14 +18,13 @@ import { addReply, addSalonMessage, publicConversations, telegramChatId, type Li
 import { chatBookingMessage, type ChatBookingMessageKind } from '../../src/chatTemplates.js';
 import { LANGUAGE_NAMES } from '../../src/conversationData.js';
 import { zonedDateTime } from '../../src/format.js';
-import { initialCompanySettings } from '../../src/mockData.js';
 
 /** Sends a text on the chat's own channel. Website chats read their messages from the storage, so nothing goes out for them. */
-async function sendOnChannel(conversation: LiveConversation, text: string) {
+async function sendOnChannel(conversation: LiveConversation, text: string, salon: Salon) {
   const channel = conversation.channel ?? 'WhatsApp';
   if (channel === 'Website') return;
   // A WhatsApp customer who has not had the fixed first text gets it before this message.
-  await sendFirstNoticeIfDue(conversation);
+  await sendFirstNoticeIfDue(conversation, salon);
   if (channel === 'Telegram') await sendTelegramText(telegramChatId(conversation.waId), text);
   else await sendWhatsAppText(conversation.waId, text);
 }
@@ -33,7 +33,7 @@ async function sendOnChannel(conversation: LiveConversation, text: string) {
  * Translates the owner's own text for the customer and sends it on the chat's channel.
  * Returns null, and sends nothing, when the customer deleted the chat while the text was translated.
  */
-async function translateAndSend(conversation: LiveConversation, version: ChatVersion, text: string): Promise<Translated | null> {
+async function translateAndSend(conversation: LiveConversation, version: ChatVersion, text: string, salon: Salon): Promise<Translated | null> {
   const language = conversation.languageLabel ?? LANGUAGE_NAMES[conversation.language];
   let sent: Translated = { original: text, translation: text };
   try {
@@ -44,7 +44,7 @@ async function translateAndSend(conversation: LiveConversation, version: ChatVer
   }
   // The translation took a while. A customer who deleted the chat meanwhile gets no message from it.
   if ((conversation.channel ?? 'WhatsApp') !== 'Website' && await deletedSince(conversation.waId, version)) return null;
-  await sendOnChannel(conversation, sent.original);
+  await sendOnChannel(conversation, sent.original, salon);
   return sent;
 }
 
@@ -121,11 +121,11 @@ const fail = (error: string, status = 400) => Response.json({ error }, { status 
 const deletedByCustomer = () => fail('This chat was deleted by the customer.', 410);
 const allChats = async () => Response.json({ conversations: publicConversations({ conversations: await listConversations() }) });
 
-/** The stylist the owner named: matched to the team where possible, else her words as they are (cleaned). */
-function ownerStylist(value: unknown): { staffName?: string; employeeId?: string } {
+/** The stylist the owner named: matched to the team as it is now where possible, else her words as they are (cleaned). */
+function ownerStylist(value: unknown, salon: Salon): { staffName?: string; employeeId?: string } {
   const name = cleanName(value, 60);
   if (!name) return {};
-  return matchStylist(name) ?? { staffName: name };
+  return matchStylist(name, salon, 'owner') ?? { staffName: name };
 }
 
 /** What an answer to a request or a cancellation found: the message to send, a refusal, or a confirmation that already stands. */
@@ -135,8 +135,9 @@ type BookingOutcome = { kind: ChatBookingMessageKind; message: Translated } | { 
  * The owner's answer to a booking request or a cancellation: what changes in the chat and the
  * fixed message the customer gets (src/chatTemplates.ts, never written or translated by the AI).
  */
-function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: Expected | undefined, now: number): BookingOutcome {
-  const details = { language: chat.language, salonName: initialCompanySettings.companyName };
+function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: Expected | undefined, now: number, salon: Salon = BUILT_IN_SALON): BookingOutcome {
+  // The fixed messages name the salon as it is now (server/salon.ts).
+  const details = { language: chat.language, salonName: salon.companySettings.companyName };
   const today = new Date(now);
   if (action.type === 'cancel-booking') {
     const cancellation = chat.cancellationRequest;
@@ -153,7 +154,7 @@ function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: 
     // Only the cancelled appointment goes: the others of this chat stay known.
     keepConfirmed(chat, all.filter(booking => booking !== cancelled), today);
     if (!openRequestOf(chat)) chat.bookingRequest = chat.confirmedBooking;
-    settleStatus(chat, today);
+    settleStatus(chat, today, salon);
     return { kind: 'cancelled', message };
   }
 
@@ -171,7 +172,7 @@ function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: 
   const restore = () => { chat.bookingRequest = chat.confirmedBooking; };
 
   if (action.type === 'confirm-booking') {
-    const stylist = ownerStylist(action.staffName);
+    const stylist = ownerStylist(action.staffName, salon);
     const message = chatBookingMessage('confirmed', { ...asked, staffName: stylist.staffName, date: open.date, time: open.time });
     // A change keeps `kind` and `previous`, so the owner's calendar knows which appointment moves.
     const confirmed = { ...open, ...stylist, status: 'confirmed' as const };
@@ -187,7 +188,7 @@ function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: 
     keepConfirmed(chat, [...bookings, confirmed], today);
     chat.bookingRequest = confirmed;
     chat.suggestion = undefined;
-    settleStatus(chat, today);
+    settleStatus(chat, today, salon);
     return { kind: 'confirmed', message };
   }
   if (action.type === 'suggest-time') {
@@ -195,7 +196,7 @@ function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: 
     const time = strictTime(action.time);
     if (!date || !time) return { error: 'Choose a valid day and time to suggest.' };
     if (date < zonedDateTime(today, 'Europe/Zurich').date) return { error: 'That day is in the past. Choose another day.' };
-    const stylist = ownerStylist(action.staffName);
+    const stylist = ownerStylist(action.staffName, salon);
     const message = chatBookingMessage('suggested', { ...asked, staffName: stylist.staffName, date, time, askedDate: open.date, askedTime: open.time });
     // The AI is told about the offer: the customer's "yes" becomes a new request for exactly this
     // time. An offer instead of a change remembers which appointment it moves.
@@ -204,13 +205,13 @@ function bookingAnswer(chat: LiveConversation, action: BookingAction, expected: 
       ...(open.kind === 'change' && open.previous ? { kind: 'change' as const, previous: open.previous } : {}),
     };
     restore();
-    settleStatus(chat, today);
+    settleStatus(chat, today, salon);
     return { kind: 'suggested', message };
   }
   const message = chatBookingMessage('declined', { ...asked, date: open.date, time: open.time });
   chat.suggestion = undefined;
   restore();
-  settleStatus(chat, today);
+  settleStatus(chat, today, salon);
   return { kind: 'declined', message };
 }
 
@@ -235,7 +236,10 @@ export async function POST(request: Request) {
   if (expected === null) return fail('This answer could not be read. Reload the page and try again.');
 
   const waId = typeof action.conversationId === 'string' && action.conversationId.startsWith('live-') ? action.conversationId.slice(5) : '';
-  const loaded: LoadedChat = waId ? await loadForUpdate(waId) : { conversation: null, version: NO_DELETION_SEEN };
+  // The salon as it is now comes with the chat, in the same storage command.
+  const { loaded, salon }: { loaded: LoadedChat; salon: Salon } = waId
+    ? await loadChatAndSalon(waId)
+    : { loaded: { conversation: null, version: NO_DELETION_SEEN }, salon: BUILT_IN_SALON };
   const conversation = loaded.conversation;
   if (!conversation) return fail('This chat no longer exists', 404);
   const now = Date.now();
@@ -265,18 +269,18 @@ export async function POST(request: Request) {
       else if (kind === 'mark-done') {
         // Nothing is sent. What the owner still has to answer (a request, a wish to cancel) keeps
         // the chat in "Needs you"; anything else is done.
-        settleStatus(chat, new Date(now));
+        settleStatus(chat, new Date(now), salon);
       } else if (kind === 'keep-booking') {
         if (!chat.cancellationRequest) return 'There is no cancellation request in this chat.';
         if (expected && !shows(expected, chat.cancellationRequest, { stylist: false })) return CHANGED_CANCELLATION;
         // The appointment stands. The owner writes to the customer herself, so the AI waits.
         chat.cancellationRequest = undefined;
         chat.takenOver = true;
-        settleStatus(chat, new Date(now));
+        settleStatus(chat, new Date(now), salon);
       } else {
         // The AI answers again, but a card that waits still waits for the owner: the chat stays in "Needs you" with its reason.
         chat.takenOver = false;
-        settleStatus(chat, new Date(now));
+        settleStatus(chat, new Date(now), salon);
       }
       return null;
     });
@@ -292,7 +296,7 @@ export async function POST(request: Request) {
     // Hand the chat back first, then let the AI answer the customer's waiting message at once.
     const { outcome } = await apply(chat => {
       chat.takenOver = false;
-      settleStatus(chat, new Date(now));
+      settleStatus(chat, new Date(now), salon);
       return null;
     });
     if (outcome.status === 'deleted') return deletedByCustomer();
@@ -300,16 +304,16 @@ export async function POST(request: Request) {
     const waiting = outcome.conversation.messages.at(-1);
     if (!waiting || waiting.sender !== 'customer') return allChats(); // nothing waits for an answer
     const saved: Saved = { loaded: outcome.loaded, conversation: outcome.conversation };
-    const analysis = await askAi(saved.conversation, waiting.id, now);
+    const analysis = await askAi(saved.conversation, waiting.id, now, salon);
     const website = (saved.conversation.channel ?? 'WhatsApp') === 'Website';
-    const answered = await applyAi(saved, waiting.id, analysis, website, now);
+    const answered = await applyAi(saved, waiting.id, analysis, website, now, salon);
     if (!answered) return deletedByCustomer();
     if (!analysis) return fail('The AI could not answer just now. The chat is back with the AI: reply yourself, or try again.', 502);
     if (!website && answered.reply) {
       const noticeBefore = answered.conversation.noticeSent;
       let delivered = false;
       try {
-        await sendOnChannel(answered.conversation, answered.reply.original);
+        await sendOnChannel(answered.conversation, answered.reply.original, salon);
         delivered = true;
       } catch (error) {
         console.error(error);
@@ -326,7 +330,7 @@ export async function POST(request: Request) {
     const noticeBefore = conversation.noticeSent;
     let sent: Translated | null;
     try {
-      sent = await translateAndSend(conversation, loaded.version, text);
+      sent = await translateAndSend(conversation, loaded.version, text, salon);
     } catch (error) {
       console.error(error);
       // The fixed first text of a WhatsApp chat may have gone out although the reply did not: the chat remembers it.
@@ -355,7 +359,7 @@ export async function POST(request: Request) {
     let already = false;
     const { outcome, error } = await apply(chat => {
       before = answeredFields(chat);
-      const answer = bookingAnswer(chat, bookingAction, expected, now);
+      const answer = bookingAnswer(chat, bookingAction, expected, now, salon);
       if ('error' in answer) return answer.error;
       if ('already' in answer) { already = true; return null; }
       message = answer.message;
@@ -370,7 +374,7 @@ export async function POST(request: Request) {
     const saved = outcome.conversation;
     const noticeBefore = saved.noticeSent;
     try {
-      await sendOnChannel(saved, (message as Translated).original);
+      await sendOnChannel(saved, (message as Translated).original, salon);
     } catch (error) {
       console.error(error);
       const noticeSent = Boolean(saved.noticeSent && !noticeBefore);
@@ -389,7 +393,7 @@ export async function POST(request: Request) {
             else kept = true;
           }
         }
-        if (kept) settleStatus(chat, new Date(now));
+        if (kept) settleStatus(chat, new Date(now), salon);
         if (noticeSent) chat.noticeSent = true;
         return null;
       }, outcome.loaded).catch(saveError => console.error(saveError));

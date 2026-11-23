@@ -221,7 +221,10 @@ test('a valid AI booking request asks the owner to confirm; the reply is only st
   assert.equal(conversation.bookingRequest?.status, 'requested');
   assert.equal(conversation.bookingRequest?.serviceId, 'srv-2');
   assert.match(conversation.attentionReason ?? '', /Haircut on Tuesday, 17\.11\.2026 at 15:00 for Ana/);
-  assert.equal(reply?.original, analysis.reply);
+  // Only a request is stored: the customer gets the server's sentence that says so, never the AI's
+  // own words. Portuguese is no chat language of the fixed texts: English then, as the other fixed messages.
+  assert.equal(reply?.original, 'Thank you, Ana. I have passed your request on to the salon: Haircut on Tuesday, 17.11.2026 at 15:00. The salon will answer you here in the chat; until then nothing is booked.');
+  assert.equal(reply?.translationDe, 'Vielen Dank, Ana. Ich habe Ihre Anfrage an den Salon weitergegeben: Haircut am Dienstag, 17.11.2026 um 15:00 Uhr. Der Salon antwortet Ihnen hier im Chat; bis dahin ist noch nichts gebucht.');
   assert.equal(conversation.messages.length, 1, 'the AI reply is added only after the channel sent it');
 
   const html = renderToStaticMarkup(React.createElement(ConversationsView, {

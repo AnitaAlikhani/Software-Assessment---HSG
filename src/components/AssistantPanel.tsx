@@ -18,6 +18,7 @@ import { askAssistantRoute, assistantQuestion } from '../assistant/remote';
 import { checkAssistantRequest, MAX_ASSISTANT_MESSAGE, type AssistantLanguage, type AssistantTask } from '../assistant/types';
 import { readLiveKey } from '../liveWhatsApp';
 import { getSalonNow } from '../scheduling';
+import { pendingSalonSave } from '../useDemoState';
 import type { CalendarEvent, ClosedDate, Customer } from '../types';
 
 interface AssistantPanelProps {
@@ -253,13 +254,24 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = (props) => {
       deleteEvent: current.onDeleteEvent,
       saveClosedDates: current.onSaveClosedDates,
     });
+    // A closed date on a signed-in device is saved on the server: the answer says "done" only
+    // once the server has it. Refused, the screen's own message says why, and so does the thread.
+    const pending = pendingSalonSave();
     const result = assistantSaid(reply);
     memory.current = { task: reply.task, asked: reply.asked };
-    setThread(previous => [
-      ...previous.map(other => other.id === item.id ? { ...item, proposal: reply.tone === 'success' ? 'confirmed' as const : 'failed' as const } : other),
-      ...(said ? [said] : []),
-      result,
+    const show = (outcome: ThreadItem, done: boolean) => setThread(previous => [
+      ...previous.map(other => other.id === item.id ? { ...item, proposal: done ? 'confirmed' as const : 'failed' as const } : other),
+      ...(said && !previous.includes(said) ? [said] : []),
+      outcome,
     ]);
+    if (!pending) show(result, reply.tone === 'success');
+    else {
+      if (said) setThread(previous => [...previous, said]);
+      void pending.then(saved => show(saved ? result : assistantSaid({
+        language: reply.language, tone: 'problem',
+        text: [reply.language === 'de' ? 'Das wurde nicht gespeichert. Die Meldung unten sagt, warum.' : 'This was not saved. The message at the bottom of the screen says why.'],
+      }), saved));
+    }
     current.onResultShown?.();
     keepFocus();
   };

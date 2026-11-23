@@ -2,33 +2,37 @@ import { cleanName } from '../../server/bookingRules.js';
 import { answerMessengerMessage, recordDelivery } from '../../server/chatFlow.js';
 import { addressWaiting, countWrongTry } from '../../server/limits.js';
 import { researchSetting } from '../../server/researchMode.js';
-import { claimMessage, deleteOwnChat, loadConversation, releaseMessage, storeConfigured } from '../../server/store.js';
+import { loadConversationAndSalon, loadSalon } from '../../server/salon.js';
+import { claimMessage, deleteOwnChat, releaseMessage, storeConfigured } from '../../server/store.js';
 import { sendTelegramText, sendTelegramTyping, telegramConfigured, telegramRefused, webhookSecret } from '../../server/telegramApi.js';
 import { parseTelegramUpdate, telegramChatId, toChatLanguage } from '../../server/whatsappCore.js';
 import { PRODUCT_NAME } from '../../src/brand.js';
 import { chatDeletedNotice, chatNotDeletedNotice, telegramWelcome } from '../../src/customerNotice.js';
-import { initialCompanySettings } from '../../src/mockData.js';
 
 /**
  * Commands get a fixed text in the language of the customer's Telegram app (German, French,
  * Italian or English), never one written by the AI:
  * /delete deletes the customer's chat; /start and every other command explain who answers and
  * what is stored. Telegram shows /start as the first step, so every customer reads it once.
+ * Both name the salon as it is now (server/salon.ts).
  */
 async function answerCommand(message: NonNullable<ReturnType<typeof parseTelegramUpdate>>) {
   const chatId = telegramChatId(message.waId);
-  const salon = initialCompanySettings.companyName;
   const language = toChatLanguage(message.languageCode);
   const command = message.text.trim().split(/[\s@]/)[0].toLowerCase();
   if (command !== '/delete') {
+    const salon = (await loadSalon()).companySettings.companyName;
     await sendTelegramText(chatId, telegramWelcome(language, { salon, study: researchSetting(), product: PRODUCT_NAME }));
     return;
   }
   let deleted = false;
   let chatLanguage = language;
+  let salon = '';
   try {
-    // Answer in the language the customer wrote in, if a chat is stored.
-    chatLanguage = (await loadConversation(message.waId))?.language ?? language;
+    // Answer in the language the customer wrote in, if a chat is stored. The salon comes in the same command.
+    const found = await loadConversationAndSalon(message.waId);
+    chatLanguage = found.conversation?.language ?? language;
+    salon = found.salon.companySettings.companyName;
     await deleteOwnChat(message.waId);
     deleted = true;
   } catch (error) {

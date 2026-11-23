@@ -15,7 +15,7 @@ import {
   addressWaiting, aiCeilingReached, countChatMessage, countMessengerMessage, countWrongTry, LIMIT_TEXTS, LIMITS, ownerAccess,
 } from '../server/limits';
 import { TAKEN_OVER_REASON } from '../server/recordAnalysis';
-import { COUNT_SCRIPT } from '../server/store';
+import { COUNT_SCRIPT, LIST_READ_SCRIPT } from '../server/store';
 import { firstContactNotice } from '../src/customerNotice';
 import { initialCompanySettings } from '../src/mockData';
 import { type Command, deployedWith, FakeStore } from './fakeStore';
@@ -255,8 +255,10 @@ test('the right token or key from an address that is not waiting is never slowed
       assert.equal((await ownerInbox(ownerInboxRequest({ address: ADDRESS }))).status, 200);
     }
   }, { store });
-  // One read for the page's poll and two for the owner's, as before: the gate is read with the chats.
-  assert.deepEqual(commands.slice(0, 3).map(command => command[0]), ['MGET', 'SCAN', 'MGET']);
+  // One read for the page's poll and two for the owner's, as before: the gate and the revision of
+  // the salon's settings are read with the chats, in one script (store.ts LIST_READ_SCRIPT).
+  assert.deepEqual(commands.slice(0, 3).map(command => command[0]), ['MGET', 'SCAN', 'EVAL']);
+  assert.equal(commands[2][1], LIST_READ_SCRIPT);
   assert.equal(commands.length, 300);
 });
 

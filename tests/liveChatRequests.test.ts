@@ -95,6 +95,8 @@ test('a request the rule check refuses: the AI reply is not sent, the owner gets
   assert.equal(chat.bookingRequest, undefined);
   assert.equal(chat.status, 'needs-attention');
   assert.match(chat.attentionReason!, /^Booking request not passed on: the salon is closed on Mondays\./);
+  // The day is written as on every screen, never as the AI's raw date.
+  assert.match(chat.attentionReason!, /The customer asked for Haircut on Monday, 12\.10\.2026 at 10:00\. Please reply to the customer\.$/);
   assert.deepEqual(chat.messages.map(message => [message.sender, message.original]), [
     ['customer', 'Haarschnitt am Montag um 10 Uhr, ich bin Eva'], ['ai', fixedReply('passedOn', 'DE').original],
   ]);

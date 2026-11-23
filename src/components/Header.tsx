@@ -6,6 +6,8 @@ import { researchMode } from '../flags';
 import { useCloseOnBack } from '../backGesture';
 import { Logo } from './Logo';
 import { initialsOf } from './MoreSheet';
+import { SaveIndicator } from './SalonGate';
+import type { SalonStatus } from '../sharedSalon';
 
 interface HeaderProps {
   /** The screen that is open, by the name the menu gives it. Phones and tablets show it in the top bar. */
@@ -25,6 +27,8 @@ interface HeaderProps {
   onNewAppointment?: () => void;
   /** Opens the owner assistant (src/components/AssistantPanel.tsx). */
   onOpenAssistant?: () => void;
+  /** On a device signed in with the owner's key: whether changes are on their way to the server. */
+  saveStatus?: SalonStatus;
 }
 
 /**
@@ -39,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   title, ownerName = '', ownerRole = '',
   searchQuery, onSearchChange, customers, appointmentRequests,
   calendarEvents, onSelectCustomer, onSelectRequest, onSelectAppointment,
-  onNewAppointment, onOpenAssistant,
+  onNewAppointment, onOpenAssistant, saveStatus,
 }) => {
   const [resultsOpen, setResultsOpen] = useState(false);
   // Phones and tablets: whether search has taken over the bar. Laptops always show the field.
@@ -196,6 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className={`shrink-0 items-center gap-1 lg:ml-auto lg:flex lg:gap-3 ${searchOpen ? 'hidden' : 'flex'}`}>
+        <SaveIndicator status={saveStatus} />
         <button ref={searchButtonRef} type="button" onClick={() => setSearchOpen(true)} aria-label="Search" aria-expanded={searchOpen} aria-controls="header-search"
           className={`${iconButton} text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden`}>
           <Search className="h-5 w-5" aria-hidden="true" />

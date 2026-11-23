@@ -2,6 +2,7 @@ import type { BookingHoursDay, Employee, ServiceItem } from './types';
 import { formatPhone, normalizePhone, openingHoursDay } from './format';
 import { validateOptionalContact, validatePersonName, validateWeeklyHours } from './managementValidation';
 import { servicesOf } from './teamBooking';
+import { TEXT_LIMITS } from './fieldLimits';
 import { dateOfWeekday, isValidHours, WEEKDAY_KEYS, weeklyHoursFromOpeningHours, type WeeklyHours } from './workingHours';
 
 /**
@@ -87,6 +88,10 @@ export type PersonToSave =
  */
 export function personFromForm(form: PersonForm, salon: { services: ServiceItem[]; companyName: string }): PersonToSave {
   if (!form.firstName.trim() || !form.lastName.trim()) return { error: 'Enter the employee’s first and last names.' };
+  // The server's limits (server/salon.ts), said here before saving rather than refused after.
+  if (form.firstName.trim().length > TEXT_LIMITS.name || form.lastName.trim().length > TEXT_LIMITS.name) return { error: `A first or last name can be at most ${TEXT_LIMITS.name} characters.` };
+  if (form.email.trim().length > TEXT_LIMITS.email) return { error: `The email address can be at most ${TEXT_LIMITS.email} characters.` };
+  if (form.phone.trim().length > TEXT_LIMITS.phone) return { error: `The phone number can be at most ${TEXT_LIMITS.phone} characters.` };
   const weeklyHours = weekFromRows(form.days);
   const error = validatePersonName(`${form.firstName} ${form.lastName}`, 'the employee’s')
     ?? validateOptionalContact(form.email, form.phone)

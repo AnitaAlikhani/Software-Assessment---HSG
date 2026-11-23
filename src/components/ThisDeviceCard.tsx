@@ -10,7 +10,15 @@ export interface ThisDeviceFacts {
   /** While the server makes this connection wait: its sentence on why and how long. */
   waitNotice?: string | null;
   onSignOut: () => void;
+  /** The salon's settings on this device come from the server (src/sharedSalon.ts). */
+  salonFromServer?: boolean;
 }
+
+/**
+ * What a signed-in device shares with the owner's other devices, and what not yet. Plain words,
+ * and no date: the calendar moves to the server in a later step.
+ */
+export const SALON_FROM_SERVER_TEXT = 'Your services, team, opening hours, closed dates, salon details and AI settings come from the server: every device you sign in on shows the same. Appointments, requests and customers are still kept in this browser only for now.';
 
 /** One sentence on what this browser can do with the live chats. It never shows the key. */
 export function deviceState({ signedIn, connection, waitNotice }: Pick<ThisDeviceFacts, 'signedIn' | 'connection' | 'waitNotice'>): { title: string; text: string } {
@@ -41,7 +49,7 @@ export function deviceState({ signedIn, connection, waitNotice }: Pick<ThisDevic
  * and the way out. Signing out matters on a shared or borrowed computer, where the owner link
  * would otherwise stay in the browser.
  */
-export function ThisDeviceCard({ signedIn, connection, waitNotice, onSignOut }: ThisDeviceFacts) {
+export function ThisDeviceCard({ signedIn, connection, waitNotice, onSignOut, salonFromServer = false }: ThisDeviceFacts) {
   const { title, text } = deviceState({ signedIn, connection, waitNotice });
   return (
     <section aria-labelledby="this-device-title" className="space-y-3">
@@ -53,6 +61,7 @@ export function ThisDeviceCard({ signedIn, connection, waitNotice, onSignOut }: 
         <div className="min-w-0 flex-1 text-sm" role="status">
           <p className="font-semibold text-slate-900">{title}</p>
           <p className="text-slate-600">{text}</p>
+          {signedIn && salonFromServer && <p className="mt-2 text-slate-600">{SALON_FROM_SERVER_TEXT}</p>}
         </div>
         {signedIn && (
           <button

@@ -3,6 +3,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { CheckCircle2, Copy, Download, ExternalLink, Printer, QrCode as QrCodeIcon } from 'lucide-react';
 import { bookingAddress, qrFileName, qrModules, qrPath, qrSide, QR_QUIET_ZONE } from '../bookingLink';
 import { researchMode } from '../flags';
+import { useSalonStatus } from '../useDemoState';
 
 /**
  * The booking link: what the owner needs of the customers' booking page. Not the form itself
@@ -110,6 +111,8 @@ interface BookingLinkCardProps extends BookingLinkProps {
 }
 
 export const BookingLinkCard: React.FC<BookingLinkCardProps> = ({ address: given, salonName = '', className = '' }) => {
+  // A signed-in device: the study hint says what the server holds and what this browser still keeps.
+  const onServer = useSalonStatus().phase === 'ready';
   const address = useBookingAddress(given);
   const { copyState, copy } = useCopyLink(address);
   const [pictureError, setPictureError] = useState(false);
@@ -176,7 +179,9 @@ export const BookingLinkCard: React.FC<BookingLinkCardProps> = ({ address: given
           {/* Study tool: the sample workspace lives in this one browser, and a study session should know how far it reaches. */}
           {researchMode() && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-              Demo workspace: its data are kept in this browser and shared by all its tabs. A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject. Another browser or device is not reached.
+              {onServer
+                ? 'Demo workspace: the salon’s settings (services, team, hours, closed dates) come from the server, so the page “Open as customer” opens shows them as you saved them. Requests, the calendar and customers are still kept in this browser and shared by its tabs: a request sent there shows up on Home here, and that tab shows your answer. Another browser or device does not see those.'
+                : 'Demo workspace: its data are kept in this browser and shared by all its tabs. A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject. Another browser or device is not reached.'}
             </p>
           )}
         </div>

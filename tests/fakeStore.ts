@@ -2,7 +2,7 @@
  * Stand-ins for the tests of the live chat: the storage in memory with a clock the test controls,
  * and a way to run code "as deployed" with given settings. Nothing leaves the test.
  */
-import { COUNT_SCRIPT, DELETE_SCRIPT, forgetEarlierListCleaning, SAVE_SCRIPT } from '../server/store';
+import { COUNT_SCRIPT, DELETE_SCRIPT, forgetEarlierListCleaning, LIST_READ_SCRIPT, SALON_SAVE_SCRIPT, SAVE_SCRIPT } from '../server/store';
 
 export type Command = (string | number)[];
 
@@ -182,6 +182,19 @@ export class FakeStore {
         if (!Number.isNaN(most) && n > most) break;
       }
       return counts;
+    }
+    if (script === SALON_SAVE_SCRIPT && keys.length === 1 && args.length === 2) {
+      const current = this.execute(['GET', keys[0]]);
+      const rev = typeof current === 'string' ? (/^\{"rev":(\d+),/.exec(current)?.[1] ?? '0') : '0';
+      if (rev !== args[0]) return [0, current];
+      this.execute(['SET', keys[0], args[1]]);
+      return [1];
+    }
+    if (script === LIST_READ_SCRIPT && keys.length >= 1 && args.length === 0) {
+      const values: unknown[] = keys.slice(0, -1).map(key => this.execute(['GET', key]));
+      const record = this.execute(['GET', keys[keys.length - 1]]);
+      values.push(typeof record === 'string' ? Number(/^\{"rev":(\d+),/.exec(record)?.[1] ?? 0) : 0);
+      return values;
     }
     throw new Error('ERR the storage stand-in does not know this script, or it got the wrong number of keys and values');
   }

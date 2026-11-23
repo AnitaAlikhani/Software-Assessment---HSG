@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { notSavedText, pendingFormSave, refreshSharedSalon, useServerValue } from '../useDemoState';
+import { followStored } from '../formFollow';
+import { useFormSave } from '../formSave';
 import { useHorizontalOverflow } from '../useHorizontalOverflow';
 import { ChevronLeft, ChevronRight, CalendarClock, ArrowLeft, X, Info, Clock, Copy } from 'lucide-react';
 import { AppointmentRequest, CalendarEvent, Employee, ShiftEntry, StaffAbsence } from '../types';
@@ -97,6 +100,12 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
   const [start, setStart] = useState('09:00');
   const [end, setEnd] = useState('18:00');
   const [error, setError] = useState('');
+  // The editor's save is on its way to the server (signed-in device): this opening of the editor
+  // waits for its answer; another day or person, or the editor opened again, is not touched by it
+  // (src/formSave.ts).
+  const { saving, notSaved, newOpening, afterSave } = useFormSave();
+  /** Closes the editor: its opening ends, and an answer still on its way no longer concerns it. */
+  const closeEditor = () => { setShowEditor(false); newOpening(); };
   // "Copy last week": the question before days that are already changed are overwritten, and what it led to.
   const [copyQuestion, setCopyQuestion] = useState<WeekCopy | null>(null);
   const [copyNotice, setCopyNotice] = useState('');
@@ -128,10 +137,29 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
 
   // What the editor showed when it was filled for a person and a day. Anything else in it now would be lost on closing.
   const [loaded, setLoaded] = useState('');
-  const loadDay = (employeeId: string, date: string) => {
-    const day = dayOf(employeeId, date);
+  // The editor compares with what the server has of the day, and follows it while open
+  // (src/formFollow.ts): a field the owner has not changed shows a change made on another device.
+  const storedEmployees = useServerValue('employees', employees);
+  const storedShifts = useServerValue('shifts', shiftOverview);
+  const storedDay = (employeeId: string, date: string) => {
+    const day = workingDayOn({ employees: storedEmployees, shiftOverview: storedShifts }, employeeId, date);
     // A day off opens with the times it would regularly have, ready for "works on this day".
-    const shown = [day.hours !== null, (day.hours ?? day.regular)?.start ?? '09:00', (day.hours ?? day.regular)?.end ?? '18:00'] as const;
+    return [day.hours !== null, (day.hours ?? day.regular)?.start ?? '09:00', (day.hours ?? day.regular)?.end ?? '18:00'] as const;
+  };
+  if (showEditor && editorEmployeeId && loaded) {
+    const stored = JSON.stringify(storedDay(editorEmployeeId, editorDate));
+    if (stored !== loaded) {
+      const [w0, s0, e0] = JSON.parse(loaded) as [boolean, string, string];
+      const [w1, s1, e1] = JSON.parse(stored) as [boolean, string, string];
+      // The two times of the day are one field: a start typed here is never paired with an end saved elsewhere.
+      const next = followStored({ works: w0, times: `${s0} ${e0}` }, { works, times: `${start} ${end}` }, { works: w1, times: `${s1} ${e1}` });
+      const [nextStart, nextEnd] = next.times.split(' ');
+      setWorks(next.works); setStart(nextStart); setEnd(nextEnd);
+      setLoaded(stored);
+    }
+  }
+  const loadDay = (employeeId: string, date: string) => {
+    const shown = storedDay(employeeId, date);
     setEditorEmployeeId(employeeId);
     setEditorDate(date);
     setWorks(shown[0]);
@@ -139,11 +167,12 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
     setEnd(shown[2]);
     setLoaded(JSON.stringify(shown));
     setError('');
+    newOpening();
   };
   /** A tap beside the editor, Escape or the Back gesture: quickly done, so changed times ask first. Cancel and X close at once. */
   const dismissEditor = () => {
     if (JSON.stringify([works, start, end]) !== loaded && !window.confirm('Discard the changes to this day?')) return;
-    setShowEditor(false);
+    closeEditor();
   };
   const dismissRef = useRef(dismissEditor);
   dismissRef.current = dismissEditor;
@@ -151,6 +180,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
   const panelRef = useRef<HTMLDivElement>(null);
   useCloseOnBack(panelRef, selectedEmployeeId !== null, () => setSelectedEmployeeId(null));
   const openEditor = (employeeId: string, date: string) => {
+    refreshSharedSalon();
     loadDay(employeeId, date);
     forgetCopy();
     setShowEditor(true);
@@ -200,15 +230,29 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
     }
     const problem = works ? validateDayHours({ start, end }) : null;
     if (problem) { setError(problem); return; }
+    if (saving) return;
     onUpdateShift([{ employeeId: editorEmployeeId, date: editorDate, hours: works ? { start, end } : null }]);
-    setWeekStart(startOfWeek(editorDate));
-    if (selectedEmployeeId) setSelectedEmployeeId(editorEmployeeId);
-    setShowEditor(false);
+    const done = () => {
+      setWeekStart(startOfWeek(editorDate));
+      if (selectedEmployeeId) setSelectedEmployeeId(editorEmployeeId);
+      closeEditor();
+    };
+    closeWhenSaved(done);
   };
   const backToRegular = (employeeId: string, date: string) => {
+    if (saving) return;
     onUpdateShift([{ employeeId, date, hours: 'regular' }]);
-    setShowEditor(false);
+    closeWhenSaved(closeEditor);
   };
+  /**
+   * On a signed-in device the editor stays as typed until the server has the day; not taken, it
+   * stays open and the message says why. Elsewhere it closes at once.
+   */
+  const closeWhenSaved = (done: () => void) => {
+    afterSave(pendingFormSave(), done, notSavedText);
+  };
+  // Why the last save was not taken, said only while the editor holds something the server does not have.
+  const shownError = error || (notSaved && JSON.stringify([works, start, end]) !== loaded ? notSaved : '');
 
   // "Copy last week": the days that were changed in the week before the one shown, for the people shown.
   const sourceWeek = formatDateRange(addDays(weekStart, -7), addDays(weekStart, -1));
@@ -472,7 +516,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
             <form onSubmit={saveDay} className="flex flex-col min-h-full gap-5 text-xs">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                 <h2 id="shift-editor-title" className="text-base font-bold text-slate-900">Change a day</h2>
-                <button type="button" aria-label="Close" onClick={() => setShowEditor(false)} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
+                <button type="button" aria-label="Close" onClick={closeEditor} className="flex size-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
               </div>
               <div>
                 <label htmlFor="shift-employee" className="font-semibold text-slate-700 block mb-1.5">Employee</label>
@@ -525,14 +569,14 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
                   {waitingOutside === 1 ? '1 waiting request' : `${waitingOutside} waiting requests`} for {editorEmployee?.name} on this day could no longer be accepted at {waitingOutside === 1 ? 'its' : 'their'} time. Answer {waitingOutside === 1 ? 'it' : 'them'} on Home first, or move {waitingOutside === 1 ? 'it' : 'them'} there.
                 </p>
               )}
-              {error && <p role="alert" className="text-rose-600">{error}</p>}
+              {shownError && <p role="alert" className="text-rose-600">{shownError}</p>}
               <div className="sticky -bottom-4 -mx-4 mt-auto space-y-2 border-t border-slate-100 bg-white px-4 pt-3 pb-4 sm:-bottom-6 sm:-mx-6 sm:px-6 sm:pb-6">
                 {editorDay.kind !== 'regular' && (
                   <button type="button" onClick={() => backToRegular(editorEmployeeId, editorDate)} className="min-h-11 w-full py-2.5 font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl">Back to regular hours</button>
                 )}
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setShowEditor(false)} className="min-h-11 flex-1 py-2.5 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
-                  <button type="submit" className="min-h-11 flex-1 py-2.5 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs">Save</button>
+                  <button type="button" onClick={closeEditor} className="min-h-11 flex-1 py-2.5 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl">Cancel</button>
+                  <button type="submit" disabled={saving} className="min-h-11 flex-1 py-2.5 font-semibold text-white bg-[#5551FF] hover:bg-[#433fd8] rounded-xl shadow-xs disabled:opacity-60">{saving ? 'Saving…' : 'Save'}</button>
                 </div>
               </div>
             </form>

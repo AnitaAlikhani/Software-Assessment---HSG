@@ -4,7 +4,7 @@ import test from 'node:test';
 import { dataSpace, usesLiveData } from '../server/environment';
 import {
   claimMessage, DELETE_SCRIPT, deleteConversation, deletedSince, deleteOwnChat, keyPrefix, listConversations, loadConversation, loadForUpdate,
-  NO_DELETION_SEEN, releaseMessage, SAVE_SCRIPT, saveConversation,
+  LIST_READ_SCRIPT, NO_DELETION_SEEN, releaseMessage, SAVE_SCRIPT, saveConversation,
 } from '../server/store';
 import { GET as spaceRoute } from '../api/space';
 import { GET as telegramSetup } from '../api/telegram/setup';
@@ -162,7 +162,11 @@ test('every copy can say which chats it uses, and a preview does not advertise t
     assert.deepEqual(body.conversations.map(item => item.customerName), ['Sofia Rossi']);
     assert.equal(body.channels.telegram, null);
   }, { store: previewStore });
-  assert.deepEqual(previewCommands, [['SCAN', '0', 'MATCH', 'slotbee:preview:live:chat:*', 'COUNT', 1000], ['MGET', 'slotbee:preview:live:chat:4179']]);
+  // The chats and the revision of the salon's settings are read in one command, and the salon is the preview's own as well.
+  assert.deepEqual(previewCommands, [
+    ['SCAN', '0', 'MATCH', 'slotbee:preview:live:chat:*', 'COUNT', 1000],
+    ['EVAL', LIST_READ_SCRIPT, 2, 'slotbee:preview:live:chat:4179', 'slotbee:preview:live:salon'],
+  ]);
 
   await deployedWith({ LIVE_ACCESS_KEY: 'right-key' }, async () => {
     assert.deepEqual(await (await space('right-key')).json(),

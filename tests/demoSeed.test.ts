@@ -586,7 +586,8 @@ test('the AI is told the new services, the hours of each day and the team, and n
   for (const service of initialServices) {
     assert.ok(context.includes(`- ${service.name}: ${service.durationMinutes} min, CHF ${service.priceCHF.toFixed(2)}.`), service.name);
   }
-  assert.match(context, /a small hair salon at Tuchgasse 7, 9000 St\. Gallen\. Your tone is/);
+  assert.match(context, /a small hair salon at Tuchgasse 7, 9000 St\. Gallen\.\n/);
+  assert.match(context, /^You are the booking assistant of the hair salon described in the salon data below\. Your tone is warm and friendly\.\n/);
   assert.match(context, /- Monday: closed\n- Tuesday: 08:30–18:30\n- Wednesday: 08:30–18:30\n- Thursday: 08:30–18:30\n- Friday: 08:30–18:30\n- Saturday: 08:00–16:00\n- Sunday: closed/);
   // The latest start follows each day's closing time: a haircut at 18:00 on weekdays, 15:30 on Saturday.
   assert.match(context, /- Haircut: .* Latest start 18:00 \(Tuesday to Friday\), 15:30 \(Saturday\)\./);

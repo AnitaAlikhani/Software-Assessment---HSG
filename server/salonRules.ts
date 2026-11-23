@@ -1,6 +1,7 @@
 /**
  * The salon's rulebook for the AI assistant. Edit the texts here to change how the AI answers.
- * Services, prices, the team and opening hours come from the salon's data (src/mockData.ts).
+ * Services, prices, the team, opening hours and closed dates come from the salon as it is now
+ * (server/salon.ts: the owner's saved settings over the built-in salon of src/mockData.ts).
  */
 
 /** Smallest gap between "now" and a bookable time, and how far ahead people can book. */

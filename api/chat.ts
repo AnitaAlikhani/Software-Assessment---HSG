@@ -3,17 +3,20 @@ import { cleanName } from '../server/bookingRules.js';
 import { answerWithoutAi, applyAi, askAi, storeIncoming } from '../server/chatFlow.js';
 import { hasChatAccess } from '../server/access.js';
 import { addressWaiting, countChatMessage, countWrongTry, gateClosed, LIMIT_TEXTS, LIMITS, wrongTriesGate } from '../server/limits.js';
-import { deleteOwnChat, loadConversationAnd, loadForUpdate, storeConfigured } from '../server/store.js';
+import { BUILT_IN_SALON, loadChatAndSalon, type Salon } from '../server/salon.js';
+import { deleteOwnChat, loadConversationAnd, storeConfigured } from '../server/store.js';
 import { answeredBy, isValidSessionId, visitorMessages, webChatId } from '../server/whatsappCore.js';
-import { initialCompanySettings } from '../src/mockData.js';
 
 const MAX_TEXT = 1000;
 
 const noStore = { 'Cache-Control': 'no-store' };
 
-/** " or call +41 ..." when the salon has a phone number in Company Settings, otherwise nothing. */
-const orCall = () => {
-  const phone = initialCompanySettings.businessPhone.trim();
+/**
+ * " or call +41 ..." when the salon has a phone number in Company Settings, otherwise nothing.
+ * Before the salon is read (the storage is not set up), the built-in salon's.
+ */
+const orCall = (salon: Salon = BUILT_IN_SALON) => {
+  const phone = salon.companySettings.businessPhone.replace(/\s+/g, ' ').trim();
   return phone ? ` or call ${phone}` : '';
 };
 const tryAgain = () => Response.json({ error: 'Your message could not be sent. Please try again.' }, { status: 400 });
@@ -67,10 +70,11 @@ export async function POST(request: Request) {
   if (!isValidSessionId(sessionId) || !text) return tryAgain();
 
   const waId = webChatId(sessionId);
-  const loaded = await loadForUpdate(waId);
+  // The salon as it is now comes with the chat, in the same storage command.
+  const { loaded, salon } = await loadChatAndSalon(waId);
   // A chat stops taking messages at this length, so it cannot grow without end.
   if ((loaded.conversation?.messages.length ?? 0) >= LIMITS.chatInAll) {
-    return refused(`This conversation has become long. Please start a new chat${orCall()}.`, 429, { full: true });
+    return refused(`This conversation has become long. Please start a new chat${orCall(salon)}.`, 429, { full: true });
   }
   // One storage command: the address's wrong tries, and this message counted for its chat, its
   // address and the day's AI answers (server/limits.ts).
@@ -83,11 +87,11 @@ export async function POST(request: Request) {
   const stored = await storeIncoming(incoming, loaded);
   // With the day's AI answers used up, the AI is not asked: the chat goes to the owner (see answerWithoutAi).
   const withoutAi = check === 'ai-ceiling';
-  const analysis = stored && !withoutAi ? await askAi(stored.conversation, incoming.id) : null;
+  const analysis = stored && !withoutAi ? await askAi(stored.conversation, incoming.id, Date.now(), salon) : null;
   // The answer is added to the chat as it is now. If the owner took it over meanwhile, no AI reply is added.
   const answered = !stored ? null
     : withoutAi ? await answerWithoutAi(stored, incoming.id, true)
-    : await applyAi(stored, incoming.id, analysis, true);
+    : await applyAi(stored, incoming.id, analysis, true, Date.now(), salon);
   // The answer took a while. If the visitor deleted the chat meanwhile (the page can be open
   // twice), it stays deleted: nothing is stored, and neither the earlier messages nor the answer
   // go back to the page.

@@ -17,6 +17,10 @@ import { dateRangeFieldClass, useDateRangeForm } from '../dateRangeForm';
 import { SectionTabs, sectionPanel } from '../components/SectionTabs';
 import { BookingLinkCard } from '../components/BookingLinkCard';
 import { ThisDeviceCard, type ThisDeviceFacts } from '../components/ThisDeviceCard';
+import { notSavedText, pendingFormSave, refreshSharedSalon, useServerValue, whenFormSaved, whenSaved } from '../useDemoState';
+import { useStoredForm } from '../formFollow';
+import { useFormSave } from '../formSave';
+import { salonTextTooLong, TEXT_LIMITS } from '../fieldLimits';
 
 /** Opening and closing times are chosen on the half hour, the step appointments start on. */
 const HALF_HOURS = Array.from({ length: 48 }, (_, index) => formatTime(index * 30));
@@ -79,9 +83,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const setActiveTab = (next: SettingsSubTab) => { setOwnTab(next); onTabChange?.(next); };
   // The form opens on the launch market's choices: a country and a time zone saved before the
   // market was narrowed show as Switzerland and Swiss time, and count as a change still to save.
-  const [formData, setFormData] = useState<CompanySettingsData>(() =>
-    ({ ...asShown(initialSettings), country: countryOf(initialSettings.country), timeZone: SALON_TIME_ZONE }));
-  const [hoursData, setHoursData] = useState<BookingHoursDay[]>(() => initialBookingHours.map((day) => ({ ...day })));
+  // The forms compare with what the server has (on a signed-in device; the browser's own salon
+  // elsewhere), and follow it while open: a field the owner has not changed shows a change made on
+  // another device, one she has changed keeps what she typed (src/formFollow.ts).
+  const storedSettings = useServerValue('companySettings', initialSettings);
+  const storedHours = useServerValue('bookingHours', initialBookingHours);
+  const { form: formData, setForm: setFormData } = useStoredForm<CompanySettingsData>(
+    { ...asShown(storedSettings), country: countryOf(storedSettings.country), timeZone: SALON_TIME_ZONE });
+  // One weekday is one field.
+  const { form: hoursData, setForm: setHoursData } = useStoredForm<BookingHoursDay[]>(storedHours, { listId: (day: BookingHoursDay) => day.day });
   const [showHelp, setShowHelp] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const [logoError, setLogoError] = useState('');
@@ -89,8 +99,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const logoInputRef = useRef<HTMLInputElement>(null);
   const logoRequest = useRef(0);
   useEffect(() => () => { logoRequest.current += 1; }, []);
+  // The forms start from the latest record (src/useDemoState.ts refreshSharedSalon).
+  useEffect(() => { refreshSharedSalon(); }, []);
   const closure = useDateRangeForm(formData.timeZone, now, 'closure-name');
-  const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(asShown(initialSettings)) || JSON.stringify(hoursData) !== JSON.stringify(initialBookingHours);
+  const hasSettingsChanges = JSON.stringify(formData) !== JSON.stringify(asShown(storedSettings)) || JSON.stringify(hoursData) !== JSON.stringify(storedHours);
   // Save applies to Salon and Opening hours. On the other tabs it is only there while something waits to be saved.
   const saveShown = activeTab === 'salon' || activeTab === 'hours' || hasSettingsChanges;
   // Leaving for another screen (the menu, the tab bar, Back) asks first while something is unsaved.
@@ -105,12 +117,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const rangeError = closure.rangeError();
     if (rangeError) { closure.setError(rangeError); return; }
     if (!closure.text.trim()) { closure.setError('Enter a name for this closure.'); return; }
-    if (closedDates.some((item) => item.id !== closure.editingId && item.start === closure.start && item.end === closure.end)) { closure.setError('A closure already covers these exact dates. Edit that closure instead.'); return; }
-    const entry: ClosedDate = { id: closure.editingId || `closed-${crypto.randomUUID()}`, name: closure.text.trim(), start: closure.start, end: closure.end };
-    onSaveClosedDates([...closedDates.filter((item) => item.id !== closure.editingId), entry].sort((a, b) => a.start.localeCompare(b.start)));
-    closure.setFeedback('Closure saved. Online booking availability is updated.');
-    closure.reset();
+    if (closure.text.trim().length > TEXT_LIMITS.name) { closure.setError(`The closure name can be at most ${TEXT_LIMITS.name} characters.`); return; }
+    // A new closure keeps one id for every try of this filling of the form: a save that is sent
+    // again (its answer got lost, or the server could not be reached) takes the place of the first
+    // try and never adds a second closure.
+    const id = closure.editingId || (newClosureId.current ??= `closed-${crypto.randomUUID()}`);
+    if (closedDates.some((item) => item.id !== id && item.start === closure.start && item.end === closure.end)) { closure.setError('A closure already covers these exact dates. Edit that closure instead.'); return; }
+    const entry: ClosedDate = { id, name: closure.text.trim(), start: closure.start, end: closure.end };
+    if (closureSaving) return;
+    onSaveClosedDates([...closedDates.filter((item) => item.id !== id), entry].sort((a, b) => a.start.localeCompare(b.start)));
+    setSentClosure(entry);
+    const done = closureTaken;
+    // On a signed-in device the form keeps what was typed until the server has it; not taken, it
+    // stays as typed and says why. Elsewhere it clears at once.
+    closureSave.afterSave(pendingFormSave(), done, notSavedText);
   };
+  // The closure form's save waits for the server: only this filling of the form is concerned by
+  // its answer (src/formSave.ts). Editing another closure, Cancel and a cleared form start a new one.
+  const closureSave = useFormSave();
+  const closureSaving = closureSave.saving;
+  const newClosureId = useRef<string | null>(null);
+  const restartClosure = () => { closure.reset(); closureSave.newOpening(); newClosureId.current = null; setSentClosure(null); };
+  /** The server has the closure of the form: the form is cleared for the next one and says so. */
+  const closureTaken = () => { restartClosure(); closure.setFeedback('Closure saved. Online booking availability is updated.'); };
+  const [sentClosure, setSentClosure] = useState<ClosedDate | null>(null);
+  const storedClosedDates = useServerValue('closedDates', closedDates);
+  // Why the last save was not taken, said only while the form holds what the server does not have.
+  const closureHeld = sentClosure !== null && storedClosedDates.some((item) => item.id === sentClosure.id && item.name === closure.text.trim() && item.start === closure.start && item.end === closure.end);
+  const closureError = closure.error || (closureSave.notSaved && !closureHeld ? closureSave.notSaved : '');
+  // Reported as not taken, but the server has it after all (the answer got lost on the way): the form is done.
+  const closureArrived = closureHeld && Boolean(closureSave.notSaved);
+  useEffect(() => {
+    if (closureArrived) closureTaken();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closureArrived]);
   const [showSavedFeedback, setShowSavedFeedback] = useState(false);
 
   const handleToggleDay = (index: number) => {
@@ -151,6 +191,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSave = () => {
     if (!formData.companyName.trim()) { setSettingsError('Enter a company name.'); setActiveTab('salon'); return; }
+    // The server's limits (server/salon.ts), said here before saving rather than refused after.
+    const tooLong = salonTextTooLong(formData);
+    if (tooLong) { setSettingsError(tooLong); setActiveTab('salon'); return; }
     const phoneIssue = formData.businessPhone.trim() ? phoneAdvice(formData.businessPhone) : null;
     if (phoneIssue) { setSettingsError(`Business phone: ${phoneIssue} Or leave the field blank.`); setActiveTab('salon'); return; }
     const invalidDay = hoursData.find((day) => day.isOpen && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(day.from) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(day.to) || day.to <= day.from));
@@ -173,8 +216,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } as unknown as CompanySettingsData;
     setFormData(asShown(normalizedSettings));
     onSaveSettings(normalizedSettings, hoursData);
-    setShowSavedFeedback(true);
-    setTimeout(() => setShowSavedFeedback(false), 2500);
+    // "Saved!" only once it is: on a signed-in device that is when the server has taken it. Not
+    // taken, the form keeps what was typed and its own Save is the way to try again.
+    whenFormSaved(() => {
+      setShowSavedFeedback(true);
+      setTimeout(() => setShowSavedFeedback(false), 2500);
+    });
   };
 
   return (
@@ -235,7 +282,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <label htmlFor="company-companyName" className="font-semibold text-slate-700 block mb-1">
                       Company name
                     </label>
-                    <input id="company-companyName"
+                    <input id="company-companyName" maxLength={120}
                       type="text"
                       value={formData.companyName}
                       onChange={(e) =>
@@ -251,7 +298,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <label htmlFor="company-street" className="font-semibold text-slate-700 block mb-1">
                         Street and number
                       </label>
-                    <input id="company-street"
+                    <input id="company-street" maxLength={200}
                         type="text"
                         value={formData.street}
                         onChange={(e) =>
@@ -264,7 +311,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <label htmlFor="company-postalCode" className="font-semibold text-slate-700 block mb-1">
                         Postal code
                       </label>
-                    <input id="company-postalCode"
+                    <input id="company-postalCode" maxLength={20}
                         type="text"
                         inputMode="numeric"
                         autoComplete="postal-code"
@@ -279,7 +326,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <label htmlFor="company-city" className="font-semibold text-slate-700 block mb-1">
                         City
                       </label>
-                    <input id="company-city"
+                    <input id="company-city" maxLength={120}
                         type="text"
                         value={formData.city}
                         onChange={(e) =>
@@ -331,7 +378,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <label htmlFor="company-businessPhone" className="font-semibold text-slate-700 block mb-1">
                         Business phone
                       </label>
-                    <input id="company-businessPhone"
+                    <input id="company-businessPhone" maxLength={40}
                         type="tel"
                         autoComplete="tel"
                         placeholder="079 123 45 67"
@@ -385,7 +432,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-description" className="font-semibold text-slate-700 block mb-1">
                     Company description
                   </label>
-                    <textarea id="company-description"
+                    <textarea id="company-description" maxLength={2000}
                     rows={3}
                     value={formData.description}
                     onChange={(e) =>
@@ -400,7 +447,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-website" className="font-semibold text-slate-700 block mb-1">
                     Link to your website
                   </label>
-                    <input id="company-website"
+                    <input id="company-website" maxLength={500}
                     type="url"
                     value={formData.website}
                     onChange={(e) =>
@@ -414,7 +461,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-facebook" className="font-semibold text-slate-700 block mb-1">
                     Link to your Facebook profile
                   </label>
-                    <input id="company-facebook"
+                    <input id="company-facebook" maxLength={500}
                     type="text"
                     value={formData.facebook}
                     onChange={(e) =>
@@ -428,7 +475,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-xProfile" className="font-semibold text-slate-700 block mb-1">
                     Link to your X profile
                   </label>
-                    <input id="company-xProfile"
+                    <input id="company-xProfile" maxLength={500}
                     type="text"
                     value={formData.xProfile}
                     onChange={(e) =>
@@ -442,7 +489,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-instagram" className="font-semibold text-slate-700 block mb-1">
                     Link to your Instagram profile
                   </label>
-                    <input id="company-instagram"
+                    <input id="company-instagram" maxLength={500}
                     type="text"
                     value={formData.instagram}
                     onChange={(e) =>
@@ -456,7 +503,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <label htmlFor="company-legalNote" className="font-semibold text-slate-700 block mb-1">
                     Link to your legal notice (imprint)
                   </label>
-                    <input id="company-legalNote"
+                    <input id="company-legalNote" maxLength={500}
                     type="url"
                     value={formData.legalNote}
                     onChange={(e) =>
@@ -487,7 +534,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   {formData.customTerms && (
                     <div className="mt-3">
                       <label htmlFor="company-termsText" className="mb-1 block text-xs font-semibold text-slate-700">Custom terms and privacy text</label>
-                      <textarea id="company-termsText" rows={6} value={formData.termsText ?? ''} onChange={(event) => setFormData({ ...formData, termsText: event.target.value })} className="min-h-11 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base focus:border-[#5551FF] focus:outline-hidden sm:text-sm" />
+                      <textarea id="company-termsText" maxLength={20000} rows={6} value={formData.termsText ?? ''} onChange={(event) => setFormData({ ...formData, termsText: event.target.value })} className="min-h-11 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base focus:border-[#5551FF] focus:outline-hidden sm:text-sm" />
                       <p className="mt-1 text-xs text-slate-500">This text appears on the customer booking page after you select Save.</p>
                     </div>
                   )}
@@ -571,21 +618,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="space-y-2">
                 {closedDates.map((item) => <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                   <div className="flex-1 min-w-0"><p className="font-semibold text-slate-800">{item.name}</p><p className="text-slate-500 mt-1 tabular-nums">{formatDateRange(item.start, item.end)}</p></div>
-                  <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => closure.edit(item, item.name)}>Edit</button>
-                  <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (closure.editingId === item.id) closure.reset(); closure.setFeedback('Closure removed. Booking availability is updated.'); }}><Trash2 className="w-4 h-4" /></button>
+                  <button className="min-h-11 min-w-11 font-semibold text-[#5551FF]" aria-label={`Edit ${item.name}`} onClick={() => { closure.edit(item, item.name); closureSave.newOpening(); }}>Edit</button>
+                  <button className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#5551FF]" aria-label={`Delete ${item.name}`} onClick={() => { onSaveClosedDates(closedDates.filter((date) => date.id !== item.id)); if (closure.editingId === item.id) restartClosure(); whenSaved(() => closure.setFeedback('Closure removed. Booking availability is updated.')); }}><Trash2 className="w-4 h-4" /></button>
                 </div>)}
                 {closedDates.length === 0 && <p className="py-4 text-sm text-slate-500">No one-off closures added.</p>}
               </div>
               {closure.feedback && <p role="status" className="rounded-xl bg-emerald-50 text-emerald-800 p-3 text-xs">{closure.feedback}</p>}
               <form onSubmit={saveClosure} className="border-t border-slate-100 pt-5 space-y-4 text-xs">
                 <h3 className="font-semibold text-slate-800">{closure.editingId ? 'Edit' : 'Add'} closure</h3>
-                <div><label htmlFor="closure-name" className="block mb-1 font-semibold text-slate-700">Closure name</label><input id="closure-name" required value={closure.text} onChange={(event) => closure.setText(event.target.value)} placeholder="For example, public holiday" className={dateRangeFieldClass} /></div>
+                <div><label htmlFor="closure-name" className="block mb-1 font-semibold text-slate-700">Closure name</label><input id="closure-name" required value={closure.text} onChange={(event) => closure.setText(event.target.value)} placeholder="For example, public holiday" className={dateRangeFieldClass} maxLength={120} /></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><label htmlFor="closure-start" className="block mb-1 font-semibold text-slate-700">First day</label><input id="closure-start" type="date" required value={closure.start} onChange={(event) => closure.changeStart(event.target.value)} className={dateRangeFieldClass} /></div>
                   <div><label htmlFor="closure-end" className="block mb-1 font-semibold text-slate-700">Last day</label><input id="closure-end" type="date" required min={closure.start} value={closure.end} onChange={(event) => closure.setEnd(event.target.value)} className={dateRangeFieldClass} /></div>
                 </div>
-                {closure.error && <p role="alert" className="rounded-xl p-3 bg-rose-50 text-rose-700">{closure.error}</p>}
-                <div className="flex gap-3"><button type="submit" className="inline-flex min-h-11 items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5551FF] text-white font-semibold disabled:opacity-50">{closure.editingId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}Save closure</button>{closure.editingId && <button type="button" onClick={closure.reset} className="min-h-11 px-4 py-2 rounded-xl text-slate-600 bg-slate-100 font-semibold">Cancel</button>}</div>
+                {closureError && <p role="alert" className="rounded-xl p-3 bg-rose-50 text-rose-700">{closureError}</p>}
+                <div className="flex gap-3"><button type="submit" disabled={closureSaving} className="inline-flex min-h-11 items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5551FF] text-white font-semibold disabled:opacity-50">{closure.editingId ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{closureSaving ? 'Saving…' : 'Save closure'}</button>{closure.editingId && <button type="button" onClick={restartClosure} className="min-h-11 px-4 py-2 rounded-xl text-slate-600 bg-slate-100 font-semibold">Cancel</button>}</div>
               </form>
             </div>
           )}

@@ -117,6 +117,63 @@ const CANCELLED: Record<ChatLanguage, (words: Pick<Words, 'name' | 'salon' | 'da
   IT: w => `Buongiorno ${w.name}, il Suo appuntamento${w.salon} di ${w.day} alle ${w.time} è annullato. Ci contatti pure per un nuovo appuntamento.`,
 };
 
+// A complete request the AI passed on to the owner: said by the server, not by the AI, because
+// nothing is booked yet and the AI's own words have promised more ("I have entered your
+// appointment"). The salon may confirm, decline or offer another time, so the sentence promises
+// only its answer. A change names the appointment that stands until the salon answers; a move of
+// an appointment that was not booked in this chat cannot know which one that is, and does not say.
+const REQUESTED: Record<ChatLanguage, {
+  requested: (words: Pick<Words, 'name' | 'service' | 'staff' | 'day' | 'time'>) => string;
+  changeRequested: (words: Pick<Words, 'name' | 'staff' | 'day' | 'time' | 'askedDay' | 'askedTime'>) => string;
+  moveRequested: (words: Pick<Words, 'name' | 'service' | 'staff' | 'day' | 'time'>) => string;
+}> = {
+  EN: {
+    requested: w => `Thank you${w.name}. I have passed your request on to the salon: ${w.service} on ${w.day} at ${w.time}${w.staff}. The salon will answer you here in the chat; until then nothing is booked.`,
+    changeRequested: w => `Thank you${w.name}. I have passed on to the salon your wish to move your appointment to ${w.day} at ${w.time}${w.staff}. Your appointment on ${w.askedDay} at ${w.askedTime} stays as it is until the salon answers you here in the chat.`,
+    moveRequested: w => `Thank you${w.name}. I have passed on to the salon your wish to move an appointment to ${w.day} at ${w.time} (${w.service}${w.staff}). The salon will answer you here in the chat; until then nothing is changed.`,
+  },
+  DE: {
+    requested: w => `Vielen Dank${w.name}. Ich habe Ihre Anfrage an den Salon weitergegeben: ${w.service} am ${w.day} um ${w.time} Uhr${w.staff}. Der Salon antwortet Ihnen hier im Chat; bis dahin ist noch nichts gebucht.`,
+    changeRequested: w => `Vielen Dank${w.name}. Ich habe Ihren Wunsch, den Termin auf ${w.day} um ${w.time} Uhr${w.staff} zu verschieben, an den Salon weitergegeben. Ihr Termin am ${w.askedDay} um ${w.askedTime} Uhr bleibt bestehen, bis der Salon Ihnen hier im Chat antwortet.`,
+    moveRequested: w => `Vielen Dank${w.name}. Ich habe Ihren Wunsch, einen Termin auf ${w.day} um ${w.time} Uhr zu verschieben (${w.service}${w.staff}), an den Salon weitergegeben. Der Salon antwortet Ihnen hier im Chat; bis dahin ist noch nichts geändert.`,
+  },
+  FR: {
+    requested: w => `Merci${w.name}. J'ai transmis votre demande au salon${GAP}: ${w.service} le ${w.day} à ${w.time}${w.staff}. Le salon vous répondra ici dans le chat${GAP}; d'ici là, rien n'est réservé.`,
+    changeRequested: w => `Merci${w.name}. J'ai transmis au salon votre souhait de déplacer votre rendez-vous au ${w.day} à ${w.time}${w.staff}. Votre rendez-vous du ${w.askedDay} à ${w.askedTime} reste valable jusqu'à ce que le salon vous réponde ici dans le chat.`,
+    moveRequested: w => `Merci${w.name}. J'ai transmis au salon votre souhait de déplacer un rendez-vous au ${w.day} à ${w.time} (${w.service}${w.staff}). Le salon vous répondra ici dans le chat${GAP}; d'ici là, rien n'est modifié.`,
+  },
+  IT: {
+    requested: w => `Grazie${w.name}. Ho inoltrato la Sua richiesta al salone: ${w.service} ${w.day} alle ${w.time}${w.staff}. Il salone Le risponderà qui nella chat; fino ad allora non è ancora stato prenotato nulla.`,
+    changeRequested: w => `Grazie${w.name}. Ho inoltrato al salone il Suo desiderio di spostare l'appuntamento a ${w.day} alle ${w.time}${w.staff}. Il Suo appuntamento di ${w.askedDay} alle ${w.askedTime} resta valido finché il salone non Le risponde qui nella chat.`,
+    moveRequested: w => `Grazie${w.name}. Ho inoltrato al salone il Suo desiderio di spostare un appuntamento a ${w.day} alle ${w.time} (${w.service}${w.staff}). Il salone Le risponderà qui nella chat; fino ad allora non è ancora stato cambiato nulla.`,
+  },
+};
+
+/** "Freitag, den 27.11.2026": the day a move goes to, as German names it after "auf". */
+const moveDay = (language: ChatLanguage, date: string) => language === 'DE' ? dayIn(language, date).replace(', ', ', den ') : dayIn(language, date);
+
+/**
+ * The sentence that tells a customer their request (or their wish to move an appointment) went to
+ * the salon and is not booked yet. `previous` is the appointment a change would move; `move` is a
+ * wish to move an appointment that was not booked in this chat.
+ */
+export function requestPassedOnText(details: Omit<AnswerTextBase, 'salonName'> & { previous?: { date: string; startTime: string }; move?: boolean }): string {
+  const language: ChatLanguage = SENTENCES[details.language] ? details.language : 'EN';
+  const name = details.customerName.trim();
+  const staffName = details.staffName?.trim() ?? '';
+  const words = {
+    name: name ? `, ${name}` : '',
+    service: details.serviceName.trim(),
+    staff: staffName ? SENTENCES[language].staff(staffName) : '',
+    day: dayIn(language, details.date),
+    time: details.startTime,
+  };
+  if (details.previous) {
+    return REQUESTED[language].changeRequested({ ...words, day: moveDay(language, details.date), askedDay: dayIn(language, details.previous.date), askedTime: details.previous.startTime });
+  }
+  return details.move ? REQUESTED[language].moveRequested({ ...words, day: moveDay(language, details.date) }) : REQUESTED[language].requested(words);
+}
+
 /** The sentence that tells a customer that their appointment is cancelled. */
 export function cancelledText(details: Pick<AnswerTextBase, 'language' | 'customerName' | 'salonName' | 'date' | 'startTime'>): string {
   const language: ChatLanguage = SENTENCES[details.language] ? details.language : 'EN';

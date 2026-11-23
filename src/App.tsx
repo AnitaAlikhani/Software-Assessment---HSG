@@ -63,8 +63,10 @@ import { BookingLinkCompact } from './components/BookingLinkCard';
 
 import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
-import { forgetRetiredDemoState, useDemoState, watchDemoState } from './useDemoState';
-import { isLiveConversation, useLiveWhatsApp } from './liveWhatsApp';
+import { forgetRetiredDemoState, salonOnServer, useDemoState, useSalonStatus, watchDemoState, whenSaved } from './useDemoState';
+import { SalonGate } from './components/SalonGate';
+import { withEntry } from './formSave';
+import { currentLiveKey, forgetLiveKey, isLiveConversation, LIVE_KEY_STORAGE, useLiveWhatsApp } from './liveWhatsApp';
 import { chatPhoneAfterCustomerEdit, customerForAppointment, customerForRequest, isPhoneNumber, normalizePhone, upsertCustomer, validateContact, type ChatContact } from './bookingData';
 import { deletionDependency } from './managementDependencies';
 import { blockTitle, timeBlockProblem } from './timeBlocks';
@@ -83,6 +85,21 @@ const startingData = (builtAt: Date): DemoWorkspace => {
   if (startingWorkspace?.builtAt !== builtAt.getTime()) startingWorkspace = { builtAt: builtAt.getTime(), data: createDemoWorkspace(undefined, builtAt) };
   return startingWorkspace.data;
 };
+
+/** One message at the foot of the screen (src/App.tsx): what happened, an action, and the way to close it. */
+function Message({ kind, text, action, onDismiss }: { kind: 'success' | 'error' | 'info'; text: string; action?: { label: string; onClick: () => void }; onDismiss: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl sm:flex-nowrap">
+      {kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
+      <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{text}</span>
+      {/* On phones an action gets its own row so the message keeps the full width. */}
+      <div className={`flex shrink-0 items-center justify-end gap-1 ${action ? 'basis-full sm:basis-auto' : ''}`}>
+        {action && <button onClick={action.onClick} className="min-h-11 shrink-0 rounded-lg px-2 text-indigo-200 underline hover:bg-white/10 hover:text-white">{action.label}</button>}
+        <button aria-label="Dismiss notification" onClick={onDismiss} className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/10"><X className="h-4 w-4" /></button>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [publicMode, setPublicMode] = useState(new URLSearchParams(window.location.search).get('booking') === '1');
@@ -230,16 +247,61 @@ export default function App() {
   // The public booking page is a customer's page: it never asks the server for them.
   const live = useLiveWhatsApp(!publicMode);
   const allConversations = [...live.conversations, ...conversations];
-  /** "Sign out on this device" (Settings and the chat screen): the browser forgets the owner key. */
+  // The salon's settings come from the server on a device signed in with the owner's key
+  // (src/sharedSalon.ts); the parts above read them through useDemoState. It follows the key: a
+  // sign-out here or in another tab returns to this browser's own salon, a new key loads again.
+  const salonStatus = useSalonStatus();
+  // The customers' booking page of a browser that holds the owner's key shows the same salon as the
+  // owner's app there: it reads the key this browser stored (never one from its own address, which
+  // it drops without storing), loads the record with it and never writes to it. It has no chats'
+  // answer, so it loads the record again when its tab comes back after a while, and it follows a
+  // sign-out in another tab.
+  const [storedKey, setStoredKey] = useState(() => currentLiveKey());
+  useEffect(() => {
+    const follow = (event: StorageEvent) => { if (event.key === null || event.key === LIVE_KEY_STORAGE) setStoredKey(currentLiveKey()); };
+    window.addEventListener('storage', follow);
+    return () => window.removeEventListener('storage', follow);
+  }, []);
+  const salonKey = publicMode ? storedKey : live.accessKey ?? storedKey;
+  useEffect(() => {
+    const salon = salonOnServer();
+    if (!salon) return;
+    if (!salonKey) salon.signOut();
+    else if (salon.signedInWith !== salonKey || salon.readOnly !== publicMode) void salon.begin(salonKey, { readOnly: publicMode });
+  }, [publicMode, salonKey]);
+  useEffect(() => {
+    if (!publicMode) return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (hiddenAt !== null && Date.now() - hiddenAt > 30_000) salonOnServer()?.reload();
+      hiddenAt = null;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [publicMode]);
+  // Another device saved: the chats' answer reports the record's new revision.
+  useEffect(() => { salonOnServer()?.noteRevision(live.salonRev); }, [live.salonRev]);
+  /** "Sign out on this device" (Settings, the chat screen, the salon that could not be loaded): the browser forgets the owner key. */
   const signOutHere = () => {
+    const fromServer = salonStatus.phase !== 'local';
     live.signOut();
-    showToast('Signed out on this device. Live chats are no longer shown here.', 'info');
+    // The booking page holds no hook of the chats: the key is forgotten here as well.
+    forgetLiveKey();
+    setStoredKey(null);
+    salonOnServer()?.signOut();
+    showToast(fromServer
+      ? 'Signed out on this device. It shows the salon kept in this browser, without live chats.'
+      : 'Signed out on this device. Live chats are no longer shown here.', 'info');
   };
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(DEFAULT_DEMO_CONVERSATION_ID);
   const [aiSettings, setAiSettings] = useDemoState<AiAssistantSettings>('aiSettings', initialAiSettings);
 
-  // Freeze legacy booking buffers before service edits can change their reservation.
+  // Freeze legacy booking buffers before service edits can change their reservation. Not while
+  // the salon is still on its way from the server: the services shown then are not the salon's.
+  const salonShown = salonStatus.phase === 'local' || salonStatus.phase === 'ready';
   useEffect(() => {
+    if (!salonShown) return;
     setCalendarEvents(previous => {
       if (previous.every(event => event.prepMinutes !== undefined && event.postMinutes !== undefined)) return previous;
       return previous.map(event => {
@@ -247,7 +309,7 @@ export default function App() {
         return { ...event, prepMinutes: event.prepMinutes ?? service?.prepMinutes ?? 0, postMinutes: event.postMinutes ?? service?.postMinutes ?? 0 };
       });
     });
-  }, [services, setCalendarEvents]);
+  }, [services, setCalendarEvents, salonShown]);
 
   const [closedDates, setClosedDates] = useDemoState<ClosedDate[]>('closedDates', []);
   const [absences, setAbsences] = useDemoState<StaffAbsence[]>('absences', []);
@@ -299,12 +361,34 @@ export default function App() {
     navigate({ tab: 'calendar', ...(event.date !== salonToday ? { date: event.date } : {}), appointmentId: event.id });
   };
 
-  const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
+  const putToast = (message: string, kind: 'success' | 'error' | 'info', action?: { label: string; onClick: () => void }) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ message, kind, action });
     // Action toasts stay longer, but never forever: on phones the toast covers the next controls.
     toastTimer.current = setTimeout(() => setToast(null), action ? 10000 : kind === 'error' ? 7000 : 4000);
   };
+  /**
+   * A message about what the owner just did. One that says a change is done waits, on a signed-in
+   * device, until the server has it; one the server refused is replaced by the salon's own message.
+   */
+  const showToast = (message: string, kind: 'success' | 'error' | 'info' = 'success', action?: { label: string; onClick: () => void }) => {
+    if (kind === 'error') putToast(message, kind, action);
+    else whenSaved(() => putToast(message, kind, action));
+  };
+  // Forms that hold a copy of a shared part follow what the server has while they are open
+  // (src/formFollow.ts). Only signing in or out starts the screens again: their salon is another one then.
+  const salonRound = salonStatus.phase === 'ready' ? 'server' : 'local';
+  const formKey = salonRound;
+  // What the salon on the server has to say: a change not saved (with "Try again"), another
+  // device that was faster, a part that could not be read, an update from another device. It has
+  // a place of its own above the other messages, so no later message covers a change that was not
+  // saved; only "Try again", dismissing it, or a message of the salon that says more replaces it.
+  const salonNotice = salonStatus.notice;
+  useEffect(() => {
+    if (salonNotice?.kind !== 'info') return;
+    const timer = setTimeout(() => salonOnServer()?.dismissNotice(), 4000);
+    return () => clearTimeout(timer);
+  }, [salonNotice]);
 
   const commitCalendarEvent = (event: CalendarEvent, chat?: ChatContact) => {
     const previousEvent = calendarEvents.find(item => item.id === event.id);
@@ -702,16 +786,18 @@ export default function App() {
   const handleAddEmployee = (
     emp: Omit<Employee, 'id' | 'initials' | 'name'>,
     serviceIds: string[] = [],
+    id?: string,
   ): string => {
     const fullName = `${emp.firstName} ${emp.lastName}`.trim();
     const initials = `${emp.firstName[0] || ''}${emp.lastName[0] || ''}`.toUpperCase();
     const newEmployee: Employee = {
       ...emp,
-      id: `emp-${Date.now()}`,
+      // The form gives one id for all its tries, so a save that is sent again is the same person, never a second one.
+      id: id ?? `emp-${Date.now()}`,
       name: fullName,
       initials: initials || 'EM',
     };
-    setEmployees([...employees, newEmployee]);
+    setEmployees((previous) => withEntry(previous, newEmployee));
     assignServices(newEmployee.id, serviceIds);
     showToast(`Employee ${fullName} added`);
     return newEmployee.id;
@@ -778,12 +864,13 @@ export default function App() {
   };
 
   // Services
-  const handleAddService = (srv: Omit<ServiceItem, 'id'>) => {
+  const handleAddService = (srv: Omit<ServiceItem, 'id'>, id?: string) => {
     const newService: ServiceItem = {
       ...srv,
-      id: `srv-${Date.now()}`,
+      // The form gives one id for all its tries, so a save that is sent again is the same service, never a second one.
+      id: id ?? `srv-${Date.now()}`,
     };
-    setServices([...services, newService]);
+    setServices((previous) => withEntry(previous, newService));
     showToast(`Service ${srv.name} created`);
   };
 
@@ -1044,13 +1131,16 @@ export default function App() {
     showToast('AI receptionist settings saved');
   };
   // The browser tab names the screen, the salon and the product; the customers' booking page names the salon only.
-  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, companySettings.companyName));
+  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, salonShown ? companySettings.companyName : ''));
 
   const bookingPage = <BookingPageView {...availabilityContext}
     companySettings={companySettings} draft={bookingDraft} setDraft={setBookingDraft}
     submittedRequest={submittedRequest} setSubmittedRequest={setSubmittedRequest}
     onNewBookingRequest={handleNewBookingRequest} onUpdateBookingRequest={handleUpdateBookingRequest}
     onCancelBookingRequest={handleCancelBookingRequest} onViewRequest={handleViewRequest} publicMode={publicMode} />;
+  // A signed-in device shows nothing of the salon before the server's record is there, on the
+  // owner's app and on the booking page of that browser alike.
+  if (!salonShown) return <SalonGate status={salonStatus} onRetry={() => void salonOnServer()?.retryLoad()} onSignOut={signOutHere} />;
   if (publicMode) return <main className="min-h-screen bg-[#F8F9FD] text-slate-800">{bookingPage}</main>;
 
   return (
@@ -1088,6 +1178,7 @@ export default function App() {
           }}
           onNewAppointment={newAppointment}
           onOpenAssistant={() => setIsAssistantOpen(true)}
+          saveStatus={salonStatus}
         />
 
         <PilotInterest
@@ -1158,6 +1249,7 @@ export default function App() {
 
           {currentTab === 'team' && (
             <TeamView
+              key={formKey}
               tab={route.section as TeamSubTab | undefined}
               onTabChange={(section) => navigate({ tab: 'team', section }, { replace: true })}
               employees={employees}
@@ -1202,6 +1294,7 @@ export default function App() {
 
           {currentTab === 'services' && (
             <ServicesView
+              key={salonRound}
               services={services}
               employees={employees}
               onAddService={handleAddService}
@@ -1240,6 +1333,7 @@ export default function App() {
 
           {currentTab === 'ai-assistant' && (
             <AiAssistantView
+              key={salonRound}
               settings={aiSettings}
               onSave={handleSaveAiSettings}
               channels={{
@@ -1253,6 +1347,7 @@ export default function App() {
 
           {currentTab === 'settings' && (
             <SettingsView
+              key={formKey}
               tab={route.section as SettingsSubTab | undefined}
               onTabChange={(section) => navigate({ tab: 'settings', section }, { replace: true })}
               settings={companySettings}
@@ -1262,7 +1357,7 @@ export default function App() {
               onSaveClosedDates={setClosedDates}
               onOpenAbsences={() => navigate({ tab: 'team', section: 'absences' })}
               onUnsavedChange={noteUnsaved}
-              thisDevice={{ signedIn: live.signedIn, connection: live.connection, waitNotice: live.inbox.waitNotice, onSignOut: signOutHere }}
+              thisDevice={{ signedIn: live.signedIn, connection: live.connection, waitNotice: live.inbox.waitNotice, onSignOut: signOutHere, salonFromServer: salonStatus.phase === 'ready' }}
             />
           )}
         </main>
@@ -1297,15 +1392,15 @@ export default function App() {
           width): the toast then moves left by that much and never lies over the assistant's input.
           While it is docked a long message also has to stay clear of the menu on the left (16rem),
           so it wraps earlier: min(16rem, dock) is the menu's width then, and nothing otherwise. */}
-      {toast && (
-        <div ref={toastRef} role={toast.kind === 'error' ? 'alert' : 'status'} style={toastLift === null ? undefined : { bottom: toastLift }} className="fixed inset-x-4 bottom-[calc(4rem+env(safe-area-inset-bottom)+0.75rem)] z-40 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-2xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white shadow-xl sm:inset-x-auto sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] sm:flex-nowrap xl:right-[calc(1.25rem+var(--assistant-dock,0px))] xl:max-w-[calc(100vw-2.5rem-var(--assistant-dock,0px)-min(16rem,var(--assistant-dock,0px)))]">
-          {toast.kind === 'error' ? <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" /> : toast.kind === 'info' ? <Info className="h-4 w-4 shrink-0 text-sky-300" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />}
-          <span className="min-w-0 flex-1 py-1 [overflow-wrap:anywhere]">{toast.message}</span>
-          {/* On phones an action gets its own row so the message keeps the full width. */}
-          <div className={`flex shrink-0 items-center justify-end gap-1 ${toast.action ? 'basis-full sm:basis-auto' : ''}`}>
-            {toast.action && <button onClick={toast.action.onClick} className="min-h-11 shrink-0 rounded-lg px-2 text-indigo-200 underline hover:bg-white/10 hover:text-white">{toast.action.label}</button>}
-            <button aria-label="Dismiss notification" onClick={() => setToast(null)} className="-mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/10"><X className="h-4 w-4" /></button>
-          </div>
+      {(toast || salonNotice) && (
+        // One live region for both messages: a problem is read out at once, anything else politely.
+        <div ref={toastRef} role={salonNotice?.kind === 'error' || toast?.kind === 'error' ? 'alert' : 'status'} style={toastLift === null ? undefined : { bottom: toastLift }} className="fixed inset-x-4 bottom-[calc(4rem+env(safe-area-inset-bottom)+0.75rem)] z-40 flex flex-col gap-2 sm:inset-x-auto sm:right-5 lg:bottom-5 sm:max-w-[calc(100vw-2.5rem)] xl:right-[calc(1.25rem+var(--assistant-dock,0px))] xl:max-w-[calc(100vw-2.5rem-var(--assistant-dock,0px)-min(16rem,var(--assistant-dock,0px)))]">
+          {salonNotice && (
+            <Message kind={salonNotice.kind === 'error' ? 'error' : 'info'} text={salonNotice.text}
+              action={salonNotice.retry ? { label: 'Try again', onClick: () => salonOnServer()?.retry() } : undefined}
+              onDismiss={() => salonOnServer()?.dismissNotice()} />
+          )}
+          {toast && <Message kind={toast.kind} text={toast.message} action={toast.action} onDismiss={() => setToast(null)} />}
         </div>
       )}
 

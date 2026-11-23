@@ -181,6 +181,62 @@ const parse = (value: unknown): StoredChat | null => {
 };
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
+/**
+ * The salon's settings (server/salon.ts): one value per data space, beside the chats. Its name
+ * does not start like a chat's, so the listing of chats never finds it. It is kept until the
+ * owner deletes it: a salon's settings do not run out like a chat.
+ */
+export const salonKey = (space: string = dataSpace()) => `${keyPrefix(space)}salon`;
+
+/**
+ * Saving the salon: write the record (KEYS[1], ARGV[2]) only when the one stored now is still at
+ * the revision the request read (ARGV[1]). Two saves that read the same revision can never both
+ * win: the second finds the first one's revision. Answers {1} (saved) or {0, the record as it is
+ * now}, so a refused save needs no second read to tell the owner what is there. A record starts
+ * with its revision ('{"rev":12,...'), like a chat; none stored counts as revision 0.
+ */
+export const SALON_SAVE_SCRIPT = [
+  "local current = redis.call('GET', KEYS[1])",
+  "local rev = '0'",
+  "if current then rev = string.match(current, '^{\"rev\":(%d+),') or '0' end",
+  'if rev ~= ARGV[1] then return {0, current} end',
+  "redis.call('SET', KEYS[1], ARGV[2])",
+  'return {1}',
+].join('\n');
+
+/**
+ * Reading for the owner's list of chats: the values of KEYS[1..n-1] as MGET gives them, and in
+ * place of the last key (the salon's record) only its revision, 0 when there is none. The owner's
+ * app asks every few seconds; the record can hold a logo of several hundred kilobytes, and only
+ * its revision is needed to tell that another device changed it.
+ */
+export const LIST_READ_SCRIPT = [
+  'local values = {}',
+  'for i = 1, #KEYS - 1 do',
+  "  local value = redis.call('GET', KEYS[i])",
+  '  values[i] = value',
+  'end',
+  "local record = redis.call('GET', KEYS[#KEYS])",
+  'local rev = 0',
+  "if record then rev = tonumber(string.match(record, '^{\"rev\":(%d+),')) or 0 end",
+  'values[#KEYS] = rev',
+  'return values',
+].join('\n');
+
+/** The values of these keys as the storage holds them (null where there is none), in one command. */
+export async function readValues(keys: string[]): Promise<unknown[]> {
+  if (keys.length === 0) return [];
+  const values = list((await redis(['MGET', ...keys])).result);
+  return keys.map((_, index) => values[index] ?? null);
+}
+
+/** Saves the salon's record over revision `expectedRev`, as SALON_SAVE_SCRIPT describes. */
+export async function saveSalonText(expectedRev: number, text: string): Promise<{ saved: true } | { saved: false; current: unknown }> {
+  const [outcome, current] = list((await redis(['EVAL', SALON_SAVE_SCRIPT, 1, salonKey(), String(expectedRev), text])).result);
+  return Number(outcome) === 1 ? { saved: true } : { saved: false, current: current ?? null };
+}
+
+
 /** Reads a chat to show it. A request that is going to save the chat uses loadForUpdate. */
 export async function loadConversation(waId: string): Promise<LiveConversation | null> {
   return parse((await redis(['GET', chatKey(waId)])).result);
@@ -205,8 +261,22 @@ export async function loadConversationAnd(waId: string, counterKey: string | nul
  * the request was busy (waiting for the AI or a translation takes many seconds).
  */
 export async function loadForUpdate(waId: string): Promise<{ conversation: LiveConversation | null; version: ChatVersion }> {
-  const [chat, marker] = list((await redis(['MGET', chatKey(waId), markerKey(waId)])).result);
-  return { conversation: parse(chat), version: typeof marker === 'string' ? marker : NO_DELETION_SEEN };
+  return (await loadForUpdateWith(waId, null)).loaded;
+}
+
+/**
+ * loadForUpdate, and in the same command one more value (the salon's record, see server/salon.ts):
+ * a customer's message then costs no command more for knowing the salon as it is now.
+ */
+export async function loadForUpdateWith(waId: string, otherKey: string | null): Promise<{ loaded: LoadedChat; other: unknown }> {
+  const [chat, marker, other] = list((await redis(['MGET', chatKey(waId), markerKey(waId), ...(otherKey ? [otherKey] : [])])).result);
+  return { loaded: { conversation: parse(chat), version: typeof marker === 'string' ? marker : NO_DELETION_SEEN }, other: other ?? null };
+}
+
+/** loadConversation, and in the same command one more value (the salon's record). */
+export async function loadConversationWith(waId: string, otherKey: string): Promise<{ conversation: LiveConversation | null; other: unknown }> {
+  const [chat, other] = list((await redis(['MGET', chatKey(waId), otherKey])).result);
+  return { conversation: parse(chat), other: other ?? null };
 }
 
 /**
@@ -354,6 +424,35 @@ export async function listConversations(): Promise<LiveConversation[]> {
  * server/limits.ts). The owner's app asks every few seconds, so the check costs no command of its own.
  */
 export async function listConversationsAnd(counterKey: string | null): Promise<{ conversations: LiveConversation[]; count: number }> {
+  const keys = await chatKeys();
+  const read = [...keys, ...(counterKey ? [counterKey] : [])];
+  if (read.length === 0) return { conversations: [], count: 0 };
+  const values = list((await redis(['MGET', ...read])).result);
+  return {
+    // A chat that expired between the two commands comes back empty and is left out.
+    conversations: values.slice(0, keys.length).map(parse).filter((item): item is StoredChat => item !== null),
+    count: counterKey ? count(values[keys.length]) : 0,
+  };
+}
+
+/**
+ * listConversationsAnd, and in its last command also the revision of the salon's record (0 when
+ * there is none), read inside the storage by LIST_READ_SCRIPT, so the owner's app learns of a
+ * change made on another device without a command more and without loading the record.
+ */
+export async function listConversationsWithSalonRev(counterKey: string | null): Promise<{ conversations: LiveConversation[]; count: number; salonRev: number }> {
+  const keys = await chatKeys();
+  const read = [...keys, ...(counterKey ? [counterKey] : []), salonKey()];
+  const values = list((await redis(['EVAL', LIST_READ_SCRIPT, read.length, ...read])).result);
+  return {
+    conversations: values.slice(0, keys.length).map(parse).filter((item): item is StoredChat => item !== null),
+    count: counterKey ? count(values[keys.length]) : 0,
+    salonRev: Number(values[read.length - 1]) || 0,
+  };
+}
+
+/** The names of all stored chats of this copy's data space. */
+async function chatKeys(): Promise<string[]> {
   const keys = new Set<string>();
   let cursor = '0';
   for (let step = 1; ; step += 1) {
@@ -366,14 +465,7 @@ export async function listConversationsAnd(counterKey: string | null): Promise<{
       break;
     }
   }
-  const read = [...keys, ...(counterKey ? [counterKey] : [])];
-  if (read.length === 0) return { conversations: [], count: 0 };
-  const values = list((await redis(['MGET', ...read])).result);
-  return {
-    // A chat that expired between the two commands comes back empty and is left out.
-    conversations: values.slice(0, keys.size).map(parse).filter((item): item is StoredChat => item !== null),
-    count: counterKey ? count(values[keys.size]) : 0,
-  };
+  return [...keys];
 }
 
 /**
