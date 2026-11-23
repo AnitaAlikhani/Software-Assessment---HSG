@@ -89,6 +89,17 @@ jobs:
           path: voice-app
           persist-credentials: false
 
+      # The reworked Home screen (anita-launch-home-dashboard). Like the launch preview: if the
+      # branch is missing or does not build, only its preview is skipped.
+      - name: Check out Home dashboard preview
+        id: home_checkout
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          ref: anita-launch-home-dashboard
+          path: home-app
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -200,6 +211,15 @@ jobs:
           npm ci --no-audit --no-fund
           npm run build -- --base=/Software-Assessment---HSG/previews/anita-voice/
 
+      - name: Build Home dashboard preview
+        id: home_build
+        if: steps.home_checkout.outcome == 'success'
+        continue-on-error: true
+        working-directory: home-app
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build -- --base=/Software-Assessment---HSG/previews/anita-launch-home-dashboard/
+
       - name: Assemble main site and branch previews
         run: |
           mkdir -p site/previews/nil-figma-sync site/previews/anita-banner site/previews/anita-fixes site/previews/anita-fix-first-visit-navigation
@@ -235,6 +255,14 @@ jobs:
             git -C voice-app rev-parse HEAD > site/previews/anita-voice/revision.txt
           else
             echo "::warning::The anita-voice preview was not built; the rest of the site is published as usual."
+          fi
+
+          if [ "${{ steps.home_build.outcome }}" = "success" ]; then
+            mkdir -p site/previews/anita-launch-home-dashboard
+            cp -a home-app/dist/. site/previews/anita-launch-home-dashboard/
+            git -C home-app rev-parse HEAD > site/previews/anita-launch-home-dashboard/revision.txt
+          else
+            echo "::warning::The anita-launch-home-dashboard preview was not built; the rest of the site is published as usual."
           fi
 
       - name: Upload combined site
