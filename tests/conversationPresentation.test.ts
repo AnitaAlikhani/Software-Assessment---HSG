@@ -96,16 +96,21 @@ test('a chat shows its own channel, and every message as the customer wrote it a
   assert.doesNotMatch(html, /<dialog/);
 });
 
-test('the list is filtered by All, Needs you and Booked', () => {
+test('the list is filtered by All, Waiting for you and Booked', () => {
   const html = renderToStaticMarkup(React.createElement(ConversationsView, { ...props, mobileDetailOpen: false }));
   // Three filters, named like the status tags in the list; the first is the one in use.
   assert.match(html, /role="group" aria-label="Filter conversations"/);
   const filters = Array.from(html.matchAll(/<button aria-pressed="(true|false)"[^>]*>([^<]+)/g), match => [match[2], match[1]]);
-  assert.deepEqual(filters, [['All', 'true'], ['Needs you', 'false'], ['Booked', 'false']]);
-  // "Needs you" carries the number of chats that wait, the one the header and Home show.
+  assert.deepEqual(filters, [['All', 'true'], ['Waiting for you', 'false'], ['Booked', 'false']]);
+  // "Waiting for you" is the name of Home's inbox: one word for one state. It carries the number of chats that wait.
   const waiting = conversationsWaiting(demoConversations);
   assert.ok(waiting.length > 0);
-  assert.match(html, new RegExp(`>Needs you<span[^>]*>${waiting.length}</span></button>`));
+  assert.match(html, new RegExp(`>Waiting for you<span[^>]*>${waiting.length}</span></button>`));
+  // The language of a chat is no state: every language wears the same quiet chip, as on Home, so
+  // none of them is taken for one of the status tags beside it.
+  const chips = Array.from(html.matchAll(/<span class="shrink-0 text-\[10px\] font-bold px-1\.5 py-0\.5 rounded-md ([^"]*)">/g), (match) => match[1]);
+  assert.ok(chips.length >= demoConversations.length);
+  assert.deepEqual([...new Set(chips)], ['bg-slate-100 text-slate-700']);
 
   // What each filter keeps. A live chat whose booking the owner confirmed has the status "booked" too.
   const confirmed: Conversation = {
@@ -142,7 +147,7 @@ test('a chat whose booking is in the calendar shows it above the messages, with 
   // Giulia asks to move an appointment she has: it stays in view while her request waits.
   assert.match(line(view('conv-giulia')) ?? '', /^Confirmed by you .* View in calendar$/);
   // The line stands above the messages, before what the chat needs from the owner.
-  assert.match(view('conv-giulia'), /Appointment from this chat[\s\S]*Needs your attention[\s\S]*wants to move an appointment/);
+  assert.match(view('conv-giulia'), /Appointment from this chat[\s\S]*>Waiting for you<\/p>[\s\S]*wants to move an appointment/);
   // Chloé only asked for a time: nothing is booked, so nothing is shown.
   assert.equal(line(view('conv-chloe')), undefined);
   // A cancelled appointment has left the calendar: no line that leads nowhere.
@@ -188,7 +193,7 @@ test('a chat that waits for a decision ends with the reason and the ways on, in 
   // Chloé asked for a time after closing: the owner takes over, or the AI offers its answer.
   const chloe = view('conv-chloe');
   assert.deepEqual(ways(chloe), ['Take over (main)', 'Let AI continue']);
-  assert.match(chloe, /Needs your attention<\/p><p[^>]*>The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\.<\/p>/);
+  assert.match(chloe, /Waiting for you<\/p><p[^>]*>The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\.<\/p>/);
   assert.doesNotMatch(chloe, /aria-label="Reply as owner"/);
   // Sabrina's request waits on its card, and the AI has an answer ready for her question: both ways stay, the card's answers lead.
   assert.deepEqual(ways(view('conv-sabrina')), ['Take over', 'Let AI continue']);
@@ -198,7 +203,7 @@ test('a chat that waits for a decision ends with the reason and the ways on, in 
   // After the last message come the reason, then the request with its answers, then the ways on:
   // all of it where the owner reads and replies, the request inside what scrolls with the messages.
   const lastMessage = demoConversations.find(conversation => conversation.id === 'conv-reto')!.messages.at(-1)!.original.slice(0, 30);
-  const order = [lastMessage, 'Needs your attention', 'data-chat-waiting', 'Reto Hollenstein wants to book', '>Confirm<', 'Who answers this chat'].map(part => reto.indexOf(part));
+  const order = [lastMessage, '>Waiting for you</p>', 'data-chat-waiting', 'Reto Hollenstein wants to book', '>Confirm<', 'Who answers this chat'].map(part => reto.indexOf(part));
   assert.ok(order.every((at, index) => at >= 0 && (index === 0 || at > order[index - 1])), `order of the chat's end: ${order.join(', ')}`);
   // The earlier block with its single answer is gone.
   assert.doesNotMatch(reto, /Confirm booking|Checked against opening hours\b/);

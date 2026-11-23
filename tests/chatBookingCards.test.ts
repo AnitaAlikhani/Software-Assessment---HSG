@@ -5,7 +5,10 @@ import { appointmentFromConversationAction, upsertAppointment } from '../src/app
 import { validateCalendarEvent, type AvailabilityContext } from '../src/availability';
 import type { ChatBookingAction } from '../src/chatBookingActions';
 import { answerChatBooking, chatCustomer, chatCustomerRecord, type ChatBookingDeps, type ChatBookingServer } from '../src/chatBookingAnswers';
-import { ChatAppointment, ChatBookedCard, ChatCancellationCard, ChatRequestCard, ChatWaitingCards, chatAwaitsAnswer } from '../src/components/ChatBookingCards';
+import { ANSWER_HOLD_MS } from '../src/answerHold';
+import {
+  ChatAppointment, ChatBookedCard, ChatCancellationAnswers, ChatCancellationCard, ChatRequestAnswers, ChatRequestCard, ChatWaitingCards, chatAwaitsAnswer,
+} from '../src/components/ChatBookingCards';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { chatTimeOptionsOn, nearestChatTimes, planChatBooking, planChatCancellation } from '../src/requestAnswers';
 import type { AppointmentAction, CalendarEvent, Conversation } from '../src/types';
@@ -58,8 +61,12 @@ test('a free time: the card names who takes it, what was checked, and offers all
   for (const button of html.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
   assert.match(html, /<select[^>]*class="[^"]*\btext-base\b/);
   assert.doesNotMatch(words(html), TELL_WORDS);
-  // One of the salon's own chats: nothing claims that a message is sent.
-  assert.match(words(requestCard(tom({}, { id: 'conv-tom', live: undefined })) ), /Confirm adds it to your calendar\. Confirm/);
+  // What Confirm does is said in small letters on the card's tint: in the darker grey, which can be read there.
+  assert.match(html, /<p class="mt-2 text-\[13px\] text-slate-600">Confirm adds it to your calendar and sends Tom the confirmation in the chat\.<\/p>/);
+  // One of the salon's own chats: the confirmation goes into the chat, and nothing claims that a message is sent.
+  const own = words(requestCard(tom({}, { id: 'conv-tom', live: undefined })));
+  assert.match(own, /Confirm adds it to your calendar and puts the confirmation in the chat\. Confirm/);
+  assert.doesNotMatch(own, /\b(sends?|sent)\b/);
 });
 
 test('a taken time: the card says who has it, offers no Confirm, and the nearest free times instead', () => {
@@ -422,5 +429,25 @@ test('the helper line of a change says that Confirm moves the appointment', () =
   const context = salon({ events: [tomsAppointment] });
   assert.match(words(requestCard(change, context)), /Confirm moves the appointment in your calendar and sends Tom the confirmation in the chat\./);
   assert.match(words(requestCard({ ...change, id: 'conv-tom', live: undefined }, salon({ events: [{ ...tomsAppointment, conversationId: 'conv-tom' }] }))),
-    /Confirm moves the appointment in your calendar\. Confirm/);
+    /Confirm moves the appointment in your calendar and puts the confirmation in the chat\. Confirm/);
+});
+
+// ---------- an answer that is held for a moment (Home's inbox) ----------
+
+test('a card that is given a hold looks as it always does until an answer is given', () => {
+  // Home's inbox holds an answer that reaches the customer for a few seconds, with "Undo"
+  // (src/answerHold.ts; tests/answerHold.test.ts turns the clock). Before a tap nothing of that
+  // shows: the same answers, ready, and no way back that has nothing to take back.
+  const hold = { ms: ANSWER_HOLD_MS, current: () => tom() };
+  const request = { conversation: tom(), salon: salon(), onAnswer: () => null };
+  const held = render(React.createElement(ChatRequestAnswers, { ...request, hold }));
+  assert.equal(held, render(React.createElement(ChatRequestAnswers, request)));
+  assert.doesNotMatch(held, /Undo|goes out in a few seconds|disabled=""/);
+  const cancelling = { conversation: tom({ status: 'confirmed' }, { cancellationRequest: { service: 'Haircut', date: '2026-10-07', time: '10:00' } }), salon: salon({ events: [tomsAppointment] }), onAnswer: () => null };
+  const heldCancellation = render(React.createElement(ChatCancellationAnswers, { ...cancelling, hold }));
+  assert.equal(heldCancellation, render(React.createElement(ChatCancellationAnswers, cancelling)));
+  assert.match(heldCancellation, />Cancel appointment<\/button>/);
+  assert.doesNotMatch(heldCancellation, /Undo|goes out in a few seconds|disabled=""/);
+  // A card in an open chat is given no hold: there the owner has the whole conversation in front of her.
+  assert.doesNotMatch(render(React.createElement(ChatWaitingCards, { conversation: tom(), salon: salon(), onAnswer: () => null })), /Undo/);
 });

@@ -274,7 +274,7 @@ test('every owner answer sends its fixed message, in a German and in a French ch
       {
         action: { type: 'mark-done' },
         sent: [],
-        // The request still waits for her answer, so the chat stays in "Needs you", with the request's reason.
+        // The request still waits for her answer, so the chat stays in "Waiting for you", with the request's reason.
         check: chat => {
           assert.deepEqual([chat.status, chat.attentionReason], ['needs-attention', 'Booking request: Haircut on Tuesday, 06.10.2026 at 10:00 for Eva. Please confirm.']);
           assert.deepEqual(chat.bookingRequest, OPEN);
@@ -287,7 +287,7 @@ test('every owner answer sends its fixed message, in a German and in a French ch
         check: chat => {
           assert.equal(chat.takenOver, false);
           assert.deepEqual(chat.messages.at(-1)!.original, 'Gern, wir öffnen um 8:30.');
-          // The AI answers again, but the booking request still waits for her: the chat stays in "Needs you".
+          // The AI answers again, but the booking request still waits for her: the chat stays in "Waiting for you".
           assert.deepEqual([chat.status, chat.attentionReason], ['needs-attention', 'Booking request: Haircut on Tuesday, 06.10.2026 at 10:00 for Eva. Please confirm.']);
         },
       },

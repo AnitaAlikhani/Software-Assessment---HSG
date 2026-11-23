@@ -28,10 +28,14 @@ export const PRODUCT_COLOR = '#5551FF';
 /**
  * An owner screen, for example "Calendar · Bella Hair Salon – SlotBee". The screen is called what
  * the menu calls it (src/navigation.ts); the salon's name comes from Settings.
+ *
+ * `waiting` is how many entries wait for the owner on Home. It stands in front, "(3) Calendar · …",
+ * so that a tab in the background shows that somebody is waiting; nothing is added while nobody is.
  */
-export function ownerPageHead(tab: NavigationTab, salon: string): PageHead {
+export function ownerPageHead(tab: NavigationTab, salon: string, waiting = 0): PageHead {
   const screenAndSalon = [SCREEN_NAMES[tab], salon.trim()].filter(Boolean).join(' · ');
-  return { title: `${screenAndSalon} – ${PRODUCT_NAME}`, homeScreenName: PRODUCT_NAME, themeColor: PRODUCT_COLOR, ownerApp: true };
+  const count = Number.isFinite(waiting) && waiting > 0 ? `(${Math.floor(waiting)}) ` : '';
+  return { title: `${count}${screenAndSalon} – ${PRODUCT_NAME}`, homeScreenName: PRODUCT_NAME, themeColor: PRODUCT_COLOR, ownerApp: true };
 }
 
 /** The customers' booking page: "Book an appointment – Bella Hair Salon". */

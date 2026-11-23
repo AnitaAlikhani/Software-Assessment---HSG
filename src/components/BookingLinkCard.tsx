@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { CheckCircle2, Copy, Download, ExternalLink, Printer, QrCode as QrCodeIcon } from 'lucide-react';
+import { CheckCircle2, Copy, Download, ExternalLink, Link2, Printer, QrCode as QrCodeIcon } from 'lucide-react';
 import { bookingAddress, qrFileName, qrModules, qrPath, qrSide, QR_QUIET_ZONE } from '../bookingLink';
 import { researchMode } from '../flags';
 import { useSalonStatus } from '../useDemoState';
@@ -11,7 +11,8 @@ import { useSalonStatus } from '../useDemoState';
  * does, or hand out its QR code on a card, a mirror sticker or the door.
  *
  * BookingLinkCard is the full card in Settings › Online booking. BookingLinkCompact is the
- * short form for Home: the address, Copy and the code on request.
+ * short form for Home: the address, Copy and the code on request. BookingLinkButtons is the same
+ * as two buttons, for the heading row of Home on a wide screen.
  */
 
 interface BookingLinkProps {
@@ -174,14 +175,14 @@ export const BookingLinkCard: React.FC<BookingLinkCardProps> = ({ address: given
           </div>
           <CopyFeedback state={copyState} />
           <p className="rounded-xl bg-indigo-50 p-3 text-xs leading-relaxed text-indigo-900">
-            Requests from this page wait on Home for your answer. Nothing is booked until you accept.
+            Requests from this page wait on Home for your answer. Nothing is booked until you confirm.
           </p>
           {/* Study tool: the sample workspace lives in this one browser, and a study session should know how far it reaches. */}
           {researchMode() && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
               {onServer
                 ? 'Demo workspace: the salon’s settings (services, team, hours, closed dates) come from the server, so the page “Open as customer” opens shows them as you saved them. Requests, the calendar and customers are still kept in this browser and shared by its tabs: a request sent there shows up on Home here, and that tab shows your answer. Another browser or device does not see those.'
-                : 'Demo workspace: its data are kept in this browser and shared by all its tabs. A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject. Another browser or device is not reached.'}
+                : 'Demo workspace: its data are kept in this browser and shared by all its tabs. A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you confirm or decline. Another browser or device is not reached.'}
             </p>
           )}
         </div>
@@ -250,5 +251,69 @@ export const BookingLinkCompact: React.FC<BookingLinkProps> = ({ address: given,
         </div>
       )}
     </section>
+  );
+};
+
+const segment = 'inline-flex min-h-11 items-center justify-center gap-2 px-3.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF]';
+
+/**
+ * The booking link as two buttons that belong together, for the heading row of Home on a wide
+ * screen: one tap copies the address, the other shows the QR code. The link is needed now and
+ * then, so it is a tool beside the page's heading and takes no card among the day's figures. The
+ * address itself is written out in the panel of the code; Settings › Online booking has the full card.
+ */
+export const BookingLinkButtons: React.FC<BookingLinkProps> = ({ address: given, className = '' }) => {
+  const address = useBookingAddress(given);
+  const { copyState, copy } = useCopyLink(address);
+  const [showCode, setShowCode] = useState(false);
+  const codeId = useId();
+  const group = useRef<HTMLDivElement>(null);
+  const codeButton = useRef<HTMLButtonElement>(null);
+  // The panel lies over the page: a tap beside it puts it away.
+  useEffect(() => {
+    if (!showCode) return;
+    const away = (event: PointerEvent) => { if (event.target instanceof Node && !group.current?.contains(event.target)) setShowCode(false); };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [showCode]);
+  // Copying did not work: the panel opens, with the address to mark and copy by hand.
+  useEffect(() => { if (copyState === 'failed') setShowCode(true); }, [copyState]);
+  if (!address) return null;
+  const copied = copyState === 'copied';
+  return (
+    <div
+      ref={group}
+      role="group"
+      aria-label="Booking link"
+      // Escape puts the panel away and keeps the focus on its button; so does the focus moving on.
+      onKeyDown={(event) => { if (event.key === 'Escape' && showCode) { event.stopPropagation(); setShowCode(false); codeButton.current?.focus(); } }}
+      onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setShowCode(false); }}
+      className={`relative ${className}`}
+    >
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white shadow-xs">
+        {/* As wide with "Copied" as with its name: the button beside it does not move under the pointer. */}
+        <button type="button" onClick={copy} className={`${segment} min-w-[10.25rem] rounded-l-[11px]`}>
+          {copied ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> : <Link2 className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />}
+          {copied ? 'Copied' : 'Copy booking link'}
+        </button>
+        <button
+          ref={codeButton} type="button" onClick={() => setShowCode((shown) => !shown)}
+          aria-expanded={showCode} aria-controls={showCode ? codeId : undefined}
+          className={`${segment} rounded-r-[11px] border-l border-slate-200 ${showCode ? 'bg-slate-50' : ''}`}
+        >
+          <QrCodeIcon className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />QR code
+        </button>
+      </div>
+      {/* Always in the page, so a screen reader announces the text when it appears. */}
+      <span role="status" className="sr-only">{copied ? 'Booking link copied.' : ''}</span>
+      {showCode && (
+        <div id={codeId} tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-xl outline-hidden">
+          <BookingQrCode address={address} className="mx-auto block h-44 w-44 rounded-xl border border-slate-200" />
+          <p className="mt-3 leading-relaxed text-slate-600">Customers scan the code with their phone camera and land on your booking page.</p>
+          <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-2 text-slate-700 select-all [overflow-wrap:anywhere]">{address}</p>
+          {copyState === 'failed' && <p role="alert" className="mt-2 text-rose-700">The link could not be copied. Select it and copy it by hand.</p>}
+        </div>
+      )}
+    </div>
   );
 };

@@ -7,7 +7,8 @@ import {
 } from '../src/analytics';
 import { appointmentFromRequest, upsertAppointment } from '../src/appointmentActions';
 import { createCsv, fileSlug } from '../src/csv';
-import { homeFigures } from '../src/dashboard';
+import { bookedValue, homeFigures, monthPace } from '../src/dashboard';
+import { formatMoney } from '../src/format';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { getSalonNow } from '../src/scheduling';
 import type { CalendarEvent, Conversation } from '../src/types';
@@ -17,8 +18,9 @@ import { demoConversations, demoEvents, demoRequests, demoShifts, FIXED_NOW } fr
 import { readableText, render, TELL_WORDS } from './renderHelpers';
 
 // The figures on Home and in Analytics are counted from the calendar and the chats, by the same
-// functions, for the same periods. These tests fix the moment (Monday 5 October 2026, 12:00 in
-// Zurich) and never read the clock.
+// functions, for the same periods. Home adds what the appointments are worth at list prices and
+// where the month before stood at the same point (tests/homeFigures.test.ts counts those by
+// hand). These tests fix the moment (Monday 5 October 2026, 12:00 in Zurich) and never read the clock.
 
 const ZONE = 'Europe/Zurich';
 const SALON = 'Bella Hair Salon';
@@ -103,7 +105,8 @@ test('the seeded salon: every figure equals a plain count over the calendar', ()
 
 // ---------- the two screens ----------
 
-const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+/** What a person reads: the text between the tags, with the apostrophe of "CHF 1'234" and "Men's cut" as itself. */
+const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
 
 const home = (events: CalendarEvent[], conversations: Conversation[] = demoConversations, requests = demoRequests) =>
   render(React.createElement(HomeView, {
@@ -117,13 +120,25 @@ const home = (events: CalendarEvent[], conversations: Conversation[] = demoConve
 const analytics = (events: CalendarEvent[], conversations: Conversation[] = demoConversations) =>
   render(React.createElement(AnalyticsView, { events, conversations, companyName: SALON, timeZone: ZONE, now: FIXED_NOW, onExportReport: nothing }));
 
-/** The numbers a person reads in Home's "This month" block. */
+/**
+ * The numbers a person reads on Home about the month: the block "This month" (every appointment
+ * of the month, those so far and those still to come, and what both are worth) and the AI
+ * receptionist's card (how many of them the AI booked, and their share).
+ */
 const homeNumbers = (html: string) => {
-  const match = /This month (.+?) · past and upcoming appointments .*?(\d+) Appointments (\d+) today, (\d+) this week (\d+%|–) Booked by AI (\d+) of (\d+) appointments? (\d+) Customers with (?:an appointment|appointments) (\d+) Still to come (\d+) so far/.exec(text(html));
-  assert.ok(match, 'Home shows the block "This month"');
-  const [, period, appointments, today, week, aiShare, aiBookings, ofAppointments, customers, stillToCome, soFar] = match;
+  const page = text(html);
+  const month = /This month (.+?) · (\d+) appointments?, past and upcoming .*?Booked value so far (CHF [\d'.]+) .*?at list prices Appointments so far (\d+) .*?of (\d+) this month Still to come (\d+) (CHF [\d'.]+) booked, until (\d{2}\.\d{2}\.)/.exec(page);
+  assert.ok(month, 'Home shows the block "This month"');
+  const [, period, appointments, valueSoFar, soFar, ofAppointments, stillToCome, valueToCome, until] = month;
   assert.equal(ofAppointments, appointments);
-  return { period, appointments: Number(appointments), today: Number(today), week: Number(week), aiShare, aiBookings: Number(aiBookings), customers: Number(customers), stillToCome: Number(stillToCome), soFar: Number(soFar) };
+  // The AI's card names the same month, or says that the AI has booked nothing yet.
+  const ai = /AI receptionist (.+?), by the day of the appointment Bookings? (\d+%|none this month)(?: of appointments)? (\d+) /.exec(page);
+  assert.ok(ai || page.includes('The AI has not booked an appointment yet.'), 'Home shows the AI receptionist\'s month');
+  if (ai) assert.equal(ai[1], period);
+  return {
+    period, appointments: Number(appointments), soFar: Number(soFar), stillToCome: Number(stillToCome), valueSoFar, valueToCome, until,
+    aiBookings: ai ? Number(ai[3]) : 0, aiShare: ai && ai[2].endsWith('%') ? ai[2] : '–',
+  };
 };
 
 /** The numbers a person reads in Analytics, which opens on "This month". */
@@ -149,16 +164,23 @@ const assertScreensAgree = (events: CalendarEvent[]) => {
   const figures = homeFigures(events, FIXED_NOW, ZONE);
   // Home shows what the shared calculation gives ...
   assert.deepEqual(
-    [onHome.appointments, onHome.today, onHome.week, onHome.aiBookings, onHome.customers, onHome.stillToCome, onHome.aiShare],
-    [figures.appointments, figures.today, figures.week, figures.aiBookings, figures.customers, figures.stillToCome, figures.aiShare === null ? '–' : `${figures.aiShare}%`],
+    [onHome.appointments, onHome.aiBookings, onHome.stillToCome, onHome.soFar, onHome.aiShare],
+    [figures.appointments, figures.aiBookings, figures.stillToCome, figures.appointments - figures.stillToCome, figures.aiShare === null ? '–' : `${figures.aiShare}%`],
   );
   // ... and Analytics, opened on the same month, shows the same numbers.
-  for (const key of ['period', 'appointments', 'aiBookings', 'aiShare', 'customers', 'stillToCome', 'soFar'] as const) {
+  for (const key of ['period', 'appointments', 'aiBookings', 'aiShare', 'stillToCome', 'soFar'] as const) {
     assert.equal(inAnalytics[key], onHome[key], key);
   }
   assert.equal(inAnalytics.otherBookings, onHome.appointments - onHome.aiBookings);
   assert.equal(onHome.soFar + onHome.stillToCome, onHome.appointments);
-  return onHome;
+  // Customers are counted in Analytics alone now; the shared calculation still gives its number.
+  assert.equal(inAnalytics.customers, figures.customers);
+  // What Home adds in francs is what the same two groups of appointments are worth at list prices.
+  const pace = monthPace(events, initialServices, FIXED_NOW, ZONE);
+  assert.deepEqual([onHome.valueSoFar, onHome.valueToCome], [formatMoney(pace.soFar.value), formatMoney(pace.stillToCome.value)]);
+  // The counts of the day and the week are no longer written on Home; they stay what Analytics' presets show.
+  const { valueSoFar: _soFar, valueToCome: _toCome, until: _until, ...counts } = onHome;
+  return { ...counts, today: figures.today, week: figures.week, customers: inAnalytics.customers };
 };
 
 test('Home and Analytics show the same figures for the month', () => {
@@ -168,6 +190,11 @@ test('Home and Analytics show the same figures for the month', () => {
   assert.deepEqual(assertScreensAgree(HAND_COUNTED), {
     period: 'October 2026', appointments: 6, today: 3, week: 4, aiShare: '33%', aiBookings: 2, customers: 5, stillToCome: 4, soFar: 2,
   });
+  // In francs: every hand-counted appointment is the same service, so two so far and four to come are worth 1 to 2.
+  const each = bookedValue(HAND_COUNTED.slice(0, 1), initialServices).value;
+  assert.ok(each > 0);
+  const handCounted = homeNumbers(home(HAND_COUNTED));
+  assert.deepEqual([handCounted.valueSoFar, handCounted.valueToCome, handCounted.until], [formatMoney(2 * each), formatMoney(4 * each), '31.10.']);
   // The presets of Analytics are the periods Home counts for.
   const periods = analyticsPeriods(getSalonNow(ZONE, FIXED_NOW).date);
   const figures = homeFigures(demoEvents, FIXED_NOW, ZONE);
@@ -180,11 +207,46 @@ test('Home and Analytics show the same figures for the month', () => {
   assert.match(page, /value="2026-10-31"/);
 });
 
+test('the month so far is set against the month before at the same point, in a short label and in words', () => {
+  /** What Home says about the month, from its heading to the line that names the comparison. The chart that follows is read in tests/homeDashboard.test.ts. */
+  const month = (events: CalendarEvent[]) => /This month .*?(?=Booked value by day|Booking link|$)/.exec(text(home(events, [], [])))?.[0].trim() ?? '';
+  // By Monday 5 October, 12:00: three appointments (one of them at 09:00 this morning). By Saturday
+  // 5 September, 12:00: two. All are the same service, so the value rises by a half and the count by one.
+  const each = bookedValue(HAND_COUNTED.slice(0, 1), initialServices).value;
+  const more = [
+    appointment('sep-a', '2026-09-01', '09:00'), appointment('sep-b', '2026-09-05', '11:30'), appointment('sep-late', '2026-09-05', '12:00'),
+    appointment('oct-a', '2026-10-01', '09:00'), appointment('oct-b', '2026-10-02', '09:00'), appointment('oct-c', '2026-10-05', '09:00'), appointment('oct-later', '2026-10-20', '09:00'),
+  ];
+  assert.equal(month(more),
+    `This month October 2026 · 4 appointments, past and upcoming View analytics Booked value so far ${formatMoney(3 * each)} +50% 50% more than September at the same point at list prices `
+    + `Appointments so far 3 +1 1 more than September at the same point of 4 this month Still to come 1 ${formatMoney(each)} booked, until 31.10. `
+    + 'Compared with September at the same point: Sat, 05.09.2026, 12:00.');
+  // Fewer than the month before, and exactly as many.
+  const fewer = more.filter((event) => event.id !== 'oct-a' && event.id !== 'oct-b');
+  assert.match(month(fewer), /Booked value so far CHF [\d'.]+ −50% 50% less than September at the same point .*Appointments so far 1 −1 1 fewer than September at the same point of 2 this month/);
+  const same = more.filter((event) => event.id !== 'oct-a');
+  assert.match(month(same), /±0% the same as September at the same point .*Appointments so far 2 ±0 the same as September at the same point/);
+  // The rise and the fall are drawn differently, and the sentence is for a screen reader only.
+  assert.match(home(more, [], []), /<span class="[^"]*bg-emerald-50 text-emerald-800"><svg[^>]*lucide-trending-up/);
+  assert.match(home(fewer, [], []), /<span class="[^"]*bg-rose-50 text-rose-800"><svg[^>]*lucide-trending-down/);
+  assert.match(home(more, [], []), /<span aria-hidden="true">\+50%<\/span><span class="sr-only">50% more than September at the same point<\/span>/);
+  // September had appointments, but none by the 5th at noon: the count is compared, the value has no percentage.
+  const lateSeptember = more.filter((event) => !['sep-a', 'sep-b'].includes(event.id));
+  assert.match(month(lateSeptember), /Booked value so far CHF [\d'.]+ at list prices Appointments so far 3 \+3 3 more than September at the same point/);
+  // A salon in its first month is compared with nothing: no label, and no line that names a comparison.
+  const firstMonth = more.filter((event) => event.date >= '2026-10-01');
+  assert.equal(month(firstMonth), `This month October 2026 · 4 appointments, past and upcoming View analytics Booked value so far ${formatMoney(3 * each)} at list prices Appointments so far 3 of 4 this month Still to come 1 ${formatMoney(each)} booked, until 31.10.`);
+  // An appointment whose service has gone from the price list is counted, and named as one without a price.
+  assert.match(month([...firstMonth, appointment('gone', '2026-10-03', '09:00', { serviceId: 'srv-deleted' })]), /at list prices · 1 without a price Appointments so far 4 of 5 this month/);
+});
+
 test('a single appointment and an empty calendar are worded correctly on both screens', () => {
   const one = [appointment('only', '2026-10-06', '10:00', { isAiBooked: true })];
-  assert.match(text(home(one)), /1 Appointments 0 today, 1 this week 100% Booked by AI 1 of 1 appointment 1 Customers with an appointment 1 Still to come 0 so far/);
+  assert.match(text(home(one)), /This month October 2026 · 1 appointment, past and upcoming .*Booked value so far CHF 0\.00 at list prices Appointments so far 0 of 1 this month Still to come 1 CHF [\d'.]+ booked, until 31\.10\./);
+  assert.match(text(home(one)), /AI receptionist October 2026, by the day of the appointment Booking 100% of appointments 1 /);
   assert.match(text(analytics(one)), /1 appointment October 2026 · all still to come/);
-  assert.match(text(home([])), /0 Appointments 0 today, 0 this week – Booked by AI 0 of 0 appointments 0 Customers with appointments 0 Still to come 0 so far/);
+  assert.match(text(home([])), /This month October 2026 · 0 appointments, past and upcoming .*Booked value so far CHF 0\.00 at list prices Appointments so far 0 of 0 this month Still to come 0 CHF 0\.00 booked, until 31\.10\./);
+  assert.match(text(home([])), /AI receptionist The AI has not booked an appointment yet\./);
   const empty = analytics([]);
   assert.match(text(empty), /0 appointments October 2026 No appointments in this period\./);
   assert.doesNotMatch(empty, /aria-label="Appointment chart"/);
@@ -403,8 +465,20 @@ test('Home and Analytics name no sample data and show only figures the data can 
     assert.doesNotMatch(readableText(page), /participant|illustrative|this tab/i);
     // Messages per day, enquiries after hours and reply times need dated messages; revenue,
     // cancellations and no-shows are not recorded. None of them is shown.
-    assert.doesNotMatch(readableText(page), /after.hours|reply time|messages today|revenue|CHF|no.show|cancell/i);
+    assert.doesNotMatch(readableText(page), /after.hours|reply time|messages today|revenue|no.show|cancell/i);
   }
+  // Analytics shows no amount of money. Home shows one kind: what the booked appointments are worth
+  // at the prices in the Services list, which the data can answer. It is always called that, and
+  // never by a word for money that has come in: the app records no payment.
+  for (const page of [analytics(demoEvents), analytics([], [])]) assert.doesNotMatch(readableText(page), /CHF/);
+  // Every amount with the words around it: each is named as booked value, before or after the number.
+  const amounts = text(home(demoEvents)).match(/(?:\S+ ){0,5}CHF [\d'.]+(?: \S+){0,2}/g) ?? [];
+  assert.ok(amounts.length >= 3, 'Home shows the value of the day, of the month and of the AI\'s bookings');
+  for (const amount of amounts) assert.match(amount, /Booked value (so far|at list prices) CHF|CHF [\d'.]+ booked/, amount);
+  assert.match(text(home(demoEvents)), /Booked value so far CHF [\d'.]+ .*at list prices/);
+  assert.doesNotMatch(readableText(home(demoEvents)), /revenue|turnover|takings|income|earn|sales|paid|payment/i);
+  // What was booked while the salon was closed is counted from the moment each booking was made, which is recorded.
+  assert.match(text(home(demoEvents)), /While closed outside opening hours \d+ /);
   const page = home(demoEvents);
   assert.match(page, />\s*This month\s*</);
   assert.match(page, />View analytics</);
@@ -413,10 +487,11 @@ test('Home and Analytics name no sample data and show only figures the data can 
   // The link to Analytics is offered only when it leads somewhere.
   const withoutLink = render(React.createElement(HomeView, {
     requests: [], selectedRequestId: null, now: FIXED_NOW,
-    availabilityContext: { requests: [], events: [], services: [], employees: [], bookingHours: [], shiftOverview: [], now: FIXED_NOW, timeZone: ZONE },
+    availabilityContext: { requests: [], events: demoEvents, services: initialServices, employees: initialEmployees, bookingHours: initialBookingHours, shiftOverview: demoShifts, now: FIXED_NOW, timeZone: ZONE },
     onAcceptRequest: nothing, onRejectRequest: nothing, onMoveRequest: () => null, onSimulateNewRequest: nothing,
     onOpenAppointment: nothing, conversations: [], onOpenConversations: nothing,
   }));
+  assert.match(withoutLink, />\s*This month\s*</);
   assert.doesNotMatch(withoutLink, /View analytics/);
   // Analytics names the salon as text, offers the export for the chosen period, and nothing looks like a second control.
   const inAnalytics = analytics(demoEvents);
@@ -444,7 +519,7 @@ test('the export holds the figures on screen and every appointment behind them',
     ['Booked by AI', onScreen.aiBookings],
     ['Booked by AI (%)', Number(onScreen.aiShare.replace('%', ''))],
     ['Other bookings', onScreen.appointments - onScreen.aiBookings],
-    ['Customers with appointments', onScreen.customers],
+    ['Customers with appointments', analyticsNumbers(analytics(demoEvents)).customers],
     ['Still to come', onScreen.stillToCome],
     [],
     ['Date', 'Start', 'End', 'Customer', 'Service', 'Staff', 'Booked by AI'],

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { bookingAddress, qrFileName, qrModules, qrPath, qrSide, QR_QUIET_ZONE } from '../src/bookingLink';
-import { BookingLinkCard, BookingLinkCompact, BookingQrCode } from '../src/components/BookingLinkCard';
+import { BookingLinkButtons, BookingLinkCard, BookingLinkCompact, BookingQrCode } from '../src/components/BookingLinkCard';
 import { initialBookingHours, initialCompanySettings } from '../src/mockData';
 import { SettingsView } from '../src/views/SettingsView';
 import { decodeQr, modulesFromPath } from './qrDecode';
@@ -101,9 +101,10 @@ test('the card in Settings offers the address, Copy, "Open as customer" and the 
   // The code on the card is the address.
   const path = /<path d="([^"]+)" fill="#000000"/.exec(html)?.[1] ?? '';
   assert.equal(decodeQr(modulesFromPath(path, qrSide(qrModules(ADDRESS)), QR_QUIET_ZONE)).text, ADDRESS);
-  // One line says what happens to a request, and claims nothing about what the customer is told.
-  assert.match(text, /Requests from this page wait on Home for your answer\. Nothing is booked until you accept\./);
-  assert.doesNotMatch(text, /confirm|notif|sent|e-?mail|SMS/i);
+  // One line says what happens to a request, and claims nothing about what the customer is told. "Confirm" is
+  // the owner's answer on Home; no confirmation is promised to anybody.
+  assert.match(text, /Requests from this page wait on Home for your answer\. Nothing is booked until you confirm\./);
+  assert.doesNotMatch(text, /confirm(ation|ed|s)\b|notif|sent|e-?mail|SMS/i);
   assert.doesNotMatch(text, TELL_WORDS);
   // Controls are large enough for a thumb, and success is announced without moving anything.
   for (const control of html.match(/<(?:button|a)\b[^>]*>/g) ?? []) assert.match(control, /\bmin-h-11\b/, control);
@@ -118,7 +119,7 @@ test('on a study link the card says how far the sample workspace reaches: the ta
   const note = readableText(render(card, { research: true }));
   assert.match(note, /Demo workspace: its data are kept in this browser and shared by all its tabs\./);
   // What is true between two tabs now: the request arrives on Home, and the customer's tab learns the answer.
-  assert.match(note, /A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you accept or reject\./);
+  assert.match(note, /A request sent in the tab that “Open as customer” opens shows up on Home here, and that tab shows your answer once you confirm or decline\./);
   // Another device is still not reached, and the note does not claim it.
   assert.match(note, /Another browser or device is not reached\./);
   assert.doesNotMatch(note, /every browser tab keeps its own data|does not learn your answer|handed to this tab/);
@@ -138,6 +139,24 @@ test('the short form for Home has the address, Copy and the code behind a button
   // Without an address (no browser and none given) there is nothing to show.
   assert.equal(render(React.createElement(BookingLinkCompact, {})), '');
   assert.equal(render(React.createElement(BookingLinkCard, {})), '');
+});
+
+test('the two buttons for Home\'s heading row copy the link and show the code on request', () => {
+  const html = render(React.createElement(BookingLinkButtons, { address: ADDRESS }));
+  // One group with a name, so the short "QR code" is heard as the booking link's.
+  assert.match(html, /^<div role="group" aria-label="Booking link"/);
+  const buttons = Array.from(html.matchAll(/<button[^>]*>(.*?)<\/button>/g), (match) => match[1].replace(/<[^>]+>/g, ''));
+  assert.deepEqual(buttons, ['Copy booking link', 'QR code']);
+  for (const control of html.match(/<button\b[^>]*>/g) ?? []) assert.match(control, /\bmin-h-11\b/, control);
+  // The code and the written address are behind the second button, which says whether its panel is open.
+  assert.match(html, /aria-expanded="false"[^>]*>.*?QR code<\/button>/);
+  assert.doesNotMatch(html, /QR code of the booking link/);
+  assert.ok(!html.includes(ADDRESS));
+  // What "Copy booking link" did is read out from a place that is always in the page.
+  assert.match(html, /<span role="status" class="sr-only"><\/span>/);
+  assert.doesNotMatch(readableText(html), TELL_WORDS);
+  // Without an address (no browser and none given) there is nothing to show.
+  assert.equal(render(React.createElement(BookingLinkButtons, {})), '');
 });
 
 test('Settings › Online booking holds the card, and no copy of the customers\' booking form', () => {

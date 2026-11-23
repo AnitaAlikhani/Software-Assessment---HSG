@@ -22,7 +22,7 @@ const buttons = (html: string) => Array.from(html.matchAll(/<button([^>]*)>(.*?)
 
 const sidebar = (partial: Partial<React.ComponentProps<typeof Sidebar>> = {}) => render(React.createElement(Sidebar, {
   companyName: 'Bella Hair Salon', companyLocation: 'St. Gallen, Switzerland', currentTab: 'home',
-  onSelectTab: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing, ...partial,
+  onSelectTab: nothing, waitingCount: 0, onOpenPilotInterest: nothing, ...partial,
 }));
 
 test('the menu lists the nine screens in three groups, in sentence case, with plain group headings', () => {
@@ -50,19 +50,23 @@ test('the menu marks the open screen in one way, whichever group it is in', () =
   };
   const styles = (Object.keys(SCREEN_NAMES) as NavigationTab[]).map(active);
   assert.equal(new Set(styles).size, 1, 'one active style');
-  // A tint, the brand colour, semibold and a bar on the left.
+  // A tint, the brand colour, semibold and a bar on the left. The text takes the darker brand
+  // tone: the lighter one on the tint falls short of the contrast small text needs (4.3 to 1).
   assert.match(styles[0], /bg-\[#5551FF\]\/10/);
-  assert.match(styles[0], /text-\[#5551FF\]/);
+  assert.match(styles[0], /text-\[#433fd8\]/);
+  assert.doesNotMatch(styles[0], /text-\[#5551FF\]/);
   assert.match(styles[0], /font-semibold/);
   assert.match(styles[0], /before:w-\[3px\]/);
 });
 
-test('the menu counts open requests on Home and waiting chats on Conversations', () => {
-  const html = sidebar({ pendingRequestsCount: 2, needsAttentionCount: 1 });
-  assert.match(html, />Home<\/span><span[^>]*>2<span class="sr-only"> open requests<\/span><\/span>/);
-  assert.match(html, />Conversations<\/span><span[^>]*>1<span class="sr-only"> chat needs you<\/span><\/span>/);
+test('the menu counts everything that waits on Home and the waiting chats on Conversations', () => {
+  // Home's number is the one beside "Waiting for you" on Home itself: requests and chats together.
+  const html = sidebar({ waitingCount: 6, needsAttentionCount: 1 });
+  assert.match(html, />Home<\/span><span[^>]*>6<span class="sr-only"> waiting for you<\/span><\/span>/);
+  assert.match(html, />Conversations<\/span><span[^>]*>1<span class="sr-only"> chat is waiting for you<\/span><\/span>/);
+  assert.match(sidebar({ waitingCount: 1, needsAttentionCount: 4 }), />1<span class="sr-only"> waiting for you<\/span>.*>4<span class="sr-only"> chats are waiting for you<\/span>/s);
   // Nothing waiting, no badge.
-  assert.doesNotMatch(sidebar(), /open request|needs? you/);
+  assert.doesNotMatch(sidebar(), /waiting for you|open request|needs? you/);
 });
 
 // ---------- the bar on top ----------
@@ -86,6 +90,9 @@ test('the header has search, New appointment, the Assistant and a plain account 
   assert.equal(html.match(/bg-\[#5551FF\] /g)?.length, 1, 'one primary action');
   // The account: who is signed in, as text. No button around it, no menu behind it.
   assert.match(html, /<p[^>]*><span class="sr-only">Signed in as <\/span><span[^>]*>Anna Weber<\/span><span[^>]*>Owner<\/span><\/p>/);
+  // The role is small text on white: it wears the grey that is dark enough to read (4.8 to 1), not the paler one.
+  assert.match(html, /<span class="[^"]*text-slate-500">Owner<\/span>/);
+  assert.doesNotMatch(html, /text-slate-400">Owner</);
   assert.doesNotMatch(html, /aria-controls="header-account"|Account and salon settings|aria-haspopup="menu"/);
 });
 
@@ -150,9 +157,9 @@ test('the tab bar is Home, Calendar, + for a new appointment, Chats and More', (
 test('the tab bar keeps the counts on Home and Chats and marks where the owner is', () => {
   const html = tabBar({ currentTab: 'conversations', homeBadge: 2, chatsBadge: 12 });
   // The number is drawn on the icon, and read out after the name of the tab with the full count.
-  assert.match(html, /<span aria-hidden="true"[^>]*>2<\/span><\/span>Home<span class="sr-only">, 2 open requests<\/span><\/button>/);
-  assert.match(html, /<span aria-hidden="true"[^>]*>9\+<\/span><\/span>Chats<span class="sr-only">, 12 chats need you<\/span><\/button>/);
-  assert.match(tabBar({ homeBadge: 1, chatsBadge: 1 }), /Home<span class="sr-only">, 1 open request<\/span>.*Chats<span class="sr-only">, 1 chat needs you<\/span>/s);
+  assert.match(html, /<span aria-hidden="true"[^>]*>2<\/span><\/span>Home<span class="sr-only">, 2 waiting for you<\/span><\/button>/);
+  assert.match(html, /<span aria-hidden="true"[^>]*>9\+<\/span><\/span>Chats<span class="sr-only">, 12 chats are waiting for you<\/span><\/button>/);
+  assert.match(tabBar({ homeBadge: 1, chatsBadge: 1 }), /Home<span class="sr-only">, 1 waiting for you<\/span>.*Chats<span class="sr-only">, 1 chat is waiting for you<\/span>/s);
   assert.equal(html.match(/aria-current="page"/g)?.length, 1);
   assert.match(html, /aria-current="page"[^>]*>(?:(?!<\/button>).)*Chats<span class="sr-only">[^<]*<\/span><\/button>/);
   // On a screen that is not in the bar, "More" is the marked place.
@@ -198,6 +205,8 @@ test('"More" marks the open screen and draws nothing while it is closed', () => 
   const html = more({ currentTab: 'team' });
   assert.equal(html.match(/aria-current="page"/g)?.length, 1);
   assert.match(html, /aria-current="page"[^>]*>.*?<span class="min-w-0 flex-1">Team<\/span>/);
+  // On the tint the open screen is written in the darker brand tone, as in the laptop's menu.
+  assert.match(html, /aria-current="page" class="[^"]*bg-\[#5551FF\]\/10 font-semibold text-\[#433fd8\]/);
   assert.equal(more({ isOpen: false }), '');
   // Without a name there is still a line, and no role is made up.
   const anonymous = more({ ownerName: '', ownerRole: '', companyName: '' });

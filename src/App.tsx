@@ -21,6 +21,7 @@ import {
 import { DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
 import { sampleChatAfterAi, sampleChatAfterOwnerReply } from './sampleChatFlow';
 import {
+  accountOwner,
   initialEmployees,
   initialServices,
   initialCompanySettings,
@@ -56,10 +57,10 @@ import { getSalonNow, isOutsideOpeningHours, validateBookingRequest, validateCal
 import { dayChangesSummary, isValidDayChange, undoDayChanges, withDayChanges, withoutRegularDays, type DayChange } from './workingHours';
 import { withServicesOf } from './teamBooking';
 import { appointmentForConversation, belongsToConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
-import { answerIsShown, openRequestCount, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
+import { answerIsShown, inboxCounts, inboxItems, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
 import { acceptedAppointmentState, chatOfFormBooking, checkRequest, movedRequest, restoreConfirmedBooking } from './requestAnswers';
 import { arrivedRequests, isRequestersAppointment, withOutcome, type RequestOutcomes } from './sharedRequests';
-import { BookingLinkCompact } from './components/BookingLinkCard';
+import { BookingLinkButtons, BookingLinkCompact } from './components/BookingLinkCard';
 
 import { createDemoWorkspace, type DemoWorkspace } from './demoWorkspace';
 import { createIncomingRequest } from './demoRequests';
@@ -326,8 +327,11 @@ export default function App() {
   latestSalon.current = availabilityContext;
 
   const needsAttention = allConversations.filter((c) => c.status === 'needs-attention');
-  // The badge on Home counts what Home lists as requests: those from the booking page and those waiting in a chat.
-  const openRequests = openRequestCount(requests, allConversations);
+  // One number for everything that waits for the owner: the badge on Home, the heading of Home's
+  // inbox and the browser tab all show it. It is counted from the inbox itself, so they cannot differ.
+  const waitingForOwner = inboxCounts(inboxItems({
+    requests, conversations: allConversations, events: calendarEvents, answers: requestAnswers, timeZone: companySettings.timeZone, now,
+  })).waiting;
   // The calendar's day, view and filters are part of the address (src/navigation.ts), so reload,
   // Back and a shared link restore them. An address without a day means today. While an
   // appointment's details are open, the calendar behind them shows that appointment's day.
@@ -451,9 +455,9 @@ export default function App() {
       const appointment = calendarEvents.find((event) => event.id === appointmentIdForRequest(id));
       const standing = acceptedAppointmentState(before, appointment);
       // Moved or edited in the calendar since: taking the acceptance back would throw that away.
-      if (standing === 'changed') return 'The appointment was changed in the calendar after you accepted. Change or cancel it there.';
+      if (standing === 'changed') return 'The appointment was changed in the calendar after you confirmed. Change or cancel it there.';
       // Cancelled in the calendar since (Home no longer shows the answer then): that decision stands.
-      if (standing === 'gone') return 'The appointment was cancelled in the calendar after you accepted. If the customer still wants it, add it by hand in the calendar.';
+      if (standing === 'gone') return 'The appointment was cancelled in the calendar after you confirmed. If the customer still wants it, add it by hand in the calendar.';
       // The appointment that the acceptance created goes, and with it what held the time.
       setCalendarEvents((previous) => previous.filter((event) => event.id !== appointmentIdForRequest(id)));
       setRequests((previous) => restoreAt(previous, before, answer.index));
@@ -1131,7 +1135,7 @@ export default function App() {
     showToast('AI receptionist settings saved');
   };
   // The browser tab names the screen, the salon and the product; the customers' booking page names the salon only.
-  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, salonShown ? companySettings.companyName : ''));
+  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, salonShown ? companySettings.companyName : '', waitingForOwner));
 
   const bookingPage = <BookingPageView {...availabilityContext}
     companySettings={companySettings} draft={bookingDraft} setDraft={setBookingDraft}
@@ -1151,7 +1155,7 @@ export default function App() {
         companyLocation={[companySettings.city, companySettings.country].filter(Boolean).join(', ')}
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
-        pendingRequestsCount={openRequests}
+        waitingCount={waitingForOwner}
         needsAttentionCount={needsAttention.length}
         onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
       />
@@ -1208,12 +1212,15 @@ export default function App() {
               onChatBooking={handleChatBooking}
               onSimulateNewRequest={handleSimulateNewRequest}
               now={now}
-              onOpenCalendar={() => setCurrentTab('calendar')}
+              onOpenCalendar={(date) => { if (date) navigate({ tab: 'calendar', view: 'day', date }); else setCurrentTab('calendar'); }}
               onOpenAnalytics={() => setCurrentTab('analytics')}
               conversations={allConversations}
               onOpenConversations={openConversation}
               onOpenCustomer={(id) => navigate({ tab: 'customers', customerId: id })}
               bookingLink={<BookingLinkCompact />}
+              bookingLinkButtons={<BookingLinkButtons />}
+              me={accountOwner(employees)}
+              onOpenScreen={setCurrentTab}
             />
           )}
 
@@ -1369,7 +1376,7 @@ export default function App() {
           onNewAppointment={newAppointment}
           onOpenMore={() => setIsMoreOpen(true)}
           isMoreOpen={isMoreOpen}
-          homeBadge={openRequests}
+          homeBadge={waitingForOwner}
           chatsBadge={needsAttention.length}
           hideOnPhone={chatOpenOnPhone}
         />

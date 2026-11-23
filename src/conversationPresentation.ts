@@ -98,7 +98,7 @@ export type ConversationFilter = 'all' | 'needs' | 'booked';
 
 /**
  * The chats a filter shows: all of them, those in which a customer waits for the owner (the
- * rule behind every "needs you" count), or those with an appointment that was booked in them.
+ * rule behind every "waiting for you" count), or those with an appointment that was booked in them.
  */
 export function conversationsInFilter(conversations: Conversation[], filter: ConversationFilter, events?: CalendarEvent[]): Conversation[] {
   if (filter === 'needs') return conversationsWaiting(conversations);

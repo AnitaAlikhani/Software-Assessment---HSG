@@ -11,10 +11,10 @@ import { workingTimeOn } from './workingHours';
 import { blockAt, blockReasonText } from './timeBlocks';
 
 /**
- * The owner's side of a booking request: may it be accepted as it stands, to which times can it
- * be moved, and if something is in the way, what.
+ * The owner's side of a booking request: may it be confirmed as it stands, which other times can
+ * be suggested for it, and if something is in the way, what.
  *
- * A request is answered under the owner's rules, not the booking page's. The owner may accept a
+ * A request is answered under the owner's rules, not the booking page's. The owner may confirm a
  * service that is not offered online and a stylist who is hidden from the page; what still
  * counts is whether the stylist is there and free. And a request keeps the length it was made
  * with: a customer who asked for 10:00 to 10:30 gets that time, also when the owner has given
@@ -137,7 +137,7 @@ function obstacleFor(rule: string, facts: Facts): Obstacle | null {
     case RULE.shiftOutsideHours: return { why: `The working hours of ${staff} on ${day} lie outside the opening hours.`, wants: 'day', or: 'change them in Team' };
     case RULE.badHours: return { why: `The opening hours for ${weekdayName(date)}s have invalid times.`, wants: 'day', or: 'correct them in Settings' };
     case RULE.badAppointment: return { why: `${staff} has an appointment with invalid times on ${day}.`, wants: 'day', or: 'correct that appointment in the calendar' };
-    case RULE.badRequest: return { why: `${staff} has another request with invalid times on ${day}.`, wants: 'day', or: 'reject that request first' };
+    case RULE.badRequest: return { why: `${staff} has another request with invalid times on ${day}.`, wants: 'day', or: 'decline that request first' };
     case RULE.taken: return conflict(facts);
     default: return WRONG_LENGTH.test(rule) ? NO_TIME : null;
   }
@@ -145,15 +145,20 @@ function obstacleFor(rule: string, facts: Facts): Obstacle | null {
 
 const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** "a", "a, or b", "a, b, or c". */
+const orList = (steps: (string | undefined)[]): string => {
+  const given = steps.filter((step): step is string => Boolean(step));
+  return given.length <= 2 ? given.join(', or ') : `${given.slice(0, -1).join(', ')}, or ${given[given.length - 1]}`;
+};
+
 /**
- * Two sentences: what is in the way, and what the owner can do. A request on Home can be moved
- * or rejected. (A chat's request has answers of its own: see adviseChat.)
+ * Two sentences: what is in the way of a request, and the owner's ways out, in the words of the
+ * answers every request has (Confirm, Suggest another time, Decline): another time or day, what
+ * she can change in the salon instead, or declining. The same for a request from the booking
+ * page and for one from a chat.
  */
-function advise(found: Obstacle): string {
-  const elsewhere = found.wants === 'time' ? 'a new time' : 'another day';
-  const steps = found.wants === 'nothing' ? [found.or, 'reject the request'] : [`move the request to ${elsewhere}`, found.or ?? 'reject it'];
-  return `${found.why} ${capital(steps.filter(Boolean).join(', or '))}.`;
-}
+const advise = (found: Obstacle): string =>
+  `${found.why} ${capital(orList([found.wants === 'nothing' ? undefined : found.wants === 'time' ? 'suggest another time' : 'suggest another day', found.or, 'decline']))}.`;
 
 const serviceOf = (services: ServiceItem[], request: Pick<AppointmentRequest, 'serviceId' | 'serviceName'>): ServiceItem | undefined =>
   request.serviceId !== undefined ? services.find((item) => item.id === request.serviceId) : services.find((item) => item.name === request.serviceName);
@@ -203,7 +208,7 @@ function requestObstacle(context: AvailabilityContext, request: AppointmentReque
 }
 
 export interface RequestCheck {
-  /** Null when the request can be accepted as it stands. Otherwise why not, and what the owner can do. */
+  /** Null when the request can be confirmed as it stands. Otherwise why not, and what the owner can do. */
   refusal: string | null;
   /** The first half of the refusal alone: what is in the way. For places that give their own advice. */
   why: string | null;
@@ -211,7 +216,7 @@ export interface RequestCheck {
   movable: boolean;
 }
 
-/** Whether the owner can accept a request now, under the owner's rules and with the request's own length. */
+/** Whether the owner can confirm a request now, under the owner's rules and with the request's own length. */
 export function checkRequest(context: AvailabilityContext, request: AppointmentRequest): RequestCheck {
   const found = requestObstacle(context, request);
   if (found === null) return { refusal: null, why: null, movable: true };
@@ -219,7 +224,7 @@ export function checkRequest(context: AvailabilityContext, request: AppointmentR
   return { refusal: advise(found), why: found.why, movable: found.wants !== 'nothing' };
 }
 
-/** Why a request cannot be accepted, or null when it can. */
+/** Why a request cannot be confirmed, or null when it can. */
 export const requestRefusal = (context: AvailabilityContext, request: AppointmentRequest): string | null =>
   checkRequest(context, request).refusal;
 
@@ -321,16 +326,6 @@ export interface ChatBookingPlan {
   movable: boolean;
 }
 
-/** "a", "a, or b", "a, b, or c". */
-const orList = (steps: (string | undefined)[]): string => {
-  const given = steps.filter((step): step is string => Boolean(step));
-  return given.length <= 2 ? given.join(', or ') : `${given.slice(0, -1).join(', ')}, or ${given[given.length - 1]}`;
-};
-
-/** What is in the way of a chat's request, and the owner's ways out: another time, the salon's settings, or declining. */
-const adviseChat = (found: Obstacle): string =>
-  `${found.why} ${capital(orList([found.wants === 'nothing' ? undefined : found.wants === 'time' ? 'suggest another time' : 'suggest another day', found.or, 'decline']))}.`;
-
 const findService = (services: ServiceItem[], booking: Pick<ChatBooking, 'serviceId' | 'service'>): ServiceItem | undefined =>
   booking.serviceId !== undefined
     ? services.find((item) => item.id === booking.serviceId)
@@ -390,13 +385,13 @@ export function planChatBooking(context: AvailabilityContext, conversation: Chat
   if (!service) {
     return {
       ...empty, serviceId: null, serviceName: booking.service, endTime: null, movable: false,
-      refusal: adviseChat({ why: `"${booking.service}" is no longer one of your services.`, wants: 'nothing', or: 'add the appointment by hand in the calendar' }),
+      refusal: advise({ why: `"${booking.service}" is no longer one of your services.`, wants: 'nothing', or: 'add the appointment by hand in the calendar' }),
     };
   }
   const endTime = addMinutes(booking.time, service.durationMinutes);
   const appointmentId = chatAppointmentId(conversation.id, booking);
   const refuse = (found: Obstacle, freeEmployees: Employee[] = []): ChatBookingPlan => ({
-    ...empty, serviceId: service.id, serviceName: service.name, endTime, freeEmployees, refusal: adviseChat(found), movable: found.wants !== 'nothing',
+    ...empty, serviceId: service.id, serviceName: service.name, endTime, freeEmployees, refusal: advise(found), movable: found.wants !== 'nothing',
   });
   const clock = getSalonNow(context.timeZone, context.now ?? new Date());
   if (`${booking.date} ${booking.time}` <= `${clock.date} ${clock.time}`) return refuse(PASSED);
@@ -615,4 +610,40 @@ export function restoreConfirmedBooking(context: AvailabilityContext, conversati
   const why = (plan?.refusal ?? 'This time is not free.').split(/(?<=\.)\s+/)
     .filter((sentence) => !/^(Suggest|Confirm|Decline|Assign|Add)\b|, or decline\.$/.test(sentence)).join(' ');
   return { error: why };
+}
+
+// ---------- the time "Suggest another time" opens on ----------
+
+/**
+ * Of a day's free times for a request, those that take nothing from a customer who waits in a
+ * chat. A chat's request holds no time until the owner confirms it, so the list of free times
+ * offers its time as well. A time counts as taken from the chat when, with the request moved
+ * there, the chat's request could no longer be confirmed as it stands.
+ */
+export function startsSparingChats(
+  context: AvailabilityContext, request: AppointmentRequest, date: string, starts: string[], conversations: ChatForBooking[],
+): string[] {
+  const waiting = conversations.filter((conversation) => planChatBooking(context, conversation)?.refusal === null);
+  if (waiting.length === 0) return starts;
+  return starts.filter((start) => {
+    const moved = movedRequest(request, date, start);
+    const after = { ...context, requests: context.requests.map((item) => (item.id === request.id ? moved : item)) };
+    return waiting.every((conversation) => planChatBooking(after, conversation)?.refusal === null);
+  });
+}
+
+/**
+ * The time the dialog "Suggest another time" opens on, for a day. The time the request stands
+ * at is no other time: on its own day the list opens on the next free time after it, or late in
+ * the day on the one before it. On another day it opens on the same time of day where that is
+ * free. And it opens on no time that another customer waits for in a chat while a time is free
+ * that nobody has asked for: the owner would take that time away with the button the dialog
+ * opens on. Every time stays in the list, for the owner to choose.
+ */
+export function otherTimeToOpenOn(context: AvailabilityContext, request: AppointmentRequest, date: string, conversations: ChatForBooking[] = []): string {
+  const own = requestTimes(request)?.start ?? '';
+  const sameDay = date === request.date;
+  const others = freeStartsForRequest(context, request, date).filter((start) => !sameDay || start !== own);
+  const choose = (starts: string[]) => starts.find((start) => (sameDay ? start > own : start >= own)) ?? starts.at(-1);
+  return choose(startsSparingChats(context, request, date, others, conversations)) ?? choose(others) ?? own;
 }

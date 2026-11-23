@@ -37,7 +37,7 @@ test('the pilot banner and its interest form appear only on a study link', () =>
 
 const sidebar = React.createElement(Sidebar, {
   companyName: 'Lumière Salon', companyLocation: 'Zürich, Switzerland', currentTab: 'home',
-  onSelectTab: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
+  onSelectTab: nothing, waitingCount: 0, onOpenPilotInterest: nothing,
 });
 // "More" is the menu of phones and tablets. A test has no browser to open the sheet in; its content is drawn all the same.
 const more = React.createElement(MoreSheet, {
@@ -83,22 +83,39 @@ test('an empty inbox on Home reads as a product; simulating a booking is a study
   assert.match(html, /New booking requests and chats that need you appear here\./);
   assert.doesNotMatch(html, /Simulate incoming booking/);
   assert.doesNotMatch(html, /WhatsApp and Instagram/);
-  // A new appointment is started from the header and the tab bar, and the booking page is the customers' own.
+  // A new appointment is started from the header and the tab bar, and the booking page is the customers' own:
+  // Home offers neither a second time, also where it tells a salon that has not begun how to go on.
   assert.doesNotMatch(html, /New appointment|Open booking page/);
+  assert.match(html, /Getting started/);
+  assert.match(html, /add the first appointment yourself with the plus button\./);
   assert.match(render(React.createElement(HomeView, home), { research: true }), /Simulate incoming booking/);
 });
 
 test('Home offers a link only when it leads somewhere, and shows the booking link card it is given', () => {
-  const html = render(React.createElement(HomeView, home));
+  // A salon with one appointment in its calendar: the usual Home, with its figures.
+  const begun: React.ComponentProps<typeof HomeView> = {
+    ...home,
+    availabilityContext: { ...home.availabilityContext, events: [{
+      id: 'cal-1', customerName: 'Petra Meier', serviceName: 'Haircut', staffName: 'Anna Weber', date: '2026-10-06', day: 'tue',
+      dateDisplay: 'Tue 06.10.', startTime: '10:00', endTime: '10:30', colorTheme: 'blue',
+    }] },
+  };
+  const html = render(React.createElement(HomeView, begun));
   assert.match(html, />Open calendar</);
   assert.match(html, />View analytics</);
-  const bare = render(React.createElement(HomeView, { ...home, onOpenCalendar: undefined, onOpenAnalytics: undefined }));
+  const bare = render(React.createElement(HomeView, { ...begun, onOpenCalendar: undefined, onOpenAnalytics: undefined }));
   assert.doesNotMatch(bare, /Open calendar|View analytics/);
-  // The compact card with the customers' booking link stands below the inbox. Without one, nothing is shown.
+  // The compact card with the customers' booking link is needed now and then: it stands last, after
+  // the inbox, the AI receptionist and the month. Without one, nothing is shown.
   assert.doesNotMatch(html, /Your booking link/);
-  const withLink = render(React.createElement(HomeView, { ...home, bookingLink: React.createElement('section', { id: 'link-card' }, 'Your booking link') }));
-  assert.ok(withLink.indexOf('Waiting for you') < withLink.indexOf('id="link-card"'));
-  assert.ok(withLink.indexOf('id="link-card"') < withLink.indexOf('Booked by the AI'));
+  const withLink = render(React.createElement(HomeView, { ...begun, bookingLink: React.createElement('section', { id: 'link-card' }, 'Your booking link') }));
+  const order = ['Waiting for you', 'AI receptionist', 'This month', 'id="link-card"'].map((part) => withLink.indexOf(part));
+  assert.ok(order.every((at, index) => at >= 0 && (index === 0 || at > order[index - 1])), `order of Home: ${order.join(', ')}`);
+  // A salon that has not begun finds the link where it is told how to go on: under "Getting started", before the inbox.
+  const notBegun = render(React.createElement(HomeView, { ...home, bookingLink: React.createElement('section', { id: 'link-card' }, 'Your booking link') }));
+  assert.ok(notBegun.indexOf('Getting started') < notBegun.indexOf('id="link-card"') && notBegun.indexOf('id="link-card"') < notBegun.indexOf('Waiting for you'));
+  assert.equal(notBegun.match(/id="link-card"/g)?.length, 1);
+  assert.doesNotMatch(notBegun, /View analytics|This month/);
 });
 
 const header: React.ComponentProps<typeof Header> = {

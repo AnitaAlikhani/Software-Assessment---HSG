@@ -12,7 +12,7 @@ interface BottomNavProps {
   /** Opens the sheet with every screen that is not in the bar. */
   onOpenMore: () => void;
   isMoreOpen: boolean;
-  /** Open booking requests: the number on Home. */
+  /** Everything that waits for the owner: the number beside "Waiting for you" on Home. */
   homeBadge: number;
   /** Chats that wait for the owner: the number on Chats. */
   chatsBadge: number;
@@ -38,7 +38,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab, o
     const Icon = NAV_ICONS[tab];
     const active = currentTab === tab;
     const badge = tab === 'home' ? homeBadge : tab === 'conversations' ? chatsBadge : 0;
-    const what = tab === 'home' ? (badge === 1 ? 'open request' : 'open requests') : (badge === 1 ? 'chat needs you' : 'chats need you');
+    const what = tab === 'home' ? 'waiting for you' : (badge === 1 ? 'chat is waiting for you' : 'chats are waiting for you');
     return (
       <li key={tab}>
         <button type="button" onClick={() => onSelectTab(tab)} aria-current={active ? 'page' : undefined} className={itemClass(active)}>
@@ -51,7 +51,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onSelectTab, o
             )}
           </span>
           {SHORT_NAMES[tab] ?? SCREEN_NAMES[tab]}
-          {/* Read out after the name of the tab, and with the full number: "Home, 12 open requests". */}
+          {/* Read out after the name of the tab, and with the full number: "Home, 12 waiting for you". */}
           {badge > 0 && <span className="sr-only">, {badge} {what}</span>}
         </button>
       </li>

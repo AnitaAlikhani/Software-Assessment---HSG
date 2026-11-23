@@ -27,7 +27,7 @@ interface ShiftPlanViewProps {
   now?: Date;
   /** The calendar: a changed day says which appointments it leaves outside the working hours. */
   events?: CalendarEvent[];
-  /** The waiting requests: a changed day also says which of them could no longer be accepted. */
+  /** The waiting requests: a changed day also says which of them could no longer be confirmed. */
   requests?: AppointmentRequest[];
   /** Days somebody is away (Absences): shown in the week and not counted as working time. */
   absences?: StaffAbsence[];
@@ -566,7 +566,7 @@ export const ShiftPlanView: React.FC<ShiftPlanViewProps> = ({
               )}
               {waitingOutside > 0 && (
                 <p role="status" className="rounded-xl bg-amber-50 p-3 leading-relaxed text-amber-900">
-                  {waitingOutside === 1 ? '1 waiting request' : `${waitingOutside} waiting requests`} for {editorEmployee?.name} on this day could no longer be accepted at {waitingOutside === 1 ? 'its' : 'their'} time. Answer {waitingOutside === 1 ? 'it' : 'them'} on Home first, or move {waitingOutside === 1 ? 'it' : 'them'} there.
+                  {waitingOutside === 1 ? '1 waiting request' : `${waitingOutside} waiting requests`} for {editorEmployee?.name} on this day could no longer be confirmed at {waitingOutside === 1 ? 'its' : 'their'} time. Answer {waitingOutside === 1 ? 'it' : 'them'} on Home first, or suggest another time there.
                 </p>
               )}
               {shownError && <p role="alert" className="text-rose-600">{shownError}</p>}

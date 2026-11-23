@@ -55,7 +55,7 @@ test('the line on customer pages names the product and is no link', () => {
 // ---------- owner app: product on top, salon as workspace ----------
 
 const sidebar = (companyName: string, companyLocation = 'Zürich, Switzerland') => render(React.createElement(Sidebar, {
-  companyName, companyLocation, currentTab: 'home', onSelectTab: nothing, pendingRequestsCount: 0, onOpenPilotInterest: nothing,
+  companyName, companyLocation, currentTab: 'home', onSelectTab: nothing, waitingCount: 0, onOpenPilotInterest: nothing,
 }));
 
 test('the menu shows the product on top and the salon from Settings as the workspace under it', () => {
@@ -105,6 +105,12 @@ test('the owner\'s browser tab names the screen, the salon and the product', () 
   // The salon's name is whatever Settings holds, also none at all.
   assert.equal(ownerPageHead('calendar', ' Coiffeur Keller ').title, 'Calendar · Coiffeur Keller – SlotBee');
   assert.equal(ownerPageHead('calendar', '').title, 'Calendar – SlotBee');
+  // While something waits for the owner on Home, its number stands in front on every screen, so a
+  // tab in the background shows it. Nobody waiting, or a number that is none, adds nothing.
+  assert.equal(ownerPageHead('home', salon, 3).title, '(3) Home · Bella Hair Salon – SlotBee');
+  assert.equal(ownerPageHead('calendar', salon, 12).title, '(12) Calendar · Bella Hair Salon – SlotBee');
+  assert.equal(ownerPageHead('calendar', '', 1).title, '(1) Calendar – SlotBee');
+  for (const none of [0, -1, Number.NaN]) assert.equal(ownerPageHead('home', salon, none).title, 'Home · Bella Hair Salon – SlotBee');
 
   // Every screen of the menu, under the name the menu gives it.
   const tabs = Object.keys(SCREEN_NAMES) as NavigationTab[];

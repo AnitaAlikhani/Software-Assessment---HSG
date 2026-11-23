@@ -5,7 +5,8 @@ import { appointmentFromRequest } from '../src/appointmentActions';
 import { getAvailableSlots, validateBookingRequest, validateCalendarEvent, type AvailabilityContext } from '../src/availability';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import {
-  checkRequest, chatAppointmentId, freeStartsForRequest, movedRequest, nextFreeDayForRequest, planChatBooking, requestRefusal, wordingForRule,
+  checkRequest, chatAppointmentId, freeStartsForRequest, movedRequest, nextFreeDayForRequest, otherTimeToOpenOn, planChatBooking, requestRefusal,
+  startsSparingChats, wordingForRule,
 } from '../src/requestAnswers';
 import type { AppointmentRequest, CalendarEvent, Conversation } from '../src/types';
 import { demoEvents, demoRequests, demoShifts, FIXED_NOW } from './fixedClock';
@@ -59,51 +60,51 @@ test('a refusal says what is in the way and what the owner can do', () => {
   const refusal = (partial: Partial<AvailabilityContext>, request = wash) => requestRefusal(salon(partial), request);
   // The four things that change under a request: the shift, the day, the stylist, the calendar.
   assert.equal(refusal({ shiftOverview: withShift('emp-2', wash.date, { start: '13:00', end: '14:00' }) }),
-    'Selina Keller works 13:00–14:00 on Wed, 07.10.2026, not at 10:00–10:30. Move the request to a new time, or reject it.');
+    'Selina Keller works 13:00–14:00 on Wed, 07.10.2026, not at 10:00–10:30. Suggest another time, or decline.');
   assert.equal(refusal({ shiftOverview: withShift('emp-2', wash.date, null) }),
-    'Selina Keller does not work on Wed, 07.10.2026. Move the request to another day, or give Selina Keller working hours for that day in Team.');
+    'Selina Keller does not work on Wed, 07.10.2026. Suggest another day, give Selina Keller working hours for that day in Team, or decline.');
   assert.equal(refusal({ closedDates: [{ id: 'c-1', name: 'Team day', start: '2026-10-07', end: '2026-10-07' }] }),
-    'The salon is closed on Wed, 07.10.2026 (Team day). Move the request to another day, or reject it.');
+    'The salon is closed on Wed, 07.10.2026 (Team day). Suggest another day, or decline.');
   assert.equal(refusal({ absences: [{ id: 'a-1', employeeId: 'emp-2', start: '2026-10-06', end: '2026-10-09' }] }),
-    'Selina Keller is away on Wed, 07.10.2026. Move the request to another day, or reject it.');
+    'Selina Keller is away on Wed, 07.10.2026. Suggest another day, or decline.');
   assert.equal(refusal({ bookingHours: initialBookingHours.map((day) => day.day === 'Wednesday' ? { ...day, isOpen: false } : day) }),
-    'The salon is closed on Wednesdays. Move the request to another day, or reject it.');
+    'The salon is closed on Wednesdays. Suggest another day, or decline.');
   assert.equal(refusal({ bookingHours: initialBookingHours.map((day) => day.day === 'Wednesday' ? { ...day, from: '10:30' } : day) }),
-    'The salon is open 10:30–18:30 on Wed, 07.10.2026, not at 10:00–10:30. Move the request to a new time, or reject it.');
+    'The salon is open 10:30–18:30 on Wed, 07.10.2026, not at 10:00–10:30. Suggest another time, or decline.');
   // Somebody else has the time: the appointment is named, and so is a second request for it.
   assert.equal(refusal({ events: [appointment('cal-x', 'emp-2', wash.date, '10:00', '11:00'), ...demoEvents] }),
-    'Selina Keller already has Sandra Keller at 10:00–11:00 on Wed, 07.10.2026. Move the request to a new time, or reject it.');
+    'Selina Keller already has Sandra Keller at 10:00–11:00 on Wed, 07.10.2026. Suggest another time, or decline.');
   const rival: AppointmentRequest = { ...wash, id: 'req-rival', customerId: 'cust-rival', customerName: 'Tobias Wenger', timeStr: '09:30 - 10:30' };
   assert.equal(refusal({ requests: [rival, ...demoRequests] }),
-    'Tobias Wenger has asked Selina Keller for 09:30–10:30 on Wed, 07.10.2026 as well. Move the request to a new time, or reject it.');
+    'Tobias Wenger has asked Selina Keller for 09:30–10:30 on Wed, 07.10.2026 as well. Suggest another time, or decline.');
   // The time a neighbouring booking needs before or after it: no single booking overlaps, so the sentence stays general.
   assert.equal(refusal({ events: [{ ...appointment('cal-x', 'emp-2', wash.date, '09:00', '10:00'), postMinutes: 15 }, ...demoEvents] }),
-    '10:00–10:30 on Wed, 07.10.2026 is not free for Selina Keller. Move the request to a new time, or reject it.');
+    '10:00–10:30 on Wed, 07.10.2026 is not free for Selina Keller. Suggest another time, or decline.');
   // The request never stands in its own way, and neither does the appointment it becomes.
   assert.equal(refusal({ events: [appointmentFromRequest(wash, initialServices, initialEmployees), ...demoEvents] }), null);
 });
 
-test('when no other time would help, the card says so and offers no "Move"', () => {
+test('when no other time would help, the card says so and offers no "Suggest another time"', () => {
   const check = (partial: Partial<AvailabilityContext>) => checkRequest(salon(partial), wash);
   assert.deepEqual(check({ employees: withEmployee('emp-2', { status: 'Inactive' }) }), {
-    refusal: 'Selina Keller is set to inactive. Set Selina Keller to active in Team, or reject the request.',
+    refusal: 'Selina Keller is set to inactive. Set Selina Keller to active in Team, or decline.',
     why: 'Selina Keller is set to inactive.', movable: false,
   });
   assert.deepEqual(check({ services: withService('srv-1', { assignedEmployeeIds: ['emp-1'] }) }), {
-    refusal: 'Selina Keller does not offer Wash & blow-dry. Assign Selina Keller to it in Services, or reject the request.',
+    refusal: 'Selina Keller does not offer Wash & blow-dry. Assign Selina Keller to it in Services, or decline.',
     why: 'Selina Keller does not offer Wash & blow-dry.', movable: false,
   });
   assert.deepEqual(check({ services: initialServices.filter((service) => service.id !== 'srv-1') }), {
-    refusal: 'Wash & blow-dry is no longer one of your services. Add the appointment by hand in the calendar, or reject the request.',
+    refusal: 'Wash & blow-dry is no longer one of your services. Add the appointment by hand in the calendar, or decline.',
     why: 'Wash & blow-dry is no longer one of your services.', movable: false,
   });
   assert.deepEqual(check({ employees: initialEmployees.filter((employee) => employee.id !== 'emp-2') }), {
-    refusal: 'Selina Keller is no longer in your team. Add the appointment by hand with someone else, or reject the request.',
+    refusal: 'Selina Keller is no longer in your team. Add the appointment by hand with someone else, or decline.',
     why: 'Selina Keller is no longer in your team.', movable: false,
   });
   // A request stored long ago that names no stylist at all.
   assert.deepEqual(checkRequest(salon(), { ...wash, employeeId: undefined, staffName: undefined }), {
-    refusal: 'This request names no stylist. Add the appointment by hand in the calendar, or reject the request.',
+    refusal: 'This request names no stylist. Add the appointment by hand in the calendar, or decline.',
     why: 'This request names no stylist.', movable: false,
   });
   // Everything else can be solved by another time.
@@ -112,12 +113,56 @@ test('when no other time would help, the card says so and offers no "Move"', () 
 
 test('a request whose time has passed says so, at the minute it starts as well', () => {
   const at = (moment: string) => requestRefusal(salon({ now: new Date(moment) }), wash);
-  const passed = 'This time has passed. Move the request to a new time, or reject it.';
+  const passed = 'This time has passed. Suggest another time, or decline.';
   assert.equal(at('2026-10-07T07:59:00Z'), null); // 09:59 in Zurich
   assert.equal(at('2026-10-07T08:00:30Z'), passed); // 10:00 and half a minute: the rules give no slot that has begun
   assert.equal(at('2026-10-07T08:01:00Z'), passed);
   assert.equal(at('2026-10-09T10:00:00Z'), passed);
-  assert.equal(requestRefusal(salon(), { ...wash, timeStr: 'in the morning' }), 'This request has no valid time. Move the request to a new time, or reject it.');
+  assert.equal(requestRefusal(salon(), { ...wash, timeStr: 'in the morning' }), 'This request has no valid time. Suggest another time, or decline.');
+});
+
+test('"Suggest another time" opens on another time, and on none that a customer waits for in a chat', () => {
+  // Petra's wash stands at 10:00 on Wednesday with Selina Keller. These are Selina's free times for it that day.
+  const free = freeStartsForRequest(salon(), wash, wash.date);
+  assert.deepEqual(free, ['10:00', '10:30', '11:00', '14:00', '15:00', '15:30', '17:30', '18:00']);
+  // The time it stands at is no other time: the list opens on the next free one, and keeps the time itself.
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date), '10:30');
+  // With nothing free after it, the list opens late in the day on the last time before it.
+  const late: AppointmentRequest = { ...wash, timeStr: '18:00 - 18:30' };
+  assert.equal(otherTimeToOpenOn(salon({ requests: [late, haircut] }), late, late.date), '17:30');
+  // On another day the same time of day is the first choice; where it is taken, the next free one.
+  assert.ok(!freeStartsForRequest(salon(), wash, '2026-10-08').includes('10:00'));
+  assert.equal(otherTimeToOpenOn(salon(), wash, '2026-10-08'), '10:30');
+  assert.equal(otherTimeToOpenOn(salon({ events: [] }), wash, '2026-10-08'), '10:00');
+
+  // Tom waits in a chat for a haircut with Selina at 10:30. A chat's request holds no time until it is
+  // confirmed: 10:30 is still in the list of free times, and Tom's request can be confirmed as it stands.
+  const tom = (time: string, asked: Partial<NonNullable<Conversation['bookingRequest']>> = { employeeId: 'emp-2', staffName: 'Selina Keller' }) => ({
+    id: 'live-web-tom', customerName: 'Tom',
+    bookingRequest: { service: 'Haircut', serviceId: 'srv-2', date: wash.date, time, customerName: 'Tom', status: 'requested' as const, ...asked },
+  });
+  assert.equal(planChatBooking(salon(), tom('10:30'))?.refusal, null);
+  assert.ok(freeStartsForRequest(salon(), wash, wash.date).includes('10:30'));
+  // Moved there, Petra's request would take the time from him.
+  const taken = salon({ requests: [movedRequest(wash, wash.date, '10:30'), haircut] });
+  assert.match(planChatBooking(taken, tom('10:30'))!.refusal!, /^Tom asked for Selina Keller\. Petra Meier has asked Selina Keller for 10:30–11:00 on Wed, 07\.10\.2026 as well\./);
+  // So the dialog does not open on it: it opens on the next time that nobody has asked for.
+  assert.deepEqual(startsSparingChats(salon(), wash, wash.date, free, [tom('10:30')]), ['10:00', '11:00', '14:00', '15:00', '15:30', '17:30', '18:00']);
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [tom('10:30')]), '11:00');
+  // A chat that asks for another time changes nothing, and neither does one that is answered or asks for nothing.
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [tom('11:00')]), '10:30');
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [{ ...tom('10:30'), bookingRequest: { ...tom('10:30').bookingRequest, status: 'confirmed' as const } }]), '10:30');
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [{ id: 'conv-x', bookingRequest: undefined }]), '10:30');
+  // Tom asked for nobody in particular: the time is his while nobody else who offers the service is free then.
+  const anyone = tom('10:30', {});
+  assert.equal(planChatBooking(taken, anyone)?.refusal === null, false);
+  assert.equal(otherTimeToOpenOn(salon(), wash, wash.date, [anyone]), '11:00');
+  // Where the only other time is the one Tom waits for, the dialog still opens on a time: the owner decides.
+  const short = salon({ shiftOverview: withShift('emp-2', wash.date, { start: '10:00', end: '11:00' }) });
+  assert.deepEqual(freeStartsForRequest(short, wash, wash.date), ['10:00', '10:30']);
+  assert.equal(otherTimeToOpenOn(short, wash, wash.date, [tom('10:30')]), '10:30');
+  // A day with nothing free has nothing to open on but the time the request stands at.
+  assert.equal(otherTimeToOpenOn(salon({ shiftOverview: withShift('emp-2', wash.date, null) }), wash, wash.date, [tom('10:30')]), '10:00');
 });
 
 test('every refusal of the slot rules has words for the owner', () => {
@@ -140,7 +185,9 @@ test('every refusal of the slot rules has words for the owner', () => {
     assert.ok(wording, `no wording for: ${refusal}`);
     assert.notEqual(wording, refusal);
     // The owner is told what to do with the request or where to change something: never to "choose" in a form that is not there.
-    assert.match(wording, /(Move the request|reject|Reject|in Team|in Services|in Settings|in the calendar)/, refusal);
+    assert.match(wording, /(Suggest another (time|day)|decline|in Team|in Services|in Settings|in the calendar)/, refusal);
+    // One set of words for every request: nothing speaks of accepting, moving or rejecting any more.
+    assert.doesNotMatch(wording, /\b(accept|move the request|reject)/i, refusal);
     assert.doesNotMatch(wording, /^Choose|Please choose|this employee|This employee/, refusal);
   }
   assert.equal(wordingForRule('A refusal nobody has written yet.', facts), null);

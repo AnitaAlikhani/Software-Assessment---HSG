@@ -6,7 +6,7 @@ name: Refresh github.io preview
 # (the branch has to be listed in .github/workflows/deploy.yml on main).
 on:
   push:
-    branches: [anita-launch, anita-voice]
+    branches: [anita-launch, anita-voice, anita-launch-home-dashboard]
   workflow_dispatch:
 
 permissions:
