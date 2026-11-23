@@ -94,7 +94,7 @@ export const MoreSheet: React.FC<MoreSheetProps> = ({
               <li key={tab}>
                 <button type="button" onClick={() => { onSelectTab(tab); onClose(); }} aria-current={active ? 'page' : undefined}
                   className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#5551FF] ${
-                    active ? 'bg-[#5551FF]/10 font-semibold text-[#5551FF]' : 'text-slate-700 hover:bg-slate-50'
+                    active ? 'bg-[#5551FF]/10 font-semibold text-[#433fd8]' : 'text-slate-700 hover:bg-slate-50'
                   }`}>
                   <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white' : 'bg-slate-100 text-slate-600'}`}>
                     <Icon className="h-4 w-4" aria-hidden="true" />

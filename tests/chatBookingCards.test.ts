@@ -5,7 +5,10 @@ import { appointmentFromConversationAction, upsertAppointment } from '../src/app
 import { validateCalendarEvent, type AvailabilityContext } from '../src/availability';
 import type { ChatBookingAction } from '../src/chatBookingActions';
 import { answerChatBooking, chatCustomer, chatCustomerRecord, type ChatBookingDeps, type ChatBookingServer } from '../src/chatBookingAnswers';
-import { ChatAppointment, ChatBookedCard, ChatCancellationCard, ChatRequestCard, ChatWaitingCards, chatAwaitsAnswer } from '../src/components/ChatBookingCards';
+import { ANSWER_HOLD_MS } from '../src/answerHold';
+import {
+  ChatAppointment, ChatBookedCard, ChatCancellationAnswers, ChatCancellationCard, ChatRequestAnswers, ChatRequestCard, ChatWaitingCards, chatAwaitsAnswer,
+} from '../src/components/ChatBookingCards';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { chatTimeOptionsOn, nearestChatTimes, planChatBooking, planChatCancellation } from '../src/requestAnswers';
 import type { AppointmentAction, CalendarEvent, Conversation } from '../src/types';
@@ -423,4 +426,24 @@ test('the helper line of a change says that Confirm moves the appointment', () =
   assert.match(words(requestCard(change, context)), /Confirm moves the appointment in your calendar and sends Tom the confirmation in the chat\./);
   assert.match(words(requestCard({ ...change, id: 'conv-tom', live: undefined }, salon({ events: [{ ...tomsAppointment, conversationId: 'conv-tom' }] }))),
     /Confirm moves the appointment in your calendar\. Confirm/);
+});
+
+// ---------- an answer that is held for a moment (Home's inbox) ----------
+
+test('a card that is given a hold looks as it always does until an answer is given', () => {
+  // Home's inbox holds an answer that reaches the customer for a few seconds, with "Undo"
+  // (src/answerHold.ts; tests/answerHold.test.ts turns the clock). Before a tap nothing of that
+  // shows: the same answers, ready, and no way back that has nothing to take back.
+  const hold = { ms: ANSWER_HOLD_MS, current: () => tom() };
+  const request = { conversation: tom(), salon: salon(), onAnswer: () => null };
+  const held = render(React.createElement(ChatRequestAnswers, { ...request, hold }));
+  assert.equal(held, render(React.createElement(ChatRequestAnswers, request)));
+  assert.doesNotMatch(held, /Undo|goes out in a few seconds|disabled=""/);
+  const cancelling = { conversation: tom({ status: 'confirmed' }, { cancellationRequest: { service: 'Haircut', date: '2026-10-07', time: '10:00' } }), salon: salon({ events: [tomsAppointment] }), onAnswer: () => null };
+  const heldCancellation = render(React.createElement(ChatCancellationAnswers, { ...cancelling, hold }));
+  assert.equal(heldCancellation, render(React.createElement(ChatCancellationAnswers, cancelling)));
+  assert.match(heldCancellation, />Cancel appointment<\/button>/);
+  assert.doesNotMatch(heldCancellation, /Undo|goes out in a few seconds|disabled=""/);
+  // A card in an open chat is given no hold: there the owner has the whole conversation in front of her.
+  assert.doesNotMatch(render(React.createElement(ChatWaitingCards, { conversation: tom(), salon: salon(), onAnswer: () => null })), /Undo/);
 });

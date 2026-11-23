@@ -397,6 +397,31 @@ export const isPhoneNumber = (value: string | null | undefined): boolean =>
 export const isSamplePhone = (phone: string): boolean => /^\+417\d555\d{4}$/.test(normalizePhone(phone));
 
 /**
+ * The number a link may write to: a real phone number in digits ("41791234567"), or nothing for
+ * a missing number, for text that is no number and for the sample salon's invented numbers,
+ * which must never reach a stranger.
+ */
+const linkDigits = (phone: string | null | undefined): string =>
+  phone && isPhoneNumber(phone) && !isSamplePhone(phone) ? phoneDigits(phone) : '';
+
+/**
+ * A link that opens the owner's own WhatsApp with a text already written. Nothing is sent by
+ * following it: she reads the text and sends it herself. With a number, the chat with that
+ * person opens; without one, WhatsApp asks whom the text is for.
+ */
+export const whatsAppLink = (phone: string | null | undefined, text: string): string =>
+  `https://wa.me/${linkDigits(phone)}?text=${encodeURIComponent(text)}`;
+
+/**
+ * The same for a text message. "?&body=" is the one spelling both iPhones and Android phones
+ * read. Without a number the message opens with the text and no recipient.
+ */
+export const smsLink = (phone: string | null | undefined, text: string): string => {
+  const digits = linkDigits(phone);
+  return `sms:${digits ? `+${digits}` : ''}?&body=${encodeURIComponent(text)}`;
+};
+
+/**
  * Why a number cannot be stored, or null when it can:
  *   'characters'  it holds something that is neither a digit nor a usual separator
  *   'prefix'      it starts with neither 0 nor a country code

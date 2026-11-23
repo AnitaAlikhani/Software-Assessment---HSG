@@ -82,15 +82,13 @@ interface ConversationsViewProps {
   now?: Date;
 }
 
-const LANG_CHIP: Record<string, string> = {
-  FR: 'bg-violet-100 text-violet-700',
-  DE: 'bg-emerald-100 text-emerald-700',
-  IT: 'bg-rose-100 text-rose-700',
-  EN: 'bg-amber-100 text-amber-700',
-};
+// The language a customer writes in is a fact about the chat, not a state of it: every language
+// wears the same quiet chip, so none of them reads like one of the status tags below (as on Home).
+const LANG_CHIP = 'bg-slate-100 text-slate-700';
 
 const STATUS_TAG: Record<ConversationStatus, { label: string; classes: string }> = {
-  'needs-attention': { label: 'Needs you', classes: 'bg-amber-100 text-amber-700' },
+  // The name Home's inbox carries, so the owner meets one word for one state.
+  'needs-attention': { label: 'Waiting for you', classes: 'bg-amber-100 text-amber-800' },
   booked: { label: 'Booked', classes: 'bg-indigo-100 text-[#5551FF]' },
   'ai-handled': { label: 'AI handled', classes: 'bg-emerald-100 text-emerald-700' },
   'owner-handled': { label: 'You handled', classes: 'bg-slate-200 text-slate-700' },
@@ -644,7 +642,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                           {c.customerName}
                         </span>
                         <span
-                          className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[c.language]}`}
+                          className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP}`}
                         >
                           {languageChip(c)}
                         </span>
@@ -690,7 +688,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                   <h2 className="min-w-0 truncate text-base font-bold text-slate-900">
                     {selected.customerName}
                   </h2>
-                  <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP[selected.language]}`}>
+                  <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${LANG_CHIP}`}>
                     {languageChip(selected)}
                   </span>
                   {research && selected.live && <LiveChip />}
@@ -818,7 +816,7 @@ export const ConversationsView: React.FC<ConversationsViewProps> = ({
                 <div className="flex items-start gap-2.5 rounded-2xl border border-amber-300/70 bg-amber-50 px-3 py-2.5 sm:px-4">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900">Needs your attention</p>
+                    <p className="text-sm font-semibold text-slate-900">Waiting for you</p>
                     {selected.attentionReason && <p className="text-xs leading-snug text-slate-600 [overflow-wrap:anywhere]">{selected.attentionReason}</p>}
                   </div>
                 </div>

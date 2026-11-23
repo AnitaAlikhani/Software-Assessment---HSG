@@ -28,8 +28,11 @@ import { readableText, render } from './renderHelpers';
 
 const nothing = () => {};
 const ZONE = 'Europe/Zurich';
-/** What a person reads or hears on a rendered screen, with every run of spaces as one. */
-const shown = (html: string) => readableText(html).replace(/\s+/g, ' ');
+/**
+ * What a person reads or hears on a rendered screen, with every run of spaces as one. The
+ * apostrophe that sets off thousands ("CHF 1'234.50") is read as itself, not as the page writes it.
+ */
+const shown = (html: string) => readableText(html).replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
 const count = (html: string, part: string) => html.split(part).length - 1;
 
 const settings = (partial: Partial<React.ComponentProps<typeof SettingsView>> = {}) => render(React.createElement(SettingsView, {
@@ -331,14 +334,22 @@ test('the screens show the Swiss forms where the old ones stood', () => {
   const home = shown(all.home);
   assert.match(home, /Today Monday, 05\.10\.2026 The salon is closed today\. No appointments\./);
   assert.match(home, /Next appointment Tue, 06\.10\.2026, \d\d:\d\d–\d\d:\d\d/);
-  assert.match(home, /WED 07\.10\. Booking request · 12 minutes ago/);
+  assert.match(home, /WED 07\.10\. Booking request 12 min Waiting for 12 minutes/);
   assert.match(home, /· 10:00–10:30 with Selina Keller \+41 7\d 555 \d\d \d\d · Booking page/);
   // A request that waits in a chat, with the time it would take; and one the owner has just moved, with its ready text.
-  assert.match(home, /THU 08\.10\. Booking request from a chat · 11:58 Tom Haircut · 15:00–15:30/);
+  assert.match(home, /THU 08\.10\. Booking request from a chat 11:58 Tom Haircut · 15:00–15:30/);
   assert.match(home, /Moved from Fri, 09\.10\.2026, 11:00–11:30/);
   assert.match(home, /(am|on|le|,) \S+,? 08\.10\.2026 (um|at|à|alle) 14:30/);
-  assert.match(home, /Booked by the AI .*Haircut · Thu, 08\.10\.2026, 13:30–14:00/);
-  assert.match(home, /This month October 2026 · past and upcoming appointments/);
+  assert.match(home, /AI receptionist October 2026, by the day of the appointment .*Haircut · Thu, 08\.10\.2026, 13:30–14:00/);
+  assert.match(home, /This month October 2026 · \d+ appointments, past and upcoming/);
+  // Amounts in francs, thousands set off with an apostrophe and always with their two decimals; the
+  // month before is named, and the point it is compared at is a date and a time in the Swiss forms.
+  assert.match(home, /Booked value so far CHF \d{1,3}('\d{3})*\.\d\d /);
+  assert.match(home, /Bookings \d+% of appointments \d+ Booked value at list prices CHF \d'\d{3}\.\d\d /);
+  assert.match(home, /Still to come \d+ CHF \d{1,3}('\d{3})*\.\d\d booked, until 31\.10\./);
+  assert.match(home, /Compared with September at the same point: Sat, 05\.09\.2026, 12:00\./);
+  // How long an entry has waited is a number and a unit, never a clock time made up for it.
+  assert.match(home, /Chat: Chloé Favre DE 42 min Waiting for 42 minutes, a long wait/);
   // Calendar: month, calendar week and the week's span as its title; an appointment with date, range and number.
   const calendar = shown(all.calendar);
   assert.match(calendar, /Calendar October 2026 Week 41 Day Week List Add Today 05\.–11\.10\.2026/);

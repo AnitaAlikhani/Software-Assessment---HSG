@@ -102,17 +102,69 @@ export type InboxItem = { key: string } & (
 /** True for an entry that still waits for the owner; false for one that only shows an answer just given. */
 export const isWaiting = (item: InboxItem): boolean => item.kind === 'request' || item.kind === 'chat-request' || item.kind === 'chat-cancellation' || item.kind === 'chat';
 
+/**
+ * How many entries wait for the owner, and of which kind: the number beside "Waiting for you",
+ * the badge on Home and the count in the browser tab all show `waiting`, so the owner meets one
+ * number. A request is whatever asks for a decision about an appointment (a booking request from
+ * the booking page or from a chat, a change, a cancellation); a chat is a customer who waits for
+ * an answer in words.
+ */
+export const inboxCounts = (items: InboxItem[]): { waiting: number; requests: number; chats: number } => {
+  const waiting = items.filter(isWaiting);
+  const chats = waiting.filter((item) => item.kind === 'chat').length;
+  return { waiting: waiting.length, requests: waiting.length - chats, chats };
+};
+
+// ---------- how long somebody has waited ----------
+
+/** The whole minutes since a moment. Null when the moment is not known. */
+export const waitedMinutes = (since: string | undefined, now: Date): number | null => {
+  const time = since ? Date.parse(since) : NaN;
+  return Number.isFinite(time) ? Math.max(0, Math.round((now.getTime() - time) / 60_000)) : null;
+};
+
+/** How a wait is shown: quietly, as a long one, or as one that is overdue. */
+export type WaitingLevel = 'calm' | 'long' | 'overdue';
+
+/**
+ * From when a wait stands out, in minutes. Somebody in a chat is waiting right now: a quarter of
+ * an hour is long, an hour is overdue. A request from the booking page was sent and left: it is
+ * answered within hours, so two hours are long and a day is overdue.
+ */
+export const WAITING_LIMITS = {
+  chat: { long: 15, overdue: 60 },
+  page: { long: 120, overdue: 24 * 60 },
+} as const;
+
+export const waitingLevel = (source: keyof typeof WAITING_LIMITS, minutes: number | null): WaitingLevel => {
+  if (minutes === null) return 'calm';
+  const limits = WAITING_LIMITS[source];
+  return minutes >= limits.overdue ? 'overdue' : minutes >= limits.long ? 'long' : 'calm';
+};
+
+/** A wait as short as a small label has room for: "now", "42 min", "3 h", "2 days". */
+export const waitingLabel = (minutes: number): string => {
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+};
+
+/** The same wait in words, for a screen reader: "42 minutes", "3 hours", "2 days". */
+export const waitingWords = (minutes: number): string => {
+  if (minutes < 1) return 'less than a minute';
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+};
+
 /** A chat's booking request that the owner has not confirmed yet. */
 export const waitingChatBooking = (conversation: Pick<Conversation, 'bookingRequest'>): ChatBooking | null =>
   conversation.bookingRequest?.status === 'requested' ? conversation.bookingRequest : null;
-
-/**
- * How many booking requests are open: those from the booking page and those that wait in a
- * chat. For a badge that should count what Home lists as requests. (A cancellation is no booking
- * request: its chat counts among the chats that need the owner.)
- */
-export const openRequestCount = (requests: AppointmentRequest[], conversations: Conversation[]): number =>
-  requests.filter((request) => request.status === 'pending').length + conversations.filter((conversation) => waitingChatBooking(conversation)).length;
 
 interface InboxInput {
   requests: AppointmentRequest[];

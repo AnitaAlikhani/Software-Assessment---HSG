@@ -32,7 +32,7 @@ export type LiveAction =
   | { type: 'take-over'; conversationId: string }
   /** `answerNow`: the AI answers the customer's waiting message at once instead of waiting for the next one. */
   | { type: 'let-ai-continue'; conversationId: string; answerNow?: boolean }
-  /** The chat needs nobody any more: it leaves "Needs you" without a message to the customer. */
+  /** The chat needs nobody any more: it leaves "Waiting for you" without a message to the customer. */
   | { type: 'mark-done'; conversationId: string }
   | { type: 'confirm-booking'; conversationId: string; expected: ExpectedSlot; staffName?: string }
   | { type: 'suggest-time'; conversationId: string; expected: ExpectedSlot; date: string; time: string; staffName?: string }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { appointmentFromRequest } from '../src/appointmentActions';
-import { ANSWER_SHOWN_MS, answerIsShown, inboxItems, isWaiting, openRequestCount, withAnswer, type RequestAnswer } from '../src/inbox';
+import { ANSWER_SHOWN_MS, answerIsShown, inboxCounts, inboxItems, isWaiting, withAnswer, type RequestAnswer } from '../src/inbox';
 import { initialBookingHours, initialEmployees, initialServices } from '../src/mockData';
 import { acceptedAppointmentState, movedRequest } from '../src/requestAnswers';
 import type { AppointmentRequest, CalendarEvent, Conversation } from '../src/types';
@@ -82,11 +82,15 @@ test('a request whose time has passed stands at the top, and the order follows t
   assert.equal(keys(items({ conversations: [...demoConversations, undated] }))[0], 'chat:live-web-old');
 });
 
-test('open requests are counted wherever they came from', () => {
-  // Two from the booking page, three in the salon's chats (Sabrina, Reto, Giulia).
-  assert.equal(openRequestCount(demoRequests, demoConversations), 5);
-  assert.equal(openRequestCount(demoRequests, [tomsRequest, lena, ...demoConversations]), 6);
-  assert.equal(openRequestCount([{ ...wash, status: 'accepted' }], [{ ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' } }]), 0);
+test('everything that waits is counted once: requests wherever they came from, and chats', () => {
+  // Two requests from the booking page, three in the salon's chats (Sabrina, Reto, Giulia), and Chloé's question.
+  assert.deepEqual(inboxCounts(items()), { waiting: 6, requests: 5, chats: 1 });
+  // Tom's request and Lena's question come in over the live chat.
+  assert.deepEqual(inboxCounts(items({ conversations: [tomsRequest, lena, ...demoConversations] })), { waiting: 8, requests: 6, chats: 2 });
+  // A chat with a waiting request is one entry, a request: it is not counted a second time as a chat.
+  assert.deepEqual(inboxCounts(items({ requests: [], conversations: [tomsRequest] })), { waiting: 1, requests: 1, chats: 0 });
+  // What is answered or confirmed no longer waits.
+  assert.deepEqual(inboxCounts(items({ requests: [{ ...wash, status: 'accepted' }], conversations: [{ ...tomsRequest, status: 'booked', bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' } }] })), { waiting: 0, requests: 0, chats: 0 });
 });
 
 // ---------- answers ----------
@@ -183,11 +187,15 @@ const entry = (html: string, name: string) => {
 /** What a person reads in a piece of the page: the text between the tags, every run of spaces as one. */
 const words = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const buttons = (html: string) => Array.from(html.matchAll(/<button[^>]*>(.*?)<\/button>/g), (match) => match[1].replace(/<[^>]+>/g, '').trim());
+/** The links of a piece of the page: what each is called (without what only a screen reader hears) and where it leads. */
+const links = (html: string) => Array.from(html.matchAll(/<a href="([^"]*)"[^>]*>(.*?)<\/a>/g), ([, href, content]) =>
+  [content.replace(/<span class="sr-only">.*?<\/span>/g, '').replace(/<[^>]+>/g, '').trim(), href.replace(/&amp;/g, '&')]);
 
 test('a request from the booking page shows who, what, when, the contact and three actions', () => {
   const html = home();
   const petra = entry(html, 'Petra Meier');
-  assert.match(words(petra), /WED 07\.10\. Booking request · 12 minutes ago Petra Meier Wash & blow-dry · 10:00–10:30 with Selina Keller \+41 76 555 62 42 · Booking page Accept Move Reject$/);
+  // The first line says what the entry is and how long it has waited: short for the eye, in words for a screen reader.
+  assert.match(words(petra), /WED 07\.10\. Booking request 12 min Waiting for 12 minutes Petra Meier Wash & blow-dry · 10:00–10:30 with Selina Keller \+41 76 555 62 42 · Booking page Accept Move Reject$/);
   assert.deepEqual(buttons(petra), ['Petra Meier', 'Accept', 'Move', 'Reject']);
   // The name leads to the customer's record, and says so to a screen reader.
   assert.match(petra, /aria-label="Petra Meier: open the customer record"/);
@@ -225,7 +233,7 @@ test('a request that cannot be accepted says why and offers "Move" first, instea
 test('a chat\'s booking request offers the answers of the chat\'s own card: Confirm, Suggest another time, Decline', () => {
   const html = home({ conversations: [tomsRequest, lena, ...demoConversations] });
   const tom = entry(html, 'Tom');
-  assert.match(words(tom), /^THU 08\.10\. Booking request from a chat · 1 minute ago Tom Haircut · 15:00–15:30 with Anna Weber Website chat Anna Weber is free then\. Checked against the opening hours, the working hours, time off and your calendar\. Confirm adds it to your calendar and sends Tom the confirmation in the chat\. Confirm Suggest another time Decline Open chat$/);
+  assert.match(words(tom), /^THU 08\.10\. Booking request from a chat 1 min Waiting for 1 minute Tom Haircut · 15:00–15:30 with Anna Weber Website chat Anna Weber is free then\. Checked against the opening hours, the working hours, time off and your calendar\. Confirm adds it to your calendar and sends Tom the confirmation in the chat\. Confirm Suggest another time Decline Open chat$/);
   assert.deepEqual(buttons(tom), ['Confirm', 'Suggest another time', 'Decline', 'Open chat']);
   for (const button of tom.match(/<button[^>]*>/g)!) assert.match(button, /\bmin-h-11\b/);
   // Two stylists are free (an empty calendar): the owner can give it to the other one.
@@ -253,13 +261,13 @@ test('a chat\'s booking request offers the answers of the chat\'s own card: Conf
   const booked = { ...demoEvents[0], id: 'live-appt-live-web-tom-2026-10-08-1500', conversationId: tomsRequest.id, customerName: 'Tom', serviceName: 'Haircut', employeeId: 'emp-1', staffName: 'Anna Weber', date: '2026-10-08', startTime: '15:00', endTime: '15:30' };
   const cancelling = { ...tomsRequest, bookingRequest: { ...tomsRequest.bookingRequest!, status: 'confirmed' as const }, cancellationRequest: { service: 'Haircut', date: '2026-10-08', time: '15:00' } };
   const cancel = entry(home({ conversations: [cancelling], availabilityContext: context({ events: [booked, ...demoEvents] }) }), 'Tom wants to cancel');
-  assert.match(words(cancel), /^THU 08\.10\. Cancellation request from a chat · 1 minute ago Tom wants to cancel Haircut · 15:00–15:30 with Anna Weber Website chat Cancel appointment takes it out of your calendar and sends Tom the cancellation in the chat\. Keep appointment sends nothing: write to Tom yourself\. Cancel appointment Keep appointment Open chat$/);
+  assert.match(words(cancel), /^THU 08\.10\. Cancellation request from a chat 1 min Waiting for 1 minute Tom wants to cancel Haircut · 15:00–15:30 with Anna Weber Website chat Cancel appointment takes it out of your calendar and sends Tom the cancellation in the chat\. Keep appointment sends nothing: write to Tom yourself\. Cancel appointment Keep appointment Open chat$/);
   assert.match(html, /Waiting for you<\/h2><span[^>]*>8</); // two requests, Tom, Lena and four of the salon's own chats
-  // A chat that waits for the owner is one row that opens the chat, with the reason it waits for.
+  // A chat that waits for the owner is one row that opens the chat: who waits and for how long, then the reason.
   const row = entry(html, 'Lena');
   assert.equal(row.match(/<button/g)?.length, 1);
-  assert.match(words(row), /Chat · 1 minute ago Lena English The customer asked for a discount\. Open chat$/);
-  assert.match(words(entry(html, 'Chloé Favre')), /Chat · 42 minutes ago Chloé Favre DE The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\. Open chat$/);
+  assert.match(words(row), /Chat: Lena English 1 min Waiting for 1 minute The customer asked for a discount\. Open chat$/);
+  assert.match(words(entry(html, 'Chloé Favre')), /Chat: Chloé Favre DE 42 min Waiting for 42 minutes, a long wait The customer asked for Friday at 19:00, after closing time \(18:30\)\. Offer another time\. Open chat$/);
   assert.match(words(entry(home({ conversations: [{ ...lena, attentionReason: undefined }] }), 'Lena')), /The customer is waiting for your answer\./);
 });
 
@@ -277,6 +285,13 @@ test('an accepted request says that the app does not tell the customer, shows th
   // Her number is one of the sample salon's invented ones (+41 7x 555 …): shown, but never a link that dials.
   assert.doesNotMatch(petra, /href="tel:/);
   assert.deepEqual(buttons(petra), ['Petra Meier', 'Copy text', 'View appointment', 'Undo', 'Done']);
+  // Beside "Copy text": the owner's own WhatsApp and text messages, opened with the text written. Nothing
+  // goes out by following them, and with an invented number they name nobody: she chooses whom it is for.
+  const written = encodeURIComponent('Guten Tag Petra Meier, Ihr Termin bei Bella Hair Salon ist bestätigt: Wash & blow-dry am Mittwoch, 07.10.2026 um 10:00 Uhr mit Selina Keller. Wir freuen uns auf Sie!');
+  assert.deepEqual(links(petra), [['Open in WhatsApp', `https://wa.me/?text=${written}`], ['Open as SMS', `sms:?&body=${written}`]]);
+  // Both are full tap targets, and the one that leaves the app opens beside it.
+  for (const link of petra.match(/<a [^>]*>/g)!) assert.match(link, /\bmin-h-11\b/);
+  assert.match(petra, /<a href="https:\/\/wa\.me\/[^"]*" target="_blank" rel="noopener noreferrer"/);
   // Nothing claims that the customer was told, and the entry no longer counts as waiting.
   assert.doesNotMatch(text, CLAIMS_CONTACT);
   assert.doesNotMatch(text, TELL_WORDS);
@@ -293,13 +308,16 @@ test('an accepted request says that the app does not tell the customer, shows th
   assert.match(words(unknown), /Text to copy, in English Hello Petra Meier/);
   assert.match(words(unknown), /\+41 76 555 62 42/);
   assert.doesNotMatch(unknown, /href="tel:/);
-  // A number that is not one of the invented ones is a link that dials.
+  // A number that is not one of the invented ones is a link that dials, and the two messengers open on that customer.
   const real = entry(home({ requests: [haircut], customers: [], availabilityContext: context({ requests: [haircut], events: [accepted, ...demoEvents] }), answers: [answered({ ...wash, customerPhone: '+41791234567' }, 'accepted')] }), 'Petra Meier');
   assert.match(real, /href="tel:\+41791234567"/);
+  assert.deepEqual(links(real).slice(1).map(([label, href]) => [label, href.split('=')[0]]), [['Open in WhatsApp', 'https://wa.me/41791234567?text'], ['Open as SMS', 'sms:+41791234567?&body']]);
   // No number anywhere: the card says so instead of showing an empty link.
   const noPhone = entry(home({ requests: [haircut], customers: [], availabilityContext: context({ requests: [haircut], events: [accepted, ...demoEvents] }), answers: [answered({ ...wash, customerPhone: undefined }, 'accepted')] }), 'Petra Meier');
   assert.match(words(noPhone), /No phone number is on record for Petra Meier\./);
   assert.doesNotMatch(noPhone, /href="tel:/);
+  // The text can still be taken to a messenger, where the owner looks the customer up herself.
+  assert.deepEqual(links(noPhone).map(([label, href]) => [label, href.split('=')[0]]), [['Open in WhatsApp', 'https://wa.me/?text'], ['Open as SMS', 'sms:?&body']]);
 });
 
 test('a rejected and a moved request say the same, each with its own text and its own way back', () => {
@@ -312,7 +330,7 @@ test('a rejected and a moved request say the same, each with its own text and it
   // Moved to Friday at 10:00: the request still waits, with its actions, and the note says what to ask the customer.
   const later = movedRequest(wash, '2026-10-09', '10:00');
   const moved = entry(home({ requests: [later, haircut], availabilityContext: context({ requests: [later, haircut] }), answers: [answered(wash, 'moved')] }), 'Petra Meier');
-  assert.match(words(moved), /FRI 09\.10\. Booking request · 12 minutes ago Petra Meier Wash & blow-dry · 10:00–10:30 with Selina Keller/);
+  assert.match(words(moved), /FRI 09\.10\. Booking request 12 min Waiting for 12 minutes Petra Meier Wash & blow-dry · 10:00–10:30 with Selina Keller/);
   assert.match(words(moved), /Moved from Wed, 07\.10\.2026, 10:00–10:30 SlotBee does not tell Petra Meier\. Call or write to ask whether the new time suits\./);
   assert.match(words(moved), /Leider ist der Termin am Mittwoch, 07\.10\.2026 um 10:00 Uhr nicht möglich\. Wir können Ihnen Wash & blow-dry am Freitag, 09\.10\.2026 um 10:00 Uhr mit Selina Keller anbieten\. Passt Ihnen das\?/);
   assert.deepEqual(buttons(moved), ['Petra Meier', 'Copy text', 'Undo', 'Done', 'Accept', 'Move', 'Reject']);
@@ -376,5 +394,72 @@ test('an accepted request follows its appointment: a change in the calendar chan
 
   // Cancelled in the calendar: the answer has nothing left to show or to take back, so it leaves the list.
   const cancelled = home({ requests: [haircut], availabilityContext: context({ requests: [haircut], events: demoEvents }), answers: [answered(wash, 'accepted')] });
-  assert.doesNotMatch(cancelled.slice(cancelled.indexOf('home-inbox-title')).split('Booked by the AI')[0], />Petra Meier</);
+  assert.doesNotMatch(cancelled.slice(cancelled.indexOf('home-inbox-title')).split('home-ai-title')[0], />Petra Meier</);
+});
+
+// ---------- one number, and how long somebody has waited ----------
+
+test('the heading counts everything that waits and says what the number is made of', () => {
+  const heading = (html: string) => words(/<h2 id="home-inbox-title"[^>]*>.*?<\/div>/.exec(html)?.[0] ?? '');
+  // Five requests (two from the booking page, three in chats) and Chloé's question.
+  assert.equal(heading(home()), 'Waiting for you 6 entries 5 requests · 1 chat');
+  assert.equal(heading(home({ requests: [wash], availabilityContext: context({ requests: [wash] }), conversations: [lena] })), 'Waiting for you 2 entries 1 request · 1 chat');
+  // One kind alone is said by the entries themselves: the number stands without a breakdown.
+  assert.equal(heading(home({ conversations: [] })), 'Waiting for you 2 entries');
+  assert.equal(heading(home({ requests: [], availabilityContext: context({ requests: [] }), conversations: [lena] })), 'Waiting for you 1 entry');
+  assert.equal(heading(home({ requests: [], availabilityContext: context({ requests: [] }), conversations: [] })), 'Waiting for you');
+});
+
+test('a wait stands out once it is long: in a chat after a quarter of an hour, on a request from the booking page after two hours', () => {
+  /** The label of an entry's wait: what it says, and whether it is drawn calm, amber or red. */
+  const wait = (html: string, name: string) => {
+    const label = /<span class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0\.5 text-xs font-semibold tabular-nums ([^"]*)">.*?<span aria-hidden="true">([^<]*)<\/span><span class="sr-only">([^<]*)<\/span>/.exec(entry(html, name));
+    assert.ok(label, `${name} shows how long the entry has waited`);
+    return { look: /bg-rose-100/.test(label[1]) ? 'red' : /bg-amber-100/.test(label[1]) ? 'amber' : 'calm', label: label[2], words: label[3] };
+  };
+  const minutesAgo = (minutes: number) => new Date(FIXED_NOW.getTime() - minutes * 60_000).toISOString();
+  const chatting = (minutes: number) => home({ requests: [], availabilityContext: context({ requests: [] }), conversations: [{ ...lena, lastMessageAt: minutesAgo(minutes) }] });
+  // Somebody in a chat is waiting right now.
+  assert.deepEqual(wait(chatting(6), 'Lena'), { look: 'calm', label: '6 min', words: 'Waiting for 6 minutes' });
+  assert.deepEqual(wait(chatting(15), 'Lena'), { look: 'amber', label: '15 min', words: 'Waiting for 15 minutes, a long wait' });
+  assert.deepEqual(wait(chatting(60), 'Lena'), { look: 'red', label: '1 h', words: 'Waiting for 1 hour, overdue' });
+  // A request the AI took in a chat: the customer is in the conversation too, so the same limits apply.
+  const requested = (minutes: number) => home({ requests: [], availabilityContext: context({ requests: [] }), conversations: [{ ...tomsRequest, lastMessageAt: minutesAgo(minutes) }] });
+  assert.equal(wait(requested(14), 'Tom').look, 'calm');
+  assert.equal(wait(requested(45), 'Tom').look, 'amber');
+  assert.equal(wait(requested(200), 'Tom').look, 'red');
+  // A request from the booking page was sent and left: it is answered within hours.
+  const sent = (minutes: number) => { const request = { ...wash, createdAt: minutesAgo(minutes) }; return home({ requests: [request], availabilityContext: context({ requests: [request] }), conversations: [] }); };
+  assert.deepEqual(wait(sent(47), 'Petra Meier'), { look: 'calm', label: '47 min', words: 'Waiting for 47 minutes' });
+  assert.deepEqual(wait(sent(180), 'Petra Meier'), { look: 'amber', label: '3 h', words: 'Waiting for 3 hours, a long wait' });
+  assert.deepEqual(wait(sent(3 * 24 * 60), 'Petra Meier'), { look: 'red', label: '3 days', words: 'Waiting for 3 days, overdue' });
+  // The colour is never the only sign: the label always says how long.
+  for (const html of [chatting(6), chatting(60), sent(180)]) assert.match(html, /<span aria-hidden="true">\d+ (min|h)<\/span>/);
+  // An entry stored without the moment it came in keeps the words it was stored with, without a colour.
+  const old = { ...wash, createdAt: undefined, timeAgo: '10 minutes ago' };
+  const undated = entry(home({ requests: [old], availabilityContext: context({ requests: [old] }), conversations: [] }), 'Petra Meier');
+  assert.match(words(undated), /Booking request 10 minutes ago Petra Meier/);
+  assert.doesNotMatch(undated, /Waiting for|bg-amber-100|bg-rose-100/);
+});
+
+test('the language of a chat wears one quiet chip, whatever the language', () => {
+  const chatIn = (language: 'EN' | 'FR' | 'DE' | 'IT') => entry(home({ requests: [], availabilityContext: context({ requests: [] }), conversations: [{ ...lena, live: false, languageLabel: undefined, language }] }), 'Lena');
+  const chips = (['EN', 'FR', 'DE', 'IT'] as const).map((language) => /<span class="([^"]*)">(?:EN|FR|DE|IT)<\/span>/.exec(chatIn(language))?.[1]);
+  assert.equal(new Set(chips).size, 1);
+  assert.match(chips[0] ?? '', /bg-slate-100 text-slate-700/);
+  // No language looks like a warning beside the red count.
+  for (const language of ['EN', 'FR', 'DE', 'IT'] as const) assert.doesNotMatch(chatIn(language), /bg-rose-100 text-rose-700|bg-amber-100 text-amber-700|bg-violet-100|bg-emerald-100 text-emerald-700/);
+});
+
+test('an inbox with nothing in it says so as good news, with what the AI dealt with by itself', () => {
+  const calm = (conversations: Conversation[]) => {
+    const html = home({ requests: [], availabilityContext: context({ requests: [] }), conversations });
+    return words(html.slice(html.indexOf('home-inbox-title'), html.indexOf('home-ai-title')).replace(/^[^>]*>/, ''));
+  };
+  const handled = (id: string) => liveChat(id, { status: 'ai-handled' });
+  assert.match(calm([handled('a'), handled('b')]), /^Waiting for you Nothing is waiting for you\. The AI receptionist handled 2 chats on its own\. New booking requests and chats that need you appear here\./);
+  assert.match(calm([handled('a')]), /The AI receptionist handled one chat on its own\./);
+  // Chats that ended in a booking or that the owner answered herself are not what the AI did alone.
+  assert.doesNotMatch(calm([liveChat('c', { status: 'booked' }), liveChat('d', { status: 'owner-handled' })]), /AI receptionist handled/);
+  assert.doesNotMatch(calm([handled('a')]), TELL_WORDS);
 });

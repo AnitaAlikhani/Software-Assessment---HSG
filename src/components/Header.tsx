@@ -226,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
             <p className="flex flex-col text-left">
               <span className="sr-only">Signed in as </span>
               <span className="whitespace-nowrap text-xs font-semibold leading-tight text-slate-800">{ownerName}</span>
-              {ownerRole && <span className="text-[11px] font-medium leading-tight text-slate-400">{ownerRole}</span>}
+              {ownerRole && <span className="text-[11px] font-medium leading-tight text-slate-500">{ownerRole}</span>}
             </p>
           )}
         </div>

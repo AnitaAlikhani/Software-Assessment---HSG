@@ -29,7 +29,7 @@ test('every pending request has an entry with its source, staff, age and actions
   // A request never names a channel the salon has not connected.
   assert.doesNotMatch(html, /WhatsApp|Instagram/);
   assert.match(selected, /with Anna Weber/);
-  assert.match(selected, /47 minutes ago/);
+  assert.match(selected, />47 min<\/span><span class="sr-only">Waiting for 47 minutes<\/span>/);
   for (const action of ['Accept', 'Move', 'Reject']) assert.match(selected, new RegExp(`>${action}</button>`));
   // The request the owner came for is marked, and only that one.
   assert.match(selected, /^[^>]*aria-current="true"/);
@@ -68,7 +68,8 @@ test('a request whose time has passed offers to move it instead of an Accept tha
   assert.doesNotMatch(passed, />Accept</);
   assert.match(passed, />Move<\/button>/);
   assert.match(passed, />Reject<\/button>/);
-  assert.match(passed, /2 days ago/);
+  // It came in two days ago: the wait is said, and marked as overdue.
+  assert.match(passed, />2 days<\/span><span class="sr-only">Waiting for 2 days, overdue<\/span>/);
   const upcoming = entryOf(html, requests[1].customerName);
   assert.doesNotMatch(upcoming, /This time has passed/);
   assert.match(upcoming, />Accept<\/button>/);

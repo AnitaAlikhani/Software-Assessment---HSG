@@ -10,8 +10,8 @@ interface SidebarProps {
   companyLocation?: string;
   currentTab: NavigationTab;
   onSelectTab: (tab: NavigationTab) => void;
-  /** Open booking requests: the number on Home. */
-  pendingRequestsCount: number;
+  /** Everything that waits for the owner: the number beside "Waiting for you" on Home. */
+  waitingCount: number;
   /** Chats that wait for the owner: the number on Conversations. */
   needsAttentionCount?: number;
   /** Study tool: opens the pilot interest form. Its button is shown with the research switch only. */
@@ -27,13 +27,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   companyLocation,
   currentTab,
   onSelectTab,
-  pendingRequestsCount,
+  waitingCount,
   needsAttentionCount = 0,
   onOpenPilotInterest,
 }) => {
   const badges: Partial<Record<NavigationTab, { count: number; what: string }>> = {
-    home: { count: pendingRequestsCount, what: pendingRequestsCount === 1 ? 'open request' : 'open requests' },
-    conversations: { count: needsAttentionCount, what: needsAttentionCount === 1 ? 'chat needs you' : 'chats need you' },
+    home: { count: waitingCount, what: 'waiting for you' },
+    conversations: { count: needsAttentionCount, what: needsAttentionCount === 1 ? 'chat is waiting for you' : 'chats are waiting for you' },
   };
 
   return (
@@ -68,14 +68,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 const badge = badges[tab];
                 return (
                   <li key={tab}>
-                    {/* One style for the open screen, whichever group it is in: tint, brand text and a bar on the left. */}
+                    {/* One style for the open screen, whichever group it is in: tint, brand text and a bar on the left.
+                        The text takes the darker brand tone: on the tint the lighter one is too pale for its size. */}
                     <button
                       type="button"
                       onClick={() => onSelectTab(tab)}
                       aria-current={active ? 'page' : undefined}
                       className={`relative flex w-full items-center gap-3 rounded-xl px-3.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5551FF] ${
                         active
-                          ? 'bg-[#5551FF]/10 font-semibold text-[#5551FF] before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-[#5551FF]'
+                          ? 'bg-[#5551FF]/10 font-semibold text-[#433fd8] before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-[#5551FF]'
                           : 'text-slate-600 hover:bg-slate-100'
                       }`}
                     >

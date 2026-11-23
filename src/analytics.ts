@@ -138,7 +138,7 @@ export function axisTicks(highest: number): number[] {
   }
 }
 
-/** Chats in which a customer is waiting for the owner: the rule behind every "needs you" count. */
+/** Chats in which a customer is waiting for the owner: the rule behind every "waiting for you" count. */
 export const conversationsWaiting = (conversations: Conversation[]): Conversation[] =>
   conversations.filter(conversation => conversation.status === 'needs-attention');
 

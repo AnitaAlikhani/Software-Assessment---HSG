@@ -106,7 +106,7 @@ because they have no server.
 The AI gets the demo salon's services, prices and opening hours, and the owner's handover rules
 (discounts, complaints, bookings outside opening hours, cancellations). It answers only booking questions,
 in the customer's language. It cannot see the live calendar, so it suggests times and says the salon confirms.
-Handover topics mark the chat **Needs you** on the website. The rules are in `server/ai.ts` (`salonContext`).
+Handover topics mark the chat **Waiting for you** on the website. The rules are in `server/ai.ts` (`salonContext`).
 
 ## Limits
 

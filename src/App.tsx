@@ -21,6 +21,7 @@ import {
 import { DEFAULT_DEMO_CONVERSATION_ID, initialAiSettings } from './conversationData';
 import { sampleChatAfterAi, sampleChatAfterOwnerReply } from './sampleChatFlow';
 import {
+  accountOwner,
   initialEmployees,
   initialServices,
   initialCompanySettings,
@@ -56,7 +57,7 @@ import { getSalonNow, isOutsideOpeningHours, validateBookingRequest, validateCal
 import { dayChangesSummary, isValidDayChange, undoDayChanges, withDayChanges, withoutRegularDays, type DayChange } from './workingHours';
 import { withServicesOf } from './teamBooking';
 import { appointmentForConversation, belongsToConversation, appointmentFromRequest, appointmentFromConversationAction, appointmentIdForRequest, upsertAppointment } from './appointmentActions';
-import { answerIsShown, openRequestCount, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
+import { answerIsShown, inboxCounts, inboxItems, unsettledAnswer, withAnswer, type RequestAnswer } from './inbox';
 import { acceptedAppointmentState, chatOfFormBooking, checkRequest, movedRequest, restoreConfirmedBooking } from './requestAnswers';
 import { arrivedRequests, isRequestersAppointment, withOutcome, type RequestOutcomes } from './sharedRequests';
 import { BookingLinkCompact } from './components/BookingLinkCard';
@@ -259,8 +260,11 @@ export default function App() {
   latestSalon.current = availabilityContext;
 
   const needsAttention = allConversations.filter((c) => c.status === 'needs-attention');
-  // The badge on Home counts what Home lists as requests: those from the booking page and those waiting in a chat.
-  const openRequests = openRequestCount(requests, allConversations);
+  // One number for everything that waits for the owner: the badge on Home, the heading of Home's
+  // inbox and the browser tab all show it. It is counted from the inbox itself, so they cannot differ.
+  const waitingForOwner = inboxCounts(inboxItems({
+    requests, conversations: allConversations, events: calendarEvents, answers: requestAnswers, timeZone: companySettings.timeZone, now,
+  })).waiting;
   // The calendar's day, view and filters are part of the address (src/navigation.ts), so reload,
   // Back and a shared link restore them. An address without a day means today. While an
   // appointment's details are open, the calendar behind them shows that appointment's day.
@@ -1039,7 +1043,7 @@ export default function App() {
     showToast('AI receptionist settings saved');
   };
   // The browser tab names the screen, the salon and the product; the customers' booking page names the salon only.
-  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, companySettings.companyName));
+  usePageHead(publicMode ? bookingPageHead(companySettings.companyName) : ownerPageHead(currentTab, companySettings.companyName, waitingForOwner));
 
   const bookingPage = <BookingPageView {...availabilityContext}
     companySettings={companySettings} draft={bookingDraft} setDraft={setBookingDraft}
@@ -1056,7 +1060,7 @@ export default function App() {
         companyLocation={[companySettings.city, companySettings.country].filter(Boolean).join(', ')}
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
-        pendingRequestsCount={openRequests}
+        waitingCount={waitingForOwner}
         needsAttentionCount={needsAttention.length}
         onOpenPilotInterest={() => setIsPilotInterestOpen(true)}
       />
@@ -1118,6 +1122,8 @@ export default function App() {
               onOpenConversations={openConversation}
               onOpenCustomer={(id) => navigate({ tab: 'customers', customerId: id })}
               bookingLink={<BookingLinkCompact />}
+              me={accountOwner(employees)}
+              onOpenScreen={setCurrentTab}
             />
           )}
 
@@ -1266,7 +1272,7 @@ export default function App() {
           onNewAppointment={newAppointment}
           onOpenMore={() => setIsMoreOpen(true)}
           isMoreOpen={isMoreOpen}
-          homeBadge={openRequests}
+          homeBadge={waitingForOwner}
           chatsBadge={needsAttention.length}
           hideOnPhone={chatOpenOnPhone}
         />
